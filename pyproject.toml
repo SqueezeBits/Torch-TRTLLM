@@ -20,7 +20,10 @@ version = "0.0.0"
 
 [tool.poetry.dependencies]
 python = ">=3.10"
-packaging = "*"
+pydantic = "*"
+torch = ">=2.3.0"
+transformers = ">=4.44.0"
+typer = "*"
 
 [tool.poetry.scripts]
 ditto = "ditto.__main__:app"
