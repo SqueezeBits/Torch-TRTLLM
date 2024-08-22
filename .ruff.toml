@@ -1,0 +1,25 @@
+# ref: https://beta.ruff.rs/docs/rules/
+select = ["B", "C4", "E", "F", "N", "I", "W", "UP", "D"]
+ignore = ["F403","F405","N812", "D100", "D101", "D102", "D103", "D104", "D105", "D107", "B905"]
+extend-select = ["D400", "D401"]
+
+# Allow autofix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Line length.
+line-length = 120
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+target-version = "py310"
+
+# Avoid automatically removing unused imports in __init__.py.
+ignore-init-module-imports = true
+
+[per-file-ignores]
+"__init__.py" = ["F401"]
+
+[pydocstyle]
+convention = "google"

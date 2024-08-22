@@ -1,0 +1,6 @@
+black
+pre-commit
+pylint
+ruff
+mypy
+types-requests==2.31.0.6

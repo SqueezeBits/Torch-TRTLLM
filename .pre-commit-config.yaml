@@ -1,0 +1,75 @@
+ci:
+  skip: [pylint]
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: "v0.0.281"
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        exclude: &fixtures tests(/\w*)*/functional/|tests/input|doc/data/messages|tests(/\w*)*data/
+      - id: ruff
+        name: ruff-doc
+        files: doc/data/messages
+        args: ["--config", ".ruff.toml"]
+  - repo: https://github.com/psf/black
+    rev: 23.7.0
+    hooks:
+      - id: black
+        args: [--safe, --quiet, --line-length, "120"]
+        exclude: *fixtures
+      - id: black
+        name: black-doc
+        args: [--safe, --quiet, --line-length, "120"]
+        files: doc/data/messages/
+        exclude: |
+          (?x)^(
+            doc/data/messages/b/bad-indentation/bad.py|
+            doc/data/messages/i/inconsistent-quotes/bad.py|
+            doc/data/messages/i/invalid-format-index/bad.py|
+            doc/data/messages/l/line-too-long/bad.py|
+            doc/data/messages/m/missing-final-newline/bad.py|
+            doc/data/messages/m/multiple-statements/bad.py|
+            doc/data/messages/r/redundant-u-string-prefix/bad.py|
+            doc/data/messages/s/superfluous-parens/bad.py|
+            doc/data/messages/s/syntax-error/bad.py|
+            doc/data/messages/t/too-many-ancestors/bad.py|
+            doc/data/messages/t/trailing-comma-tuple/bad.py|
+            doc/data/messages/t/trailing-newlines/bad.py|
+            doc/data/messages/t/trailing-whitespace/bad.py|
+            doc/data/messages/u/unnecessary-semicolon/bad.py
+          )$
+  - repo: local
+    hooks:
+      - id: pylint
+        name: pylint
+        entry: pylint
+        language: system
+        types: [python]
+        args: ["-rn", "-sn", "--rcfile=.pylintrc", "--fail-on=I"]
+        exclude: test(/\w*)|owlite/backend/patches.py
+      # We define an additional manual step to allow running pylint with a spelling
+      # checker in CI.
+      - id: pylint
+        alias: pylint-with-spelling
+        name: pylint
+        entry: pylint
+        language: system
+        types: [python]
+        args: ["-rn", "-sn", "--rcfile=.pylintrc", "--fail-on=I", "--spelling-dict=en"]
+        exclude: test(/\w*)|owlite/backend/patches.py
+        stages: [manual]
+      - id: check-newsfragments
+        name: Check newsfragments
+        entry: python3 -m script.check_newsfragments
+        language: system
+        types: [text]
+        files: ^(doc/whatsnew/fragments)
+        exclude: doc/whatsnew/fragments/_.*.rst
+      - id: mypy
+        name:  mypy
+        entry:  mypy
+        language: system                                                                                                                                                                                           
+        types: [python]
+        args: [--config-file=.mypy.ini]
+        exclude: test(/\w*)|owlite/backend/patches.py
