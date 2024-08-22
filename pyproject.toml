@@ -1,0 +1,32 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "ditto"
+description = "Ditto - conversion tool for transformers to TensorRT"
+authors = ["SqueezeBits.inc <owlite@squeezebits.com>"]
+maintainers = ["SqueezeBits.inc <owlite@squeezebits.com>"]
+license = "AGPL-3.0-only"
+readme = "README.md"
+homepage = "https://github.com/SqueezeBits/ditto"
+repository = "https://github.com/SqueezeBits/ditto"
+keywords = ["transformers", "TensorRT", "torch.export"]
+classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Operating System :: OS Independent"
+]
+version = "0.0.0"
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+packaging = "*"
+
+[tool.poetry.scripts]
+ditto = "ditto.__main__:main"
+
+[tool.poetry.dynamic]
+version = { source = "ditto", attribute = "__version__" }
+
+[tool.poetry.package.include]
+path = "src/ditto"
