@@ -41,13 +41,23 @@ def generate(
     tokenizer = AutoTokenizer.from_pretrained(model_id)
 
     if debug:
+        cache_handler = (
+            StaticCacheHandler(
+                config=model.config,
+                batch_size=1,
+                max_seq_len=max_seq_len,
+            )
+            if use_static_cache
+            else DynamicCacheHandler(config=model.config)
+        )
 
         def debug_hook(self: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any], results: Any) -> None:
+            _args, _kwargs = cache_handler.map_to_tensor(args, kwargs)
             with brief_tensor_repr():
                 pprint.pp(
                     {
-                        "args": args,
-                        "kwargs": kwargs,
+                        "args": _args,
+                        "kwargs": _kwargs,
                         "results": results,
                     },
                     indent=2,
@@ -189,11 +199,14 @@ def run_generation(
         past_key_values=initial_cache,
         do_sample=False,
         max_new_tokens=(
-            initial_cache.max_cache_len - 1 - prompt_size if isinstance(initial_cache, StaticCache) else None
+            initial_cache.max_cache_len - 1 - prompt_size if isinstance(initial_cache, StaticCache) else 1024
         ),
     )
     responses = tokenizer.batch_decode(outputs)
-    return [response.strip(tokenizer.pad_token) for response in responses]
+    return [
+        response.replace(tokenizer.pad_token, "").replace(tokenizer.eos_token, "").replace(tokenizer.bos_token, "")
+        for response in responses
+    ]
 
 
 if __name__ == "__main__":
