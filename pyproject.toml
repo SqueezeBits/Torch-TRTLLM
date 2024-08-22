@@ -23,7 +23,7 @@ python = ">=3.10"
 packaging = "*"
 
 [tool.poetry.scripts]
-ditto = "ditto.__main__:main"
+ditto = "ditto.__main__:app"
 
 [tool.poetry.dynamic]
 version = { source = "ditto", attribute = "__version__" }
