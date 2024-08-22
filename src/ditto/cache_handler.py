@@ -28,6 +28,11 @@ class CacheHandler(BaseModel, ABC):
         ...
 
     @property
+    @abstractmethod
+    def num_key_value_heads(self) -> int:
+        ...
+
+    @property
     def head_dim(self) -> int:
         return self.hidden_size // self.num_heads
 
@@ -36,7 +41,7 @@ class CacheHandler(BaseModel, ABC):
         return False
 
     def get_shape(self, batch_size: int, seq_len: int = 0) -> tuple[int, ...]:
-        return (2, self.num_hidden_layers, batch_size, self.num_heads, seq_len, self.head_dim)
+        return (2, self.num_hidden_layers, batch_size, self.num_key_value_heads, seq_len, self.head_dim)
 
     @abstractmethod
     def to_cache(self, past_key_values: torch.Tensor) -> Cache:
@@ -109,6 +114,10 @@ class ConfigBasedCacheHandler(CacheHandler):
     @property
     def num_heads(self) -> int:
         return self.config.num_attention_heads
+
+    @property
+    def num_key_value_heads(self) -> int:
+        return self.config.num_key_value_heads
 
 
 class DynamicCacheHandler(ConfigBasedCacheHandler):
