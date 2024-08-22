@@ -17,26 +17,30 @@ class ShapeHistory(tuple[int | torch.LongTensor, ...]):
     @property
     def dynamic_axes(self) -> list[int]:
         return [i for i, v in enumerate(self) if isinstance(v, torch.LongTensor)]
+
     @property
     def num_dynamic_axes(self) -> int:
         return len(self.dynamic_axes)
+
     @property
     def dynamic_axis(self) -> int:
         assert len(self.dynamic_axes) == 1
         return self.dynamic_axes[0]
+
     @property
     def dynamic_axis_history(self) -> torch.LongTensor:
         history = self[self.dynamic_axis]
         assert isinstance(history, torch.LongTensor)
         return history
+
     @property
     def argmax(self) -> int:
         return self.dynamic_axis_history.argmax(0).item()  # type: ignore
+
     @property
     def slices(self) -> tuple[slice, ...]:
         return tuple(
-            slice(None, None) if isinstance(v, int) else slice(None, v.float().mean().long().item())
-            for v in self
+            slice(None, None) if isinstance(v, int) else slice(None, v.float().mean().long().item()) for v in self
         )
 
 
@@ -47,8 +51,7 @@ def get_shape_history(tensors: list[torch.Tensor]) -> ShapeHistory:
     shapes = torch.LongTensor([t.shape for t in tensors]).transpose(0, 1)
     is_static_axis: list[bool] = (shapes.min(dim=1).values == shapes.max(dim=1).values).tolist()
     return ShapeHistory(
-        shapes[i][0].item() if is_static else shapes[i]  # type: ignore
-        for i, is_static in enumerate(is_static_axis)
+        shapes[i][0].item() if is_static else shapes[i] for i, is_static in enumerate(is_static_axis)  # type: ignore
     )
 
 
@@ -76,11 +79,10 @@ class ForwardArgumentCollector:
         if self._count >= self.max_num_arguments:
             return False
         args, kwargs = self.cache_handler.map_to_tensor(args, kwargs)
-        arguments = {name: arg for name, arg in zip(self.signature.parameters, args)}
+        arguments = dict(zip(self.signature.parameters, args))
         arguments.update(kwargs)
-        if (
-            not self.cache_handler.is_static
-            and isinstance((attention_mask := arguments.pop("attention_mask", None)), torch.Tensor)
+        if not self.cache_handler.is_static and isinstance(
+            (attention_mask := arguments.pop("attention_mask", None)), torch.Tensor
         ):
             if not isinstance((past_key_values := arguments.get("past_key_values")), torch.Tensor):
                 raise ValueError(f"Expected past_key_values to be a tensor but got {past_key_values}")
@@ -103,13 +105,13 @@ class ForwardArgumentCollector:
         self._count += 1
         return True
 
-    def hook(self, _: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any], outputs: Any):
+    def hook(self, _: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any], outputs: Any) -> None:
         self.record(args, kwargs)
 
-    def pre_hook(self, _: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]):
+    def pre_hook(self, _: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
         self.record(args, kwargs)
 
-    def print_readable(self):
+    def print_readable(self) -> None:
         with brief_tensor_repr():
             for i in range(self._count):
                 print(f"=======================Iteration {i}======================")
@@ -144,7 +146,7 @@ class ForwardArgumentCollector:
                     value = tensors[argmax]
                     example_inputs[name] = value[shape_history.slices]
                     dim_name = f"{name}_dim_{dynamic_axis}"
-                    dim = Dim(dim_name, min=0, max=1<<30)
+                    dim = Dim(dim_name, min=0, max=1 << 30)
                     _constraints[name] = {dynamic_axis: dim_name}
                     dims_and_historys[dim_name] = (dim, shape_history.dynamic_axis_history)
                 else:
@@ -175,13 +177,13 @@ class ForwardArgumentCollector:
             else:
                 resolved_dims[dim_name] = dim
         constraints: dict[str, dict[int, DimType] | None] = {
-            param_name: None if constraint is None else {
-                i: resolved_dims[dim_name] for i, dim_name in constraint.items()
-            }
+            param_name: None
+            if constraint is None
+            else {i: resolved_dims[dim_name] for i, dim_name in constraint.items()}
             for param_name, constraint in _constraints.items()
         }
         if batch_dim is None:
-            batch_dim = Dim("batch", min=0, max=1<<30)
+            batch_dim = Dim("batch", min=0, max=1 << 30)
         batch_constraints: dict[str, dict[int, DimType] | None] = {
             "input_ids": {batch_axis: batch_dim},
             "position_ids": {batch_axis: batch_dim},
@@ -207,7 +209,7 @@ class ForwardArgumentCollector:
                     src.update({param_name: None})
                     continue
                 target_constraint.update(constraint)
-        
+
         _update_constraints(constraints, batch_constraints)
         if extra_shape_constraints is not None:
             _update_constraints(constraints, extra_shape_constraints)
@@ -218,15 +220,15 @@ class ForwardArgumentCollector:
             self._handle.remove()
         self._handle = (
             self.model.register_forward_pre_hook(self.pre_hook, with_kwargs=True)
-            if self.collect_before_forward else
-            self.model.register_forward_hook(self.hook, with_kwargs=True)
+            if self.collect_before_forward
+            else self.model.register_forward_hook(self.hook, with_kwargs=True)
         )
         return self
 
     def __exit__(
-        self, 
-        exc_type: type[BaseException] | None, 
-        exc_value: BaseException | None, 
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
         if self._handle:

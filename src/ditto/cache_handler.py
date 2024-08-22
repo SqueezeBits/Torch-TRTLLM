@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import Any
+
 import torch
-from transformers import PretrainedConfig
-from transformers.cache_utils import Cache, StaticCache, DynamicCache
 from pydantic import BaseModel
+from transformers import PretrainedConfig
+from transformers.cache_utils import Cache, DynamicCache, StaticCache
+
+from .constants import DEFAULT_DEVICE
 
 
 class CacheHandler(BaseModel, ABC):
@@ -23,7 +26,7 @@ class CacheHandler(BaseModel, ABC):
     @abstractmethod
     def num_heads(self) -> int:
         ...
-    
+
     @property
     def head_dim(self) -> int:
         return self.hidden_size // self.num_heads
@@ -43,9 +46,8 @@ class CacheHandler(BaseModel, ABC):
         self,
         cache: Cache,
     ) -> torch.Tensor:
-        if (
-            isinstance((key_cache := getattr(cache, "key_cache", None)), list)
-            and isinstance((value_cache := getattr(cache, "value_cache", None)), list)
+        if isinstance((key_cache := getattr(cache, "key_cache", None)), list) and isinstance(
+            (value_cache := getattr(cache, "value_cache", None)), list
         ):
             return torch.stack((torch.stack(key_cache), torch.stack(value_cache)))
         raise NotImplementedError(
@@ -65,16 +67,9 @@ class CacheHandler(BaseModel, ABC):
             if not isinstance(kwarg, Cache):
                 continue
             kwargs_to_replace[name] = kwarg
-        args = tuple(
-            self.to_tensor(args_to_replace[i])
-            if i in args_to_replace
-            else args[i]
-            for i in range(len(args))
-        )
+        args = tuple(self.to_tensor(args_to_replace[i]) if i in args_to_replace else args[i] for i in range(len(args)))
         kwargs = {
-            name: self.to_tensor(kwargs_to_replace[name])
-            if name in kwargs_to_replace
-            else kwargs[name]
+            name: self.to_tensor(kwargs_to_replace[name]) if name in kwargs_to_replace else kwargs[name]
             for name in kwargs
         }
         return (args, kwargs)
@@ -84,7 +79,7 @@ class CacheHandler(BaseModel, ABC):
         batch_size: int,
         seq_len: int = 0,
         *,
-        device: str | torch.device = "cuda" if torch.cuda.is_available() else "cpu",
+        device: str | torch.device = DEFAULT_DEVICE,
         dtype: torch.dtype = torch.float16,
     ) -> Cache:
         return self.to_cache(self.init_tensor(batch_size, seq_len, device=device, dtype=dtype))
@@ -94,7 +89,7 @@ class CacheHandler(BaseModel, ABC):
         batch_size: int,
         seq_len: int = 0,
         *,
-        device: str | torch.device = "cuda" if torch.cuda.is_available() else "cpu",
+        device: str | torch.device = DEFAULT_DEVICE,
         dtype: torch.dtype = torch.float16,
     ) -> torch.Tensor:
         return torch.zeros(*self.get_shape(batch_size, seq_len), dtype=dtype, device=device)
@@ -153,7 +148,7 @@ class StaticCacheHandler(ConfigBasedCacheHandler):
         batch_size: int | None = None,
         seq_len: int | None = None,
         *,
-        device: str | torch.device = "cuda" if torch.cuda.is_available() else "cpu",
+        device: str | torch.device = DEFAULT_DEVICE,
         dtype: torch.dtype = torch.float16,
     ) -> Cache:
         return super().init_cache(self.batch_size, self.max_seq_len, device=device, dtype=dtype)
@@ -163,7 +158,7 @@ class StaticCacheHandler(ConfigBasedCacheHandler):
         batch_size: int | None = None,
         seq_len: int | None = None,
         *,
-        device: str | torch.device = "cuda" if torch.cuda.is_available() else "cpu",
+        device: str | torch.device = DEFAULT_DEVICE,
         dtype: torch.dtype = torch.float16,
     ) -> torch.Tensor:
         return super().init_tensor(self.batch_size, self.max_seq_len, device=device, dtype=dtype)
