@@ -17,7 +17,7 @@ def export(
     strict: bool = True,
     pre_dispatch: bool = False,
     maintain_input_constraints_checking: bool = False,
-) -> torch.nn.Module:
+) -> PostExportWrapper:
     graph_module = torch_export(
         PreExportWrapper(model, cache_handler=cache_handler),
         (),
