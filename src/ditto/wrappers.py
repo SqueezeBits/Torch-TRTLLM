@@ -1,17 +1,20 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 import torch
+from torch.fx import GraphModule
 from transformers.cache_utils import Cache
 from transformers.modeling_outputs import ModelOutput
 
 from .cache_handler import CacheHandler
 
+ModuleType = TypeVar("ModuleType", torch.nn.Module, GraphModule)
 
-class ExportWrapper(torch.nn.Module, ABC):
+
+class ExportWrapper(torch.nn.Module, Generic[ModuleType], ABC):
     def __init__(
         self,
-        model: torch.nn.Module,
+        model: ModuleType,
         *,
         cache_handler: CacheHandler,
         input_ids_key: str = "input_ids",
@@ -20,7 +23,7 @@ class ExportWrapper(torch.nn.Module, ABC):
         seq_dim: int = -1,
     ) -> None:
         super().__init__()
-        self.model = model
+        self.model: ModuleType = model
         self.cache_handler = cache_handler
         self.input_ids_key = input_ids_key
         self.attention_mask_key = attention_mask_key
@@ -45,7 +48,7 @@ class ExportWrapper(torch.nn.Module, ABC):
         return output
 
 
-class PreExportWrapper(ExportWrapper):
+class PreExportWrapper(ExportWrapper[torch.nn.Module]):
     def preprocess(self, kwargs: dict[str, Any]) -> None:
         if not isinstance((past_key_values := kwargs.get(self.past_key_values_key)), torch.Tensor):
             raise ValueError(f"Expected {self.past_key_values_key} to be a tensor but got {past_key_values}")
@@ -71,7 +74,7 @@ class PreExportWrapper(ExportWrapper):
         output.past_key_values = self.cache_handler.to_tensor(past_key_values)
 
 
-class PostExportWrapper(ExportWrapper):
+class PostExportWrapper(ExportWrapper[GraphModule]):
     def preprocess(self, kwargs: dict[str, Any]) -> None:
         if not isinstance((past_key_values := kwargs.get(self.past_key_values_key)), Cache):
             raise ValueError(f"Expected {self.past_key_values_key} to be a cache but got {past_key_values}")
