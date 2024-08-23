@@ -81,20 +81,6 @@ class PostExportWrapper(ExportWrapper[GraphModule]):
         past_key_values_tensor = self.cache_handler.to_tensor(past_key_values)
         kwargs[self.past_key_values_key] = past_key_values_tensor
 
-        if not self.cache_handler.is_static:
-            if not isinstance((input_ids := kwargs.get(self.input_ids_key)), torch.Tensor):
-                raise ValueError(f"Expected {self.input_ids_key} to be a tensor but got {input_ids}")
-            if not isinstance((attention_mask := kwargs.pop(self.attention_mask_key, None)), torch.Tensor):
-                raise ValueError(f"Expected {self.attention_mask_key} to be a tensor but got {attention_mask}")
-            input_ids_len = input_ids.shape[self.seq_dim]
-            cache_len = past_key_values_tensor.shape[-2]
-            assert attention_mask.shape[self.seq_dim] == input_ids_len + cache_len
-            prefilled_attention_mask, generation_attention_mask = torch.split(
-                attention_mask, [cache_len, input_ids_len], dim=self.seq_dim
-            )
-            kwargs["prefilled_attention_mask"] = prefilled_attention_mask
-            kwargs["generation_attention_mask"] = generation_attention_mask
-
     def postprocess(self, output: ModelOutput) -> None:
         assert isinstance(
             output, ModelOutput
