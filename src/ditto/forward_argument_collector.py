@@ -1,5 +1,7 @@
 import copy
 import inspect
+from collections.abc import Callable
+from functools import cached_property
 from types import TracebackType
 from typing import Any
 
@@ -7,41 +9,39 @@ import torch
 from torch.export import Dim
 from torch.export.dynamic_shapes import _Dim as DimType
 from torch.utils.hooks import RemovableHandle
-from typing_extensions import Self
 
-from .cache_handler import CacheHandler
 from .pretty_print import brief_tensor_repr
 
 
 class ShapeHistory(tuple[int | torch.LongTensor, ...]):
-    @property
-    def dynamic_axes(self) -> list[int]:
-        return [i for i, v in enumerate(self) if isinstance(v, torch.LongTensor)]
+    @cached_property
+    def dynamic_dims(self) -> dict[int, torch.LongTensor]:
+        return {i: v for i, v in enumerate(self) if isinstance(v, torch.LongTensor)}
 
     @property
-    def num_dynamic_axes(self) -> int:
-        return len(self.dynamic_axes)
+    def num_dynamic_dims(self) -> int:
+        return len(self.dynamic_dims)
 
-    @property
-    def dynamic_axis(self) -> int:
-        assert len(self.dynamic_axes) == 1
-        return self.dynamic_axes[0]
+    @cached_property
+    def max_shape(self) -> tuple[int, ...]:
+        return tuple(x if isinstance(x, int) else x.max().item() for x in self)  # type: ignore
 
-    @property
-    def dynamic_axis_history(self) -> torch.LongTensor:
-        history = self[self.dynamic_axis]
-        assert isinstance(history, torch.LongTensor)
-        return history
+    @cached_property
+    def min_shape(self) -> tuple[int, ...]:
+        return tuple(x if isinstance(x, int) else x.min().item() for x in self)  # type: ignore
 
-    @property
-    def argmax(self) -> int:
-        return self.dynamic_axis_history.argmax(0).item()  # type: ignore
-
-    @property
-    def slices(self) -> tuple[slice, ...]:
+    @cached_property
+    def mean_shape(self) -> tuple[int, ...]:
         return tuple(
-            slice(None, None) if isinstance(v, int) else slice(None, v.float().mean().long().item()) for v in self
+            x if isinstance(x, int)
+            # dynamic dimension example size must be larger than 1
+            else max(x.float().mean().long().item(), 2)  # type: ignore
+            for x in self
         )
+
+
+def shape_as_slices(shape: tuple[int, ...]) -> tuple[slice, ...]:
+    return tuple(slice(0, s) for s in shape)
 
 
 def get_shape_history(tensors: list[torch.Tensor]) -> ShapeHistory:
@@ -59,49 +59,56 @@ class ForwardArgumentCollector:
     def __init__(
         self,
         model: torch.nn.Module,
-        cache_handler: CacheHandler,
+        *,
+        preprocess_inputs: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         collect_before_forward: bool = True,
-        max_num_arguments: int = 2,
+        verbose: bool = False,
     ) -> None:
         self.model = model
-        self.cache_handler = cache_handler
-        self.collect_before_forward = collect_before_forward
-        self.max_num_arguments = max_num_arguments
+        self.preprocess_inputs = preprocess_inputs
+        self.before_forward = collect_before_forward
+        self.verbose = verbose
         self._argument_history: dict[str, list[Any]] = {}
-        self._count: int = 0
+        self._count = 0
         self._handle: RemovableHandle | None = None
+        self._count_range: range | None = None
+
+    def get(self) -> dict[str, list[Any]]:
+        try:
+            return self._argument_history
+        finally:
+            self._argument_history = {}
+            self._count = 0
 
     @property
     def signature(self) -> inspect.Signature:
         return inspect.signature(self.model.forward)
 
+    def __len__(self) -> int:
+        return self._count
+
     def record(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> bool:
-        if self._count >= self.max_num_arguments:
+        if self._count_range is not None and self._count not in self._count_range:
             return False
-        args, kwargs = self.cache_handler.map_to_tensor(args, kwargs)
-        arguments = dict(zip(self.signature.parameters, args))
-        arguments.update(kwargs)
-        if not self.cache_handler.is_static and isinstance(
-            (attention_mask := arguments.pop("attention_mask", None)), torch.Tensor
-        ):
-            if not isinstance((past_key_values := arguments.get("past_key_values")), torch.Tensor):
-                raise ValueError(f"Expected past_key_values to be a tensor but got {past_key_values}")
-            if not isinstance((input_ids := arguments.get("input_ids", None)), torch.Tensor):
-                raise ValueError(f"Expected input_ids to be a tensor but got {input_ids}")
-            input_ids_len = input_ids.shape[-1]
-            cache_len = past_key_values.shape[-2]
-            assert attention_mask.shape[-1] == input_ids_len + cache_len
-            prefilled_attention_mask, generation_attention_mask = torch.split(
-                attention_mask, [cache_len, input_ids_len], dim=-1
+
+        kwargs = copy.deepcopy(kwargs)
+        if args:
+            keys = list(self.signature.parameters.keys())[: len(args)]
+            print(
+                f"[WARNING] {len(args)} positional arguments passed to the model will be converted as "
+                f"keyword arguments with the following keys: {', '.join(keys)}"
             )
-            arguments["prefilled_attention_mask"] = prefilled_attention_mask
-            arguments["generation_attention_mask"] = generation_attention_mask
+            kwargs.update(zip(keys, copy.deepcopy(args)))
+
+        if self.preprocess_inputs:
+            kwargs = self.preprocess_inputs(kwargs)
+
         if self._count == 0:
-            self._argument_history = {name: [copy.deepcopy(value)] for name, value in arguments.items()}
+            self._argument_history = {name: [value] for name, value in kwargs.items()}
         else:
-            for name, value in arguments.items():
+            for name, value in kwargs.items():
                 assert name in self._argument_history, f"Previously unseen argument found: {name}"
-                self._argument_history[name].append(copy.deepcopy(value))
+                self._argument_history[name].append(value)
         self._count += 1
         return True
 
@@ -111,91 +118,112 @@ class ForwardArgumentCollector:
     def pre_hook(self, _: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
         self.record(args, kwargs)
 
-    def print_readable(self) -> None:
+    def print_readable(self, *, since_iteration: int = 0) -> None:
         with brief_tensor_repr():
-            for i in range(self._count):
+            for i in range(since_iteration, self._count):
                 print(f"=======================Iteration {i}======================")
                 for name, kwargs_history in self._argument_history.items():
                     print(f"{name}: {kwargs_history[i]}")
 
+    def _insert_hook(self) -> None:
+        if self._handle:
+            self._handle.remove()
+        self._handle = (
+            self.model.register_forward_pre_hook(self.pre_hook, with_kwargs=True)
+            if self.before_forward
+            else self.model.register_forward_hook(self.hook, with_kwargs=True)
+        )
+
+    def _remove_hook(self) -> None:
+        if self._handle:
+            self._handle.remove()
+        if self.verbose:
+            self.print_readable(since_iteration=self._count_range.start if self._count_range is not None else 0)
+        self._count_range = None
+
+    def collect(self, num_arguments: int) -> "ArgumentCollectorSession":
+        self._count_range = range(self._count, self._count + num_arguments)
+        return ArgumentCollectorSession(self)
+
     def get_example_inputs_and_dynamic_shapes(
         self,
-        *,
         start: int | None = None,
         stop: int | None = None,
-        batch_axis: int = 0,
-        batch_dim: DimType | None = None,
+        dim_names: dict[str, dict[int, str]] | None = None,
         extra_shape_constraints: dict[str, dict[int, DimType] | None] | None = None,
+        include_nones: bool = False,
     ) -> tuple[dict[str, Any], dict[str, dict[int, DimType] | None]]:
-        assert self._count > 0
         example_inputs: dict[str, Any] = {}
         _constraints: dict[str, dict[int, str] | None] = {}
-        dims_and_historys: dict[str, tuple[DimType, torch.LongTensor]] = {}
-        for name, full_history in self._argument_history.items():
-            history = full_history[slice(start, stop)]
-            tensors = [x for x in history if isinstance(x, torch.Tensor)]
-            non_tensors = [x for x in history if not isinstance(x, torch.Tensor)]
-            if len(tensors) == len(history):
+        dim_size_history: dict[str, torch.LongTensor] = {}
+
+        def _autogen_name(param_name: str, axis: int) -> str:
+            return f"{param_name}_dim_{axis}"
+
+        for param, full_argument_history in self._argument_history.items():
+            argument_history = full_argument_history[slice(start, stop)]
+            tensors = [x for x in argument_history if isinstance(x, torch.Tensor)]
+            non_tensors = [x for x in argument_history if not isinstance(x, torch.Tensor)]
+            if len(tensors) == len(argument_history):
                 shape_history = get_shape_history(tensors)
-                if shape_history.num_dynamic_axes == 0:
-                    example_inputs[name] = tensors[-1]
-                    _constraints[name] = None
-                elif shape_history.num_dynamic_axes == 1:
-                    argmax = shape_history.argmax
-                    dynamic_axis = shape_history.dynamic_axis
-                    value = tensors[argmax]
-                    example_inputs[name] = value[shape_history.slices]
-                    dim_name = f"{name}_dim_{dynamic_axis}"
-                    dim = Dim(dim_name, min=0, max=1 << 30)
-                    _constraints[name] = {dynamic_axis: dim_name}
-                    dims_and_historys[dim_name] = (dim, shape_history.dynamic_axis_history)
+                last_input = tensors[-1]
+                if shape_history.num_dynamic_dims == 0:
+                    example_inputs[param] = last_input
+                    _constraints[param] = None
                 else:
-                    raise ValueError(f"The tensor values for {name} has more than one dynamic axis: {shape_history}")
-            elif len(non_tensors) == len(history):
+                    argument_constraint: dict[int, str] = {}
+                    for axis, size_values in shape_history.dynamic_dims.items():
+                        dim_name = _autogen_name(param, axis)
+                        argument_constraint[axis] = dim_name
+                        dim_size_history[dim_name] = size_values
+                    max_size_input = torch.zeros(
+                        shape_history.max_shape,
+                        device=last_input.device,
+                        dtype=last_input.dtype,
+                    )
+                    max_size_input[shape_as_slices(last_input.shape)] = last_input
+                    example_inputs[param] = max_size_input[shape_as_slices(shape_history.mean_shape)]
+                    _constraints[param] = argument_constraint
+            elif len(non_tensors) == len(argument_history):
                 if not all((value := non_tensors[0]) == x for x in non_tensors):
-                    raise ValueError(f"Expected consistent non-tensor values for {name} but got {non_tensors}")
-                example_inputs[name] = value
-                _constraints[name] = None
+                    raise ValueError(f"Expected consistent non-tensor values for {param} but got {non_tensors}")
+                example_inputs[param] = value
+                _constraints[param] = None
             else:
-                raise ValueError(f"Mixed tensor and non-tensor values provided to {name}: {history}")
+                raise ValueError(f"Mixed tensor and non-tensor values provided to {param}: {argument_history}")
 
         resolved_dims: dict[str, DimType] = {}
-        for dim_name, (dim, history) in dims_and_historys.items():
+        dim_name_map = {}
+        if dim_names:
+            for param_name, axis_names in dim_names.items():
+                for axis, user_defined_name in axis_names.items():
+                    dim_name_map[_autogen_name(param_name, axis)] = user_defined_name
+
+        def _create_dim(name: str, min_: int = 1, max_: int = 1 << 32 - 1) -> DimType:
+            return Dim(dim_name_map.get(name, name), min=min_, max=max_)
+
+        for dim_name, size_history in dim_size_history.items():
             for existing_dim_name, existing_dim in resolved_dims.items():
-                existing_dim_history = dims_and_historys[existing_dim_name][1]
-                if (existing_dim_history == history).all():
+                existing_size_history = dim_size_history[existing_dim_name]
+                if (existing_size_history == size_history).all():
                     resolved_dims[dim_name] = existing_dim
                     break
-                elif (diff := history - existing_dim_history).min() == diff.max():
+                if (diff := size_history - existing_size_history).min() == diff.max():
                     diff_value = diff.min().item()
                     if diff_value > 0:
                         resolved_dims[dim_name] = existing_dim + diff_value
                     else:
-                        resolved_dims[dim_name] = dim
+                        resolved_dims[dim_name] = (dim := _create_dim(dim_name))
                         resolved_dims[existing_dim_name] = dim + (-diff_value)
                     break
             else:
-                resolved_dims[dim_name] = dim
+                resolved_dims[dim_name] = _create_dim(dim_name)
         constraints: dict[str, dict[int, DimType] | None] = {
             param_name: None
             if constraint is None
             else {i: resolved_dims[dim_name] for i, dim_name in constraint.items()}
             for param_name, constraint in _constraints.items()
         }
-        if batch_dim is None:
-            batch_dim = Dim("batch", min=0, max=1 << 30)
-        batch_constraints: dict[str, dict[int, DimType] | None] = {
-            "input_ids": {batch_axis: batch_dim},
-            "position_ids": {batch_axis: batch_dim},
-            "past_key_values": {batch_axis + 2: batch_dim},
-        }
-        if self.cache_handler.is_static:
-            batch_constraints.update(attention_mask={batch_axis: batch_dim})
-        else:
-            batch_constraints.update(
-                prefilled_attention_mask={batch_axis: batch_dim},
-                generation_attention_mask={batch_axis: batch_dim},
-            )
 
         def _update_constraints(
             src: dict[str, dict[int, DimType] | None],
@@ -210,20 +238,22 @@ class ForwardArgumentCollector:
                     continue
                 target_constraint.update(constraint)
 
-        _update_constraints(constraints, batch_constraints)
         if extra_shape_constraints is not None:
             _update_constraints(constraints, extra_shape_constraints)
+
+        if not include_nones:
+            example_inputs = {name: value for name, value in example_inputs.items() if value is not None}
+            constraints = {name: constraint for name, constraint in constraints.items() if name in example_inputs}
+
         return example_inputs, constraints
 
-    def __enter__(self) -> Self:
-        if self._handle:
-            self._handle.remove()
-        self._handle = (
-            self.model.register_forward_pre_hook(self.pre_hook, with_kwargs=True)
-            if self.collect_before_forward
-            else self.model.register_forward_hook(self.hook, with_kwargs=True)
-        )
-        return self
+
+class ArgumentCollectorSession:
+    def __init__(self, collector: ForwardArgumentCollector) -> None:
+        self.collector = collector
+
+    def __enter__(self) -> None:
+        self.collector._insert_hook()
 
     def __exit__(
         self,
@@ -231,5 +261,4 @@ class ForwardArgumentCollector:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        if self._handle:
-            self._handle.remove()
+        self.collector._remove_hook()
