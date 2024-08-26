@@ -80,6 +80,10 @@ class PostExportWrapper(ExportWrapper[GraphModule]):
             raise ValueError(f"Expected {self.past_key_values_key} to be a cache but got {past_key_values}")
         past_key_values_tensor = self.cache_handler.to_tensor(past_key_values)
         kwargs[self.past_key_values_key] = past_key_values_tensor
+        if isinstance((forward_arg_names := self.model.meta.get("forward_arg_names", None)), list):
+            unidentified_keys = [key for key in kwargs if key not in forward_arg_names]
+            for key in unidentified_keys:
+                _ = kwargs.pop(key)
 
     def postprocess(self, output: ModelOutput) -> None:
         assert isinstance(
