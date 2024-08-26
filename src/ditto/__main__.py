@@ -2,7 +2,6 @@ import pprint
 from typing import Any
 
 import torch
-from torch.export import Dim
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -10,6 +9,7 @@ from transformers import (
     DynamicCache,
     PreTrainedModel,
     PreTrainedTokenizer,
+    PreTrainedTokenizerFast,
     StaticCache,
 )
 from typer import Typer
@@ -35,7 +35,7 @@ def generate(
     debug: bool = False,
     max_batch_size: int = 1,
     max_seq_len: int = 256,
-):
+) -> None:
     model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16)
     model.to(device)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -99,14 +99,13 @@ def test_export(
     device: str = DEFAULT_DEVICE,
     dtype: str = "float16",
     use_static_cache: bool = False,
-    max_batch_size: int = 1 << 30,
     max_seq_len: int = 256,
     export_inner_model: bool = False,
     verbose: bool = False,
 ) -> None:
     torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
     model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch_dtype).to(device)
-    tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token_id = model.config.pad_token_id or 0
     tokenizer.padding_side = "left"
     cache_handler = (
@@ -121,28 +120,67 @@ def test_export(
 
     model_to_export = model.model if export_inner_model else model
 
-    with ForwardArgumentCollector(
+    def preprocess_inputs(arguments: dict[str, Any]) -> dict[str, Any]:
+        arguments = {
+            name: cache_handler.to_tensor(value) if isinstance(value, Cache) else value
+            for name, value in arguments.items()
+        }
+        if not cache_handler.is_static and isinstance(
+            (attention_mask := arguments.pop("attention_mask", None)), torch.Tensor
+        ):
+            if not isinstance((past_key_values := arguments.get("past_key_values")), torch.Tensor):
+                raise ValueError(f"Expected past_key_values to be a tensor but got {past_key_values}")
+            if not isinstance((input_ids := arguments.get("input_ids", None)), torch.Tensor):
+                raise ValueError(f"Expected input_ids to be a tensor but got {input_ids}")
+            input_ids_len = input_ids.shape[-1]
+            cache_len = past_key_values.shape[-2]
+            assert attention_mask.shape[-1] == input_ids_len + cache_len
+            prefilled_attention_mask, generation_attention_mask = torch.split(
+                attention_mask, [cache_len, input_ids_len], dim=-1
+            )
+            arguments["prefilled_attention_mask"] = prefilled_attention_mask
+            arguments["generation_attention_mask"] = generation_attention_mask
+        return arguments
+
+    argument_collector = ForwardArgumentCollector(
         model_to_export,
-        cache_handler=cache_handler,
-        max_num_arguments=4,
-    ) as argument_collector:
-        print("==================Model Outputs Before Exporting==================")
-        for response in run_generation(
+        preprocess_inputs=preprocess_inputs,
+        verbose=verbose,
+    )
+    if not use_static_cache:
+        # collect two arguments forwarded to the model with batch_size=1
+        with argument_collector.collect(2):
+            _ = run_generation(
+                prompts[:1],
+                model,
+                tokenizer,
+                initial_cache=cache_handler.init_cache(batch_size=1),
+                device=device,
+            )
+
+    # collect two arguments forwarded to the model with batch_size=len(prompts)
+    with argument_collector.collect(2):
+        responses = run_generation(
             prompts,
             model,
             tokenizer,
-            initial_cache=cache_handler.init_cache(batch_size=len(prompts)),
+            initial_cache=cache_handler.init_cache(batch_size=len(prompts), device=device),
             device=device,
-        ):
-            print(response)
-            print("==================================================================")
+        )
+
+    print("==================Model Outputs Before Exporting==================")
+    for response in responses:
+        print(response)
+        print("==================================================================")
 
     example_inputs, dynamic_shapes = argument_collector.get_example_inputs_and_dynamic_shapes(
-        batch_dim=Dim("batch", min=1, max=max_batch_size)
+        dim_names={
+            "input_ids": {0: "batch", 1: "seq_len"},
+            "past_key_values": {4: "cache_size"},
+        }
     )
 
     if verbose:
-        argument_collector.print_readable()
         with brief_tensor_repr():
             print("================Inputs for torch.export=================")
             for name, value in example_inputs.items():
@@ -168,7 +206,7 @@ def test_export(
         model.model = exported_model
     else:
 
-        def patched_top_model_forward(*args: Any, **kwargs: Any):
+        def patched_top_model_forward(*args: Any, **kwargs: Any) -> Any:
             return exported_model(*args, **kwargs)
 
         model.forward = patched_top_model_forward
@@ -178,7 +216,7 @@ def test_export(
         prompts,
         model,
         tokenizer,
-        initial_cache=cache_handler.init_cache(batch_size=len(prompts)),
+        initial_cache=cache_handler.init_cache(batch_size=len(prompts), device=device),
         device=device,
     ):
         print(response)
@@ -188,7 +226,7 @@ def test_export(
 def run_generation(
     prompts: list[str],
     model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizer,
+    tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
     initial_cache: Cache,
     device: str = DEFAULT_DEVICE,
 ) -> list[str]:
