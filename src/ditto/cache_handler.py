@@ -149,9 +149,6 @@ class StaticCacheHandler(ConfigBasedCacheHandler):
         cache.value_cache = list(past_key_values[1].unbind())
         return cache
 
-    def to_tensor(self, cache: StaticCache) -> torch.Tensor:
-        return torch.stack((torch.stack(cache.key_cache), torch.stack(cache.value_cache)))
-
     def init_cache(
         self,
         batch_size: int | None = None,
