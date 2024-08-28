@@ -21,6 +21,7 @@ class ExportWrapper(torch.nn.Module, Generic[ModuleType], ABC):
         attention_mask_key: str = "attention_mask",
         past_key_values_key: str = "past_key_values",
         seq_dim: int = -1,
+        constant_inputs: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.model: ModuleType = model
@@ -29,6 +30,7 @@ class ExportWrapper(torch.nn.Module, Generic[ModuleType], ABC):
         self.attention_mask_key = attention_mask_key
         self.past_key_values_key = past_key_values_key
         self.seq_dim = seq_dim
+        self.constant_inputs = constant_inputs or {}
 
     @abstractmethod
     def preprocess(self, kwargs: dict[str, Any]) -> None:
@@ -40,7 +42,7 @@ class ExportWrapper(torch.nn.Module, Generic[ModuleType], ABC):
 
     def forward(self, **kwargs: Any) -> ModelOutput:
         self.preprocess(kwargs)
-        output = self.model(**kwargs)
+        output = self.model(**kwargs, **self.constant_inputs)
         assert isinstance(
             output, ModelOutput
         ), "The tuple output is not supported. You may need to set `return_dict=True`"
@@ -67,6 +69,9 @@ class PreExportWrapper(ExportWrapper[torch.nn.Module]):
                 (prefilled_attention_mask, generation_attention_mask),
                 dim=self.seq_dim,
             )
+
+        for key in self.constant_inputs:
+            _ = kwargs.pop(key, None)
 
     def postprocess(self, output: ModelOutput) -> None:
         if not isinstance((past_key_values := getattr(output, self.past_key_values_key, None)), Cache):

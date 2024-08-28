@@ -1,12 +1,11 @@
-from typing import Any
-
 import torch
 from torch._ops import OpOverload
 from torch.export._trace import _export as torch_export
-from torch.export.dynamic_shapes import _Dim as DimType
 from torch.fx import Graph, GraphModule, Node
 from torch.fx.graph import _PyTreeCodeGen
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
+from .arguments_for_export import ArgumentsForExport
 from .cache_handler import CacheHandler
 from .wrappers import PostExportWrapper, PreExportWrapper
 
@@ -14,26 +13,43 @@ from .wrappers import PostExportWrapper, PreExportWrapper
 def export(
     cache_handler: CacheHandler,
     model: torch.nn.Module,
-    example_inputs: dict[str, Any],
-    dynamic_shapes: dict[str, dict[int, DimType] | None],
+    arguments: ArgumentsForExport,
     *,
     strict: bool = True,
     pre_dispatch: bool = False,
     maintain_input_constraints_checking: bool = False,
+    sdp_backends: list[SDPBackend] | None = None,
 ) -> PostExportWrapper:
-    graph_module = torch_export(
-        PreExportWrapper(model, cache_handler=cache_handler),
-        (),
-        example_inputs,
-        dynamic_shapes={"kwargs": dynamic_shapes},
-        strict=strict,
-        pre_dispatch=pre_dispatch,
-    ).module()
+    if sdp_backends is None:
+        sdp_backends = get_default_sdp_backends()
+    with sdpa_kernel(sdp_backends):
+        ep = torch_export(
+            PreExportWrapper(model, cache_handler=cache_handler, constant_inputs=arguments.constant_inputs),
+            (),
+            arguments.tensor_inputs,
+            dynamic_shapes={"kwargs": arguments.constraints},
+            strict=strict,
+            pre_dispatch=pre_dispatch,
+        )
+    graph_module = ep.module()
     if not maintain_input_constraints_checking:
         graph_module._forward_pre_hooks.clear()
     assert isinstance(graph_module, GraphModule)
     fuse_attention_mask_inputs(graph_module)
     return PostExportWrapper(graph_module, cache_handler=cache_handler)
+
+
+def get_default_sdp_backends() -> list[SDPBackend]:
+    backends: list[SDPBackend] = []
+    if torch.backends.cuda.cudnn_sdp_enabled():
+        backends.append(SDPBackend.CUDNN_ATTENTION)
+    if torch.backends.cuda.flash_sdp_enabled():
+        backends.append(SDPBackend.FLASH_ATTENTION)
+    if torch.backends.cuda.mem_efficient_sdp_enabled():
+        backends.append(SDPBackend.EFFICIENT_ATTENTION)
+    if torch.backends.cuda.math_sdp_enabled():
+        backends.append(SDPBackend.MATH)
+    return backends
 
 
 def fuse_attention_mask_inputs(graph_module: GraphModule) -> None:

@@ -7,10 +7,11 @@ from typing import Any
 
 import torch
 from torch.export import Dim
-from torch.export.dynamic_shapes import _Dim as DimType
 from torch.utils.hooks import RemovableHandle
 
+from .arguments_for_export import ArgumentsForExport
 from .pretty_print import brief_tensor_repr
+from .types import BuiltInConstant, DimType
 
 
 class ShapeHistory(tuple[int | torch.LongTensor, ...]):
@@ -141,35 +142,38 @@ class ForwardArgumentCollector:
             self.print_readable(since_iteration=self._count_range.start if self._count_range is not None else 0)
         self._count_range = None
 
-    def collect(self, num_arguments: int) -> "ArgumentCollectorSession":
-        self._count_range = range(self._count, self._count + num_arguments)
+    def collect(self, max_num_arguments: int) -> "ArgumentCollectorSession":
+        self._count_range = range(self._count, self._count + max_num_arguments)
         return ArgumentCollectorSession(self)
 
-    def get_example_inputs_and_dynamic_shapes(
+    def get_arguments_for_export(
         self,
         start: int | None = None,
         stop: int | None = None,
         dim_names: dict[str, dict[int, str]] | None = None,
-        extra_shape_constraints: dict[str, dict[int, DimType] | None] | None = None,
-        include_nones: bool = False,
-    ) -> tuple[dict[str, Any], dict[str, dict[int, DimType] | None]]:
-        example_inputs: dict[str, Any] = {}
-        _constraints: dict[str, dict[int, str] | None] = {}
+        extra_shape_constraints: dict[str, dict[int, DimType]] | None = None,
+        device: torch.device | str | None = None,
+    ) -> ArgumentsForExport:
+        tensor_inputs: dict[str, torch.Tensor] = {}
+        constant_inputs: dict[str, BuiltInConstant] = {}
+        _constraints: dict[str, dict[int, str]] = {}
         dim_size_history: dict[str, torch.LongTensor] = {}
 
         def _autogen_name(param_name: str, axis: int) -> str:
             return f"{param_name}_dim_{axis}"
 
+        if device is None:
+            device = next(self.model.parameters()).device
         for param, full_argument_history in self._argument_history.items():
             argument_history = full_argument_history[slice(start, stop)]
             tensors = [x for x in argument_history if isinstance(x, torch.Tensor)]
-            non_tensors = [x for x in argument_history if not isinstance(x, torch.Tensor)]
+            constants = [x for x in argument_history if isinstance(x, BuiltInConstant)]
             if len(tensors) == len(argument_history):
                 shape_history = get_shape_history(tensors)
                 last_input = tensors[-1]
                 if shape_history.num_dynamic_dims == 0:
-                    example_inputs[param] = last_input
-                    _constraints[param] = None
+                    tensor_inputs[param] = last_input
+                    _constraints[param] = {}
                 else:
                     argument_constraint: dict[int, str] = {}
                     for axis, size_values in shape_history.dynamic_dims.items():
@@ -182,15 +186,16 @@ class ForwardArgumentCollector:
                         dtype=last_input.dtype,
                     )
                     max_size_input[shape_as_slices(last_input.shape)] = last_input
-                    example_inputs[param] = max_size_input[shape_as_slices(shape_history.mean_shape)]
+                    tensor_inputs[param] = max_size_input[shape_as_slices(shape_history.mean_shape)]
                     _constraints[param] = argument_constraint
-            elif len(non_tensors) == len(argument_history):
-                if not all((value := non_tensors[0]) == x for x in non_tensors):
-                    raise ValueError(f"Expected consistent non-tensor values for {param} but got {non_tensors}")
-                example_inputs[param] = value
-                _constraints[param] = None
+            elif len(constants) == len(argument_history):
+                if all((value := constants[0]) == x for x in constants):
+                    constant_inputs[param] = value
+                else:
+                    tensor_inputs[param] = torch.tensor(constants[-1], device=device)
+                    _constraints[param] = {}
             else:
-                raise ValueError(f"Mixed tensor and non-tensor values provided to {param}: {argument_history}")
+                raise ValueError(f"Unsupported combination of values provided to {param}: {argument_history}")
 
         resolved_dims: dict[str, DimType] = {}
         dim_name_map = {}
@@ -199,7 +204,7 @@ class ForwardArgumentCollector:
                 for axis, user_defined_name in axis_names.items():
                     dim_name_map[_autogen_name(param_name, axis)] = user_defined_name
 
-        def _create_dim(name: str, min_: int = 1, max_: int = 1 << 32 - 1) -> DimType:
+        def _create_dim(name: str, min_: int = 0, max_: int = 1 << 32 - 1) -> DimType:
             return Dim(dim_name_map.get(name, name), min=min_, max=max_)
 
         for dim_name, size_history in dim_size_history.items():
@@ -218,34 +223,29 @@ class ForwardArgumentCollector:
                     break
             else:
                 resolved_dims[dim_name] = _create_dim(dim_name)
-        constraints: dict[str, dict[int, DimType] | None] = {
-            param_name: None
-            if constraint is None
-            else {i: resolved_dims[dim_name] for i, dim_name in constraint.items()}
+        constraints: dict[str, dict[int, DimType]] = {
+            param_name: {i: resolved_dims[dim_name] for i, dim_name in constraint.items()}
             for param_name, constraint in _constraints.items()
         }
 
         def _update_constraints(
-            src: dict[str, dict[int, DimType] | None],
-            other: dict[str, dict[int, DimType] | None],
+            src: dict[str, dict[int, DimType]],
+            other: dict[str, dict[int, DimType]],
         ) -> None:
             for param_name, constraint in other.items():
                 if (target_constraint := src.get(param_name)) is None:
                     src.update({param_name: constraint})
-                    continue
-                if constraint is None:
-                    src.update({param_name: None})
                     continue
                 target_constraint.update(constraint)
 
         if extra_shape_constraints is not None:
             _update_constraints(constraints, extra_shape_constraints)
 
-        if not include_nones:
-            example_inputs = {name: value for name, value in example_inputs.items() if value is not None}
-            constraints = {name: constraint for name, constraint in constraints.items() if name in example_inputs}
-
-        return example_inputs, constraints
+        return ArgumentsForExport(
+            tensor_inputs={k: (v.contiguous() if isinstance(v, torch.Tensor) else v) for k, v in tensor_inputs.items()},
+            constant_inputs=constant_inputs,
+            constraints=constraints,
+        )
 
 
 class ArgumentCollectorSession:

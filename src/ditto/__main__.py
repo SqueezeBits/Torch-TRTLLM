@@ -1,7 +1,8 @@
 import pprint
-from typing import Any
+from typing import Annotated, Any
 
 import torch
+from torch.nn.attention import SDPBackend
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -12,7 +13,7 @@ from transformers import (
     PreTrainedTokenizerFast,
     StaticCache,
 )
-from typer import Typer
+from typer import Option, Typer
 
 from . import (
     DynamicCacheHandler,
@@ -95,7 +96,8 @@ def generate(
 @torch.no_grad()
 def test_export(
     model_id: str,
-    prompts: list[str] = ["Tell me about pikachu.", "What's the difference between python2 and python3?"],
+    sdp_backends: Annotated[list[str], Option(default_factory=list)],
+    prompts: Annotated[list[str], Option(default_factory=list)],
     device: str = DEFAULT_DEVICE,
     dtype: str = "float16",
     use_static_cache: bool = False,
@@ -103,6 +105,15 @@ def test_export(
     export_inner_model: bool = False,
     verbose: bool = False,
 ) -> None:
+    backends = parse_sdp_backends(sdp_backends)
+    print(f"Using SDP backends: {backends or 'default'}")
+
+    if not prompts:
+        print("Using default ", end="")
+        prompts = ["Tell me about pikachu.", "What's the difference between python2 and python3?"]
+    _prompts = "\n".join(f"* {p}" for p in prompts)
+    print(f"prompts:\n{_prompts}")
+
     torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
     model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch_dtype).to(device)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -148,7 +159,7 @@ def test_export(
         verbose=verbose,
     )
     if not use_static_cache:
-        # collect two arguments forwarded to the model with batch_size=1
+        # collect at most two arguments forwarded to the model with batch_size=1
         with argument_collector.collect(2):
             _ = run_generation(
                 prompts[:1],
@@ -158,7 +169,7 @@ def test_export(
                 device=device,
             )
 
-    # collect two arguments forwarded to the model with batch_size=len(prompts)
+    # collect at most two arguments forwarded to the model with batch_size=len(prompts)
     with argument_collector.collect(2):
         responses = run_generation(
             prompts,
@@ -173,28 +184,22 @@ def test_export(
         print(response)
         print("==================================================================")
 
-    example_inputs, dynamic_shapes = argument_collector.get_example_inputs_and_dynamic_shapes(
+    arguments_for_export = argument_collector.get_arguments_for_export(
         dim_names={
-            "input_ids": {0: "batch", 1: "seq_len"},
-            "past_key_values": {4: "cache_size"},
-        }
+            "input_ids": {0: "batch", 1: "q_size"},
+            "past_key_values": {4: "kv_size"},
+        },
+        device=device,
     )
 
     if verbose:
-        with brief_tensor_repr():
-            print("================Inputs for torch.export=================")
-            for name, value in example_inputs.items():
-                print(f"{name}: {value}")
-            print("======================Constraints=======================")
-            for name, constraint in dynamic_shapes.items():
-                print(f"{name}: {constraint}")
-            print("========================================================")
+        arguments_for_export.print_readable()
 
     exported_model = export(
         cache_handler,
         model_to_export,
-        example_inputs,
-        dynamic_shapes=dynamic_shapes,
+        arguments_for_export,
+        sdp_backends=backends,
     )
 
     if verbose:
@@ -221,6 +226,19 @@ def test_export(
     ):
         print(response)
         print("==================================================================")
+
+
+def parse_sdp_backends(sdp_backends: list[str]) -> list[SDPBackend]:
+    try:
+        available_backends = {
+            "CUDNN_ATTENTION": SDPBackend.CUDNN_ATTENTION,
+            "EFFICIENT_ATTENTION": SDPBackend.EFFICIENT_ATTENTION,
+            "FLASH_ATTENTION": SDPBackend.FLASH_ATTENTION,
+            "MATH": SDPBackend.MATH,
+        }
+        return [available_backends[x.upper()] for x in sdp_backends]
+    except KeyError as e:
+        raise ValueError(f"--sdp-backends must be one of {','.join(available_backends.keys())}") from e
 
 
 def run_generation(
