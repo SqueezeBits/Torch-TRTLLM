@@ -106,7 +106,7 @@ def test_export(
     verbose: bool = False,
 ) -> None:
     backends = parse_sdp_backends(sdp_backends)
-    print(f"Using SDP backends: {backends or 'default'}")
+    print(f"Using SDP backends: {backends}")
 
     if not prompts:
         print("Using default ", end="")
@@ -228,7 +228,7 @@ def test_export(
         print("==================================================================")
 
 
-def parse_sdp_backends(sdp_backends: list[str]) -> list[SDPBackend]:
+def parse_sdp_backends(sdp_backends: list[str]) -> list[SDPBackend] | SDPBackend:
     try:
         available_backends = {
             "CUDNN_ATTENTION": SDPBackend.CUDNN_ATTENTION,
@@ -236,7 +236,8 @@ def parse_sdp_backends(sdp_backends: list[str]) -> list[SDPBackend]:
             "FLASH_ATTENTION": SDPBackend.FLASH_ATTENTION,
             "MATH": SDPBackend.MATH,
         }
-        return [available_backends[x.upper()] for x in sdp_backends]
+        backends = [available_backends[x.upper()] for x in sdp_backends]
+        return backends or SDPBackend.MATH
     except KeyError as e:
         raise ValueError(f"--sdp-backends must be one of {','.join(available_backends.keys())}") from e
 
