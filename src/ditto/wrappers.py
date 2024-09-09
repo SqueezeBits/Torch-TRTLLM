@@ -57,18 +57,7 @@ class PreExportWrapper(ExportWrapper[torch.nn.Module]):
         kwargs[self.past_key_values_key] = self.cache_handler.to_cache(past_key_values)
 
         if not self.cache_handler.is_static:
-            if not isinstance((prefilled_attention_mask := kwargs.pop("prefilled_attention_mask", None)), torch.Tensor):
-                raise ValueError(f"Expected prefilled_attention_mask to be a tensor but got {prefilled_attention_mask}")
-            if not isinstance(
-                (generation_attention_mask := kwargs.pop("generation_attention_mask", None)), torch.Tensor
-            ):
-                raise ValueError(
-                    f"Expected generation_attention_mask to be a tensor but got {generation_attention_mask}"
-                )
-            kwargs[self.attention_mask_key] = torch.cat(
-                (prefilled_attention_mask, generation_attention_mask),
-                dim=self.seq_dim,
-            )
+            fuse_attention_masks(kwargs)
 
         for key in self.constant_inputs:
             _ = kwargs.pop(key, None)
@@ -97,3 +86,12 @@ class PostExportWrapper(ExportWrapper[GraphModule]):
         if not isinstance((past_key_values := getattr(output, self.past_key_values_key, None)), torch.Tensor):
             raise ValueError(f"Expected {self.past_key_values_key} to be a tensor but got {past_key_values}")
         output.past_key_values = self.cache_handler.to_cache(past_key_values)
+
+
+def fuse_attention_masks(kwargs: dict[str, Any]) -> None:
+    if not (
+        isinstance((prefilled_attention_mask := kwargs.pop("prefilled_attention_mask", None)), torch.Tensor)
+        and isinstance((generation_attention_mask := kwargs.pop("generation_attention_mask", None)), torch.Tensor)
+    ):
+        return
+    kwargs["attention_mask"] = torch.cat((prefilled_attention_mask, generation_attention_mask), dim=-1)
