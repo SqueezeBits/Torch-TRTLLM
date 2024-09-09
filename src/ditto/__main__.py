@@ -255,6 +255,8 @@ def run_generation(
         **inputs,
         past_key_values=initial_cache,
         do_sample=False,
+        temperature=None,
+        top_p=None,
         max_new_tokens=(
             initial_cache.max_cache_len - 1 - prompt_size if isinstance(initial_cache, StaticCache) else 1024
         ),
