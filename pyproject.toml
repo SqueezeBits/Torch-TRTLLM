@@ -22,7 +22,7 @@ version = "0.0.0"
 python = ">=3.10"
 pydantic = "*"
 torch = ">=2.3.0"
-transformers = ">=4.44.0"
+transformers = ">=4.40.0"
 typer = "*"
 
 [tool.poetry.scripts]
