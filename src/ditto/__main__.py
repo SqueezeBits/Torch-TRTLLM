@@ -94,7 +94,7 @@ def generate(
 
 @app.command("export")
 @torch.no_grad()
-def test_export(
+def test_dynamic_export(
     model_id: str,
     sdp_backends: Annotated[list[str], Option(default_factory=list)],
     prompts: Annotated[list[str], Option(default_factory=list)],
