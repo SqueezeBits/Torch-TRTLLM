@@ -6,10 +6,12 @@ from types import TracebackType
 from typing import Any
 
 import torch
+from pydantic import BaseModel
 from torch.export import Dim
 from torch.utils.hooks import RemovableHandle
 
 from .arguments_for_export import ArgumentsForExport
+from .dynamic_dim import DynamicDim
 from .pretty_print import brief_tensor_repr
 from .types import BuiltInConstant, DimType
 
@@ -56,6 +58,106 @@ def get_shape_history(tensors: list[torch.Tensor]) -> ShapeHistory:
     )
 
 
+class TensorArgumentHistories(dict[str, list[torch.Tensor]]):
+    @property
+    def shape_histories(self) -> dict[str, ShapeHistory]:
+        return {name: get_shape_history(self[name]) for name in self}
+
+
+class ArgumentHistory(BaseModel):
+    model_config = {"arbitrary_types_allowed": True}
+
+    dynamic: TensorArgumentHistories
+    static: TensorArgumentHistories
+    constants: dict[str, BuiltInConstant]
+    all_keys: tuple[str, ...]
+
+    def resolve_dynamic_dims(
+        self,
+        dynamic_dims: dict[str, dict[int, DynamicDim]] | None = None,
+    ) -> tuple[dict[str, dict[int, DimType]], dict[str, torch.Tensor]]:
+        def _autogen_name(param_name: str, axis: int) -> str:
+            return f"{param_name}_dim_{axis}"
+
+        def _create_dim(name: str, min_: int = 0, max_: int = 1 << 15 - 1) -> DimType:
+            return Dim(name, min=min_, max=max_)
+
+        _constraints: dict[str, dict[int, str]] = {}
+        dim_size_history: dict[str, torch.LongTensor] = {}
+        for name, shape_history in self.dynamic.shape_histories.items():
+            argument_constraint: dict[int, str] = {}
+            for axis, size_values in shape_history.dynamic_dims.items():
+                dim_name = _autogen_name(name, axis)
+                argument_constraint[axis] = dim_name
+                dim_size_history[dim_name] = size_values
+                _constraints[name] = argument_constraint
+
+        resolved_dims: dict[str, tuple[DimType, int]] = {}
+        if dynamic_dims:
+            for param_name, axis_and_dims in dynamic_dims.items():
+                for axis, dynamic_dim in axis_and_dims.items():
+                    dim_name = _autogen_name(param_name, axis)
+                    resolved_dims[dim_name] = (dynamic_dim.export_dim, dynamic_dim.opt)
+
+        for dim_name, size_history in dim_size_history.items():
+            if dim_name in resolved_dims:
+                continue
+            for existing_dim_name, (existing_dim, existing_opt_size) in resolved_dims.items():
+                if existing_dim_name not in dim_size_history:
+                    print(f"[WARNING] {existing_dim.__name__} was marked as dynamic but it is static")
+                    continue
+                existing_size_history = dim_size_history[existing_dim_name]
+                if (existing_size_history == size_history).all():
+                    resolved_dims[dim_name] = (existing_dim, existing_opt_size)
+                    break
+                if (diff := size_history - existing_size_history).min() == diff.max() and isinstance(
+                    (diff_value := diff.min().item()), int
+                ):
+                    if diff_value > 0:
+                        resolved_dims[dim_name] = (existing_dim + diff_value, existing_opt_size + diff_value)
+                    else:
+                        resolved_dims[dim_name] = (dim := _create_dim(dim_name), existing_opt_size + diff_value)
+                        resolved_dims[existing_dim_name] = (dim - diff_value, existing_opt_size)
+                    break
+            else:
+                # for (name0, (dim0, opt0)), (name1, (dim1, opt1)) in combinations(resolved_dims.items(), 2):
+                #     if name0 not in dim_size_history:
+                #         print(f"[WARNING] {dim0.__name__} was marked as dynamic but it is static")
+                #         continue
+                #     if name1 not in dim_size_history:
+                #         print(f"[WARNING] {dim1.__name__} was marked as dynamic but it is static")
+                #         continue
+                #     size_history0 = dim_size_history[name0]
+                #     size_history1 = dim_size_history[name1]
+                #     if (size_history == size_history0 + size_history1)
+                opt_size = int(size_history.float().mean().item())
+                print(f"[WARNING] Couldn't infer optimal size for {dim_name}. Will use the average size {opt_size}")
+                resolved_dims[dim_name] = (_create_dim(dim_name), opt_size)
+        constraints = {
+            param: {i: resolved_dims[dim_name][0] for i, dim_name in constraint.items()}
+            for param, constraint in _constraints.items()
+        }
+        opt_sizes = {
+            param: {i: resolved_dims[dim_name][1] for i, dim_name in constraint.items()}
+            for param, constraint in _constraints.items()
+        }
+        input_tensors: dict[str, torch.Tensor] = {}
+        for param, tensors in self.dynamic.items():
+            opt_sizes_for_param = opt_sizes.get(param, {})
+            last_tensor = tensors[-1]
+            opt_shape = tuple(
+                opt_sizes_for_param.get(axis, last_tensor.shape[axis]) for axis in range(last_tensor.ndim)
+            )
+            opt_tensor = torch.zeros(*opt_shape, dtype=last_tensor.dtype, device=last_tensor.device)
+            slices = shape_as_slices(tuple(min(x, y) for x, y in zip(opt_shape, last_tensor.shape)))
+            opt_tensor[slices] = last_tensor[slices]
+            input_tensors[param] = opt_tensor
+        for param, tensors in self.static.items():
+            input_tensors[param] = tensors[-1]
+
+        return constraints, input_tensors
+
+
 class ForwardArgumentCollector:
     def __init__(
         self,
@@ -86,10 +188,13 @@ class ForwardArgumentCollector:
         return inspect.signature(self.model.forward)
 
     def __len__(self) -> int:
-        return self._count
+        if not self._argument_history:
+            return 0
+        return len([*self._argument_history.values()][0])
 
     def record(self, args: tuple[Any, ...], kwargs: dict[str, Any]) -> bool:
         if self._count_range is not None and self._count not in self._count_range:
+            self._count += 1
             return False
 
         kwargs = copy.deepcopy(kwargs)
@@ -104,7 +209,7 @@ class ForwardArgumentCollector:
         if self.preprocess_inputs:
             kwargs = self.preprocess_inputs(kwargs)
 
-        if self._count == 0:
+        if len(self) == 0:
             self._argument_history = {name: [value] for name, value in kwargs.items()}
         else:
             for name, value in kwargs.items():
@@ -119,12 +224,12 @@ class ForwardArgumentCollector:
     def pre_hook(self, _: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
         self.record(args, kwargs)
 
-    def print_readable(self, *, since_iteration: int = 0) -> None:
+    def print_readable(self) -> None:
         with brief_tensor_repr():
-            for i in range(since_iteration, self._count):
-                print(f"=======================Iteration {i}======================")
+            for idx, iteration in enumerate(self._count_range or range(self._count)):
+                print(f"=======================Iteration {iteration}======================")
                 for name, kwargs_history in self._argument_history.items():
-                    print(f"{name}: {kwargs_history[i]}")
+                    print(f"{name}: {kwargs_history[idx]}")
 
     def _insert_hook(self) -> None:
         if self._handle:
@@ -139,111 +244,64 @@ class ForwardArgumentCollector:
         if self._handle:
             self._handle.remove()
         if self.verbose:
-            self.print_readable(since_iteration=self._count_range.start if self._count_range is not None else 0)
+            self.print_readable()
         self._count_range = None
 
-    def collect(self, max_num_arguments: int) -> "ArgumentCollectorSession":
-        self._count_range = range(self._count, self._count + max_num_arguments)
+    def collect(self, max_num_arguments: int, skip_first_n: int = 0) -> "ArgumentCollectorSession":
+        self._count_range = range(self._count + skip_first_n, self._count + skip_first_n + max_num_arguments)
         return ArgumentCollectorSession(self)
 
-    def get_arguments_for_export(
+    def get_argument_histories(
         self,
         start: int | None = None,
         stop: int | None = None,
-        dim_names: dict[str, dict[int, str]] | None = None,
-        extra_shape_constraints: dict[str, dict[int, DimType]] | None = None,
-        device: torch.device | str | None = None,
-    ) -> ArgumentsForExport:
-        tensor_inputs: dict[str, torch.Tensor] = {}
-        constant_inputs: dict[str, BuiltInConstant] = {}
-        _constraints: dict[str, dict[int, str]] = {}
-        dim_size_history: dict[str, torch.LongTensor] = {}
-
-        def _autogen_name(param_name: str, axis: int) -> str:
-            return f"{param_name}_dim_{axis}"
-
-        if device is None:
-            device = next(self.model.parameters()).device
-        for param, full_argument_history in self._argument_history.items():
+        # device: torch.device | str | None = None,
+    ) -> ArgumentHistory:
+        dynamic_argument_histories = TensorArgumentHistories()
+        static_argument_histories = TensorArgumentHistories()
+        constant_arguments: dict[str, BuiltInConstant] = {}
+        for name, full_argument_history in self._argument_history.items():
             argument_history = full_argument_history[slice(start, stop)]
             tensors = [x for x in argument_history if isinstance(x, torch.Tensor)]
             constants = [x for x in argument_history if isinstance(x, BuiltInConstant)]
             if len(tensors) == len(argument_history):
                 shape_history = get_shape_history(tensors)
-                last_input = tensors[-1]
                 if shape_history.num_dynamic_dims == 0:
-                    tensor_inputs[param] = last_input
-                    _constraints[param] = {}
+                    static_argument_histories[name] = tensors
                 else:
-                    argument_constraint: dict[int, str] = {}
-                    for axis, size_values in shape_history.dynamic_dims.items():
-                        dim_name = _autogen_name(param, axis)
-                        argument_constraint[axis] = dim_name
-                        dim_size_history[dim_name] = size_values
-                    max_size_input = torch.zeros(
-                        shape_history.max_shape,
-                        device=last_input.device,
-                        dtype=last_input.dtype,
-                    )
-                    max_size_input[shape_as_slices(last_input.shape)] = last_input
-                    tensor_inputs[param] = max_size_input[shape_as_slices(shape_history.mean_shape)]
-                    _constraints[param] = argument_constraint
+                    dynamic_argument_histories[name] = tensors
             elif len(constants) == len(argument_history):
                 if all((value := constants[0]) == x for x in constants):
-                    constant_inputs[param] = value
+                    constant_arguments[name] = value
                 else:
-                    tensor_inputs[param] = torch.tensor(constants[-1], device=device)
-                    _constraints[param] = {}
+                    raise ValueError(
+                        f"Expected constant input {name} to have consistent values, but got {argument_history}"
+                    )
+                # else:
+                #     static_argument_history[name] = [torch.tensor(constant, device=device) for constant in constants]
             else:
-                raise ValueError(f"Unsupported combination of values provided to {param}: {argument_history}")
+                with brief_tensor_repr():
+                    raise ValueError(f"Unsupported combination of values provided to {name}: {argument_history}")
+        return ArgumentHistory(
+            dynamic=dynamic_argument_histories,
+            static=static_argument_histories,
+            constants=constant_arguments,
+            all_keys=tuple(self._argument_history.keys()),
+        )
 
-        resolved_dims: dict[str, DimType] = {}
-        dim_name_map = {}
-        if dim_names:
-            for param_name, axis_names in dim_names.items():
-                for axis, user_defined_name in axis_names.items():
-                    dim_name_map[_autogen_name(param_name, axis)] = user_defined_name
-
-        def _create_dim(name: str, min_: int = 0, max_: int = 1 << 32 - 1) -> DimType:
-            return Dim(dim_name_map.get(name, name), min=min_, max=max_)
-
-        for dim_name, size_history in dim_size_history.items():
-            for existing_dim_name, existing_dim in resolved_dims.items():
-                existing_size_history = dim_size_history[existing_dim_name]
-                if (existing_size_history == size_history).all():
-                    resolved_dims[dim_name] = existing_dim
-                    break
-                if (diff := size_history - existing_size_history).min() == diff.max():
-                    diff_value = diff.min().item()
-                    if diff_value > 0:
-                        resolved_dims[dim_name] = existing_dim + diff_value
-                    else:
-                        resolved_dims[dim_name] = (dim := _create_dim(dim_name))
-                        resolved_dims[existing_dim_name] = dim + (-diff_value)
-                    break
-            else:
-                resolved_dims[dim_name] = _create_dim(dim_name)
-        constraints: dict[str, dict[int, DimType]] = {
-            param_name: {i: resolved_dims[dim_name] for i, dim_name in constraint.items()}
-            for param_name, constraint in _constraints.items()
-        }
-
-        def _update_constraints(
-            src: dict[str, dict[int, DimType]],
-            other: dict[str, dict[int, DimType]],
-        ) -> None:
-            for param_name, constraint in other.items():
-                if (target_constraint := src.get(param_name)) is None:
-                    src.update({param_name: constraint})
-                    continue
-                target_constraint.update(constraint)
-
-        if extra_shape_constraints is not None:
-            _update_constraints(constraints, extra_shape_constraints)
+    def get_arguments_for_export(
+        self,
+        start: int | None = None,
+        stop: int | None = None,
+        dynamic_dims: dict[str, dict[int, DynamicDim]] | None = None,
+        device: torch.device | str | None = None,
+    ) -> ArgumentsForExport:
+        argument_history = self.get_argument_histories(start, stop)
+        constraints, tensor_inputs = argument_history.resolve_dynamic_dims(dynamic_dims=dynamic_dims)
 
         return ArgumentsForExport(
-            tensor_inputs={k: (v.contiguous() if isinstance(v, torch.Tensor) else v) for k, v in tensor_inputs.items()},
-            constant_inputs=constant_inputs,
+            tensor_inputs={k: v.contiguous() for k, v in tensor_inputs.items()},
+            constant_inputs=argument_history.constants,
             constraints=constraints,
         )
 

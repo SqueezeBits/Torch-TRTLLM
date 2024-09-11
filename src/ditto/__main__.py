@@ -17,9 +17,11 @@ from typer import Option, Typer
 
 from . import (
     DynamicCacheHandler,
+    DynamicDim,
     ForwardArgumentCollector,
     StaticCacheHandler,
     brief_tensor_repr,
+    convert,
     export,
 )
 from .constants import DEFAULT_DEVICE
@@ -185,9 +187,12 @@ def test_dynamic_export(
         print("==================================================================")
 
     arguments_for_export = argument_collector.get_arguments_for_export(
-        dim_names={
-            "input_ids": {0: "batch", 1: "q_size"},
-            "past_key_values": {4: "kv_size"},
+        dynamic_dims={
+            "input_ids": {
+                0: DynamicDim(name="batch", min=1, opt=2, max=32),
+                1: DynamicDim(name="q_size", min=0, opt=2, max=16384),
+            },
+            "past_key_values": {4: DynamicDim(name="kv_size", min=0, opt=256, max=16384)},
         },
         device=device,
     )
@@ -216,16 +221,137 @@ def test_dynamic_export(
 
         model.forward = patched_top_model_forward
 
-    print("==================Model Outputs After Exporting===================")
+    print("======Model Outputs After Exporting (with two extra prompts)======")
     for response in run_generation(
-        prompts,
+        prompts + ["Hey, are you conscious?", "Why is pi irrational?"],
         model,
         tokenizer,
-        initial_cache=cache_handler.init_cache(batch_size=len(prompts), device=device),
+        initial_cache=cache_handler.init_cache(batch_size=len(prompts) + 2, device=device),
         device=device,
     ):
         print(response)
         print("==================================================================")
+
+
+@app.command("convert")
+@torch.no_grad()
+def test_trt_convert(
+    model_id: str,
+    sdp_backends: Annotated[list[str], Option(default_factory=list)],
+    prompts: Annotated[list[str], Option(default_factory=list)],
+    device: str = DEFAULT_DEVICE,
+    dtype: str = "float16",
+    use_static_cache: bool = False,
+    max_seq_len: int = 256,
+    export_inner_model: bool = False,
+    verbose: bool = False,
+) -> None:
+    backends = parse_sdp_backends(sdp_backends)
+    print(f"Using SDP backends: {backends}")
+
+    if not prompts:
+        print("Using default ", end="")
+        prompts = ["Tell me about pikachu.", "What's the difference between python2 and python3?"]
+    _prompts = "\n".join(f"* {p}" for p in prompts)
+    print(f"prompts:\n{_prompts}")
+
+    torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
+    model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch_dtype).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer.pad_token_id = model.config.pad_token_id or 0
+    tokenizer.padding_side = "left"
+    cache_handler = (
+        StaticCacheHandler(
+            config=model.config,
+            batch_size=len(prompts),
+            max_seq_len=max_seq_len,
+        )
+        if use_static_cache
+        else DynamicCacheHandler(config=model.config)
+    )
+
+    model_to_export = model.model if export_inner_model else model
+
+    def unpack_past_key_values(arguments: dict[str, Any]) -> dict[str, Any]:
+        if not (
+            isinstance((past_key_values := arguments.pop("past_key_values", None)), Cache)
+            and isinstance((key_cache := getattr(past_key_values, "key_cache", None)), list)
+            and isinstance((value_cache := getattr(past_key_values, "value_cache", None)), list)
+        ):
+            return arguments
+        arguments.update({f"past_key_{i}": tensor for i, tensor in enumerate(key_cache)})
+        arguments.update({f"past_value_{i}": tensor for i, tensor in enumerate(value_cache)})
+        return arguments
+
+    def pack_past_key_values(arguments: dict[str, Any]) -> dict[str, Any]:
+        cache = cache_handler.init_cache(batch_size=arguments["input_ids"].shape[0])
+        i = 0
+        while True:
+            if not (
+                isinstance((key := arguments.pop(f"past_key_{i}", None)), torch.Tensor)
+                and isinstance((value := arguments.pop(f"past_value_{i}", None)), torch.Tensor)
+            ):
+                break
+            cache.update(key, value, i)
+            i += 1
+        if i > 0:
+            arguments["past_key_values"] = cache
+        return arguments
+
+    argument_collector = ForwardArgumentCollector(
+        model_to_export,
+        preprocess_inputs=unpack_past_key_values,
+        verbose=verbose,
+    )
+    if not use_static_cache:
+        # collect at most two arguments forwarded to the model with batch_size=1
+        with argument_collector.collect(2):
+            _ = run_generation(
+                prompts[:1],
+                model,
+                tokenizer,
+                initial_cache=cache_handler.init_cache(batch_size=1),
+                device=device,
+            )
+
+    # collect at most two arguments forwarded to the model with batch_size=len(prompts)
+    with argument_collector.collect(2):
+        responses = run_generation(
+            prompts,
+            model,
+            tokenizer,
+            initial_cache=cache_handler.init_cache(batch_size=len(prompts), device=device),
+            device=device,
+        )
+
+    print("==================Model Outputs Before Exporting==================")
+    for response in responses:
+        print(response)
+        print("==================================================================")
+
+    arguments_for_export = argument_collector.get_arguments_for_export(
+        dynamic_dims={
+            "input_ids": {
+                0: DynamicDim(name="batch", min=1, opt=1, max=32),
+                1: DynamicDim(name="q_size", min=0, opt=1, max=16384),
+            },
+            "attention_mask": {1: DynamicDim(name="qkv_size", min=0, opt=257, max=32768)},
+            "past_key_0": {2: DynamicDim(name="kv_size", min=0, opt=256, max=16384)},
+        },
+        device=device,
+    )
+
+    if verbose:
+        arguments_for_export.print_readable()
+
+    convert(
+        model_to_export,
+        arguments_for_export,
+        input_processors={"pack_past_key_values": pack_past_key_values},
+        output_processors={"unpack_past_key_values": unpack_past_key_values},
+        optimal_dims={"batch": 1, "q_size": 1, "kv_size": 256},
+        sdp_backends=backends,
+    )
 
 
 def parse_sdp_backends(sdp_backends: list[str]) -> list[SDPBackend] | SDPBackend:
