@@ -7,11 +7,10 @@ from typing import Any
 
 import torch
 from pydantic import BaseModel
-from torch.export import Dim
 from torch.utils.hooks import RemovableHandle
 
 from .arguments_for_export import ArgumentsForExport
-from .dynamic_dim import DynamicDim
+from .dynamic_dim import DynamicDimension, DynamicDimensionType
 from .pretty_print import brief_tensor_repr
 from .types import BuiltInConstant, DimType
 
@@ -74,13 +73,14 @@ class ArgumentHistory(BaseModel):
 
     def resolve_dynamic_dims(
         self,
-        dynamic_dims: dict[str, dict[int, DynamicDim]] | None = None,
-    ) -> tuple[dict[str, dict[int, DimType]], dict[str, torch.Tensor]]:
+        predefined_dims: dict[str, dict[int, DynamicDimensionType]] | None = None,
+        default_min: int = 0,
+        default_max: int = 1 << 15 - 1,
+        default_opt: int | None = None,
+        default_example_for_export: int | None = None,
+    ) -> tuple[dict[str, dict[int, DimType]], dict[str, dict[int, int]], dict[str, torch.Tensor]]:
         def _autogen_name(param_name: str, axis: int) -> str:
             return f"{param_name}_dim_{axis}"
-
-        def _create_dim(name: str, min_: int = 0, max_: int = 1 << 15 - 1) -> DimType:
-            return Dim(name, min=min_, max=max_)
 
         _constraints: dict[str, dict[int, str]] = {}
         dim_size_history: dict[str, torch.LongTensor] = {}
@@ -92,62 +92,56 @@ class ArgumentHistory(BaseModel):
                 dim_size_history[dim_name] = size_values
                 _constraints[name] = argument_constraint
 
-        resolved_dims: dict[str, tuple[DimType, int]] = {}
-        if dynamic_dims:
-            for param_name, axis_and_dims in dynamic_dims.items():
+        resolved_dims: dict[str, DynamicDimensionType] = {}
+        if predefined_dims:
+            for param_name, axis_and_dims in predefined_dims.items():
                 for axis, dynamic_dim in axis_and_dims.items():
                     dim_name = _autogen_name(param_name, axis)
-                    resolved_dims[dim_name] = (dynamic_dim.export_dim, dynamic_dim.opt)
+                    resolved_dims[dim_name] = dynamic_dim
 
         for dim_name, size_history in dim_size_history.items():
             if dim_name in resolved_dims:
                 continue
-            for existing_dim_name, (existing_dim, existing_opt_size) in resolved_dims.items():
+            for existing_dim_name, existing_dim in resolved_dims.items():
                 if existing_dim_name not in dim_size_history:
-                    print(f"[WARNING] {existing_dim.__name__} was marked as dynamic but it is static")
+                    print(f"[WARNING] The predefined dynamic dimension {existing_dim.name} is actually static")
                     continue
                 existing_size_history = dim_size_history[existing_dim_name]
                 if (existing_size_history == size_history).all():
-                    resolved_dims[dim_name] = (existing_dim, existing_opt_size)
+                    resolved_dims[dim_name] = existing_dim
                     break
                 if (diff := size_history - existing_size_history).min() == diff.max() and isinstance(
                     (diff_value := diff.min().item()), int
                 ):
-                    if diff_value > 0:
-                        resolved_dims[dim_name] = (existing_dim + diff_value, existing_opt_size + diff_value)
-                    else:
-                        resolved_dims[dim_name] = (dim := _create_dim(dim_name), existing_opt_size + diff_value)
-                        resolved_dims[existing_dim_name] = (dim - diff_value, existing_opt_size)
+                    resolved_dims[dim_name] = existing_dim + diff_value
                     break
             else:
-                # for (name0, (dim0, opt0)), (name1, (dim1, opt1)) in combinations(resolved_dims.items(), 2):
-                #     if name0 not in dim_size_history:
-                #         print(f"[WARNING] {dim0.__name__} was marked as dynamic but it is static")
-                #         continue
-                #     if name1 not in dim_size_history:
-                #         print(f"[WARNING] {dim1.__name__} was marked as dynamic but it is static")
-                #         continue
-                #     size_history0 = dim_size_history[name0]
-                #     size_history1 = dim_size_history[name1]
-                #     if (size_history == size_history0 + size_history1)
-                opt_size = int(size_history.float().mean().item())
-                print(f"[WARNING] Couldn't infer optimal size for {dim_name}. Will use the average size {opt_size}")
-                resolved_dims[dim_name] = (_create_dim(dim_name), opt_size)
+                readable_dim_name = dim_name.replace("_dim_", "'s dimension ")
+                print(f"[WARNING] No predefined dynamic dimension given for {readable_dim_name}.")
+                resolved_dims[dim_name] = DynamicDimension(
+                    name=dim_name,
+                    min=default_min,
+                    opt=default_opt or int(size_history.float().mean().item()),
+                    max=default_max,
+                    example_for_export=default_example_for_export,
+                )
         constraints = {
-            param: {i: resolved_dims[dim_name][0] for i, dim_name in constraint.items()}
+            param: {i: resolved_dims[dim_name].export_dim for i, dim_name in constraint.items()}
             for param, constraint in _constraints.items()
         }
-        opt_sizes = {
-            param: {i: resolved_dims[dim_name][1] for i, dim_name in constraint.items()}
+        example_sizes = {
+            param: {i: resolved_dims[dim_name].example for i, dim_name in constraint.items()}
+            for param, constraint in _constraints.items()
+        }
+        optimal_sizes = {
+            param: {i: resolved_dims[dim_name].opt for i, dim_name in constraint.items()}
             for param, constraint in _constraints.items()
         }
         input_tensors: dict[str, torch.Tensor] = {}
         for param, tensors in self.dynamic.items():
-            opt_sizes_for_param = opt_sizes.get(param, {})
+            example_size = example_sizes.get(param, {})
             last_tensor = tensors[-1]
-            opt_shape = tuple(
-                opt_sizes_for_param.get(axis, last_tensor.shape[axis]) for axis in range(last_tensor.ndim)
-            )
+            opt_shape = tuple(example_size.get(axis, last_tensor.shape[axis]) for axis in range(last_tensor.ndim))
             opt_tensor = torch.zeros(*opt_shape, dtype=last_tensor.dtype, device=last_tensor.device)
             slices = shape_as_slices(tuple(min(x, y) for x, y in zip(opt_shape, last_tensor.shape)))
             opt_tensor[slices] = last_tensor[slices]
@@ -155,7 +149,7 @@ class ArgumentHistory(BaseModel):
         for param, tensors in self.static.items():
             input_tensors[param] = tensors[-1]
 
-        return constraints, input_tensors
+        return constraints, optimal_sizes, input_tensors
 
 
 class ForwardArgumentCollector:
@@ -175,6 +169,7 @@ class ForwardArgumentCollector:
         self._count = 0
         self._handle: RemovableHandle | None = None
         self._count_range: range | None = None
+        self._num_existing_arguments: int = 0
 
     def get(self) -> dict[str, list[Any]]:
         try:
@@ -229,7 +224,7 @@ class ForwardArgumentCollector:
             for idx, iteration in enumerate(self._count_range or range(self._count)):
                 print(f"=======================Iteration {iteration}======================")
                 for name, kwargs_history in self._argument_history.items():
-                    print(f"{name}: {kwargs_history[idx]}")
+                    print(f"{name}: {kwargs_history[self._num_existing_arguments + idx]}")
 
     def _insert_hook(self) -> None:
         if self._handle:
@@ -246,17 +241,13 @@ class ForwardArgumentCollector:
         if self.verbose:
             self.print_readable()
         self._count_range = None
+        self._num_existing_arguments = len(self)
 
     def collect(self, max_num_arguments: int, skip_first_n: int = 0) -> "ArgumentCollectorSession":
         self._count_range = range(self._count + skip_first_n, self._count + skip_first_n + max_num_arguments)
         return ArgumentCollectorSession(self)
 
-    def get_argument_histories(
-        self,
-        start: int | None = None,
-        stop: int | None = None,
-        # device: torch.device | str | None = None,
-    ) -> ArgumentHistory:
+    def get_argument_history(self, start: int | None = None, stop: int | None = None) -> ArgumentHistory:
         dynamic_argument_histories = TensorArgumentHistories()
         static_argument_histories = TensorArgumentHistories()
         constant_arguments: dict[str, BuiltInConstant] = {}
@@ -293,16 +284,27 @@ class ForwardArgumentCollector:
         self,
         start: int | None = None,
         stop: int | None = None,
-        dynamic_dims: dict[str, dict[int, DynamicDim]] | None = None,
-        device: torch.device | str | None = None,
+        *,
+        dynamic_dims: dict[str, dict[int, DynamicDimensionType]] | None = None,
+        default_min: int = 0,
+        default_max: int = 1 << 15 - 1,
+        default_opt: int | None = None,
+        default_example_for_export: int | None = None,
     ) -> ArgumentsForExport:
-        argument_history = self.get_argument_histories(start, stop)
-        constraints, tensor_inputs = argument_history.resolve_dynamic_dims(dynamic_dims=dynamic_dims)
+        argument_history = self.get_argument_history(start, stop)
+        constraints, optimial_sizes, tensor_inputs = argument_history.resolve_dynamic_dims(
+            predefined_dims=dynamic_dims,
+            default_min=default_min,
+            default_max=default_max,
+            default_opt=default_opt,
+            default_example_for_export=default_example_for_export,
+        )
 
         return ArgumentsForExport(
             tensor_inputs={k: v.contiguous() for k, v in tensor_inputs.items()},
             constant_inputs=argument_history.constants,
             constraints=constraints,
+            optimal_sizes=optimial_sizes,
         )
 
 

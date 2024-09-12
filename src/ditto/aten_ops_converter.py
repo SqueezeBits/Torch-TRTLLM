@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-from typing import TypeAlias
 
 import tensorrt as trt
 import torch
@@ -19,10 +18,6 @@ from torch_tensorrt.dynamo.conversion.converter_utils import (
     cast_trt_tensor,
 )
 
-TRTNetwork: TypeAlias = trt.INetworkDefinition
-TRTTensor: TypeAlias = trt.ITensor
-
-
 dynamo_tensorrt_converter(torch.ops.aten.sub.default, supports_dynamic_shapes=False)(aten_ops_sub)
 dynamo_tensorrt_converter(torch.ops.aten._safe_softmax.default, supports_dynamic_shapes=False)(aten_ops_softmax)
 
@@ -40,8 +35,8 @@ def aten_ops_all(
     args: tuple[Argument, ...],
     kwargs: dict[str, Argument],
     name: str,
-) -> TRTTensor | Sequence[TRTTensor]:
-    return all(
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    return reduce_all(
         ctx,
         target,
         SourceIR.ATEN,
@@ -52,16 +47,16 @@ def aten_ops_all(
     )
 
 
-def all(
+def reduce_all(
     ctx: ConversionContext,
     target: Target,
     source_ir: SourceIR | None,
     name: str,
-    input_val: TRTTensor,
+    input_val: trt.ITensor,
     dim: int | Sequence[int] | None = None,
     keepdim: bool = False,
-) -> TRTTensor:
-    if (isinstance(input_val, TRTTensor)) and (input_val.dtype == trt.bool):
+) -> trt.ITensor:
+    if (isinstance(input_val, trt.ITensor)) and (input_val.dtype == trt.bool):
         input_val = cast_trt_tensor(ctx, input_val, trt.int32, f"{name}_cast")
 
     abs_out = impl.unary.abs(

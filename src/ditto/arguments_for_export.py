@@ -11,6 +11,7 @@ class ArgumentsForExport(BaseModel):
 
     tensor_inputs: dict[str, torch.Tensor]
     constraints: dict[str, dict[int, DimType]] = Field(default_factory=dict)
+    optimal_sizes: dict[str, dict[int, int]] = Field(default_factory=dict)
     constant_inputs: dict[str, BuiltInConstant] = Field(default_factory=dict)
 
     def print_readable(self) -> None:
@@ -32,16 +33,17 @@ class ArgumentsForExport(BaseModel):
                 print(f"{name}: {dim_reprs}")
             print("========================================================")
 
-    def get_torch_trt_inputs(self, optimal_sizes: dict[str, int] | None = None) -> dict[str, Input]:
+    @property
+    def torch_trt_inputs(self) -> dict[str, Input]:
         trt_inputs: dict[str, Input] = {}
-        opt_sizes = optimal_sizes or {}
         for name, tensor in self.tensor_inputs.items():
             if name not in self.constraints:
                 trt_input = Input.from_tensor(tensor)
                 trt_input.name = name
                 trt_inputs[name] = trt_input
                 continue
-            constraint = self.constraints[name]
+            constraint = self.constraints.get(name, {})
+            opt_sizes = self.optimal_sizes.get(name, {})
             min_shape = tuple(
                 (getattr(constraint[dim], "min", size) if dim in constraint else size)
                 for dim, size in enumerate(tensor.shape)
@@ -50,15 +52,8 @@ class ArgumentsForExport(BaseModel):
                 (getattr(constraint[dim], "max", size) if dim in constraint else size)
                 for dim, size in enumerate(tensor.shape)
             )
-            opt_shape = tuple(
-                (
-                    opt_sizes[dim_name]
-                    if (dim in constraint and (dim_name := getattr(constraint[dim], "__name__", "")) in opt_sizes)
-                    else size
-                )
-                for dim, size in enumerate(tensor.shape)
-            )
-            format = (
+            opt_shape = tuple(opt_sizes.get(dim, size) for dim, size in enumerate(tensor.shape))
+            format_ = (
                 torch.contiguous_format
                 if tensor.is_contiguous(memory_format=torch.contiguous_format)
                 else torch.channels_last
@@ -68,7 +63,7 @@ class ArgumentsForExport(BaseModel):
                 opt_shape=opt_shape,
                 max_shape=max_shape,
                 dtype=tensor.dtype,
-                format=format,
+                format=format_,
                 torch_tensor=tensor,
                 name=name,
             )

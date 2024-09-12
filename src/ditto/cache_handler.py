@@ -117,7 +117,11 @@ class ConfigBasedCacheHandler(CacheHandler):
 
     @property
     def num_key_value_heads(self) -> int:
-        return self.config.num_key_value_heads
+        possible_keys = ("num_key_value_heads", "n_head", "num_heads")
+        for key in possible_keys:
+            if hasattr(self.config, key):
+                return getattr(self.config, key)
+        raise AttributeError(f"The config doesn't have attributes named {' or '.join(possible_keys)}: {self.config}")
 
 
 class DynamicCacheHandler(ConfigBasedCacheHandler):

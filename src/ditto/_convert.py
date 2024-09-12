@@ -1,70 +1,45 @@
 import operator
-from collections.abc import Callable
-from typing import Any
 
 import tensorrt as trt
 import torch
-from torch.export._trace import _export as torch_export
+from torch.export import ExportedProgram
 from torch.fx import GraphModule, Node
 from torch.fx.passes.shape_prop import TensorMetadata
-from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch_tensorrt._enums import dtype
+from torch_tensorrt._Input import Input
 
 from ._compile import compile
-from .arguments_for_export import ArgumentsForExport
-from .wrappers import ExportWrapperV2
 
 
 def convert(
-    model: torch.nn.Module,
-    arguments: ArgumentsForExport,
+    exported_program: ExportedProgram,
+    input_spec: dict[str, Input],
     *,
-    input_processors: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
-    output_processors: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
-    optimal_dims: dict[str, int] | None = None,
-    strict: bool = True,
-    pre_dispatch: bool = False,
-    sdp_backends: SDPBackend | list[SDPBackend] = SDPBackend.MATH,
     enable_experimental_decompositions: bool = False,
 ) -> trt.ICudaEngine:
-    with sdpa_kernel(sdp_backends):
-        exported_program = torch_export(
-            ExportWrapperV2(
-                model,
-                input_processors=input_processors,
-                output_processors=output_processors,
-                constant_inputs=arguments.constant_inputs,
-            ),
-            (),
-            arguments.tensor_inputs,
-            strict=strict,
-            pre_dispatch=pre_dispatch,
-        )
+    interpreter_result = compile(
+        exported_program,
+        arg_inputs=(),
+        kwarg_inputs=input_spec,
+        assume_dynamic_shape_support=True,
+        enabled_precisions={dtype.f32, dtype.f16},
+        enable_experimental_decompositions=enable_experimental_decompositions,
+        extra_pre_inline_passes=[],
+        extra_post_inline_passes=[
+            eliminate_empty_tensors_from_cat_or_stack,
+            eliminate_nop_cat_or_stack,
+            remove_second_outputs_of_scaled_dot_product_attention,
+            remove_assert_scalar,
+            replace_operator_sub_by_aten_sub,
+        ],
+    )
+    with trt.Runtime(trt.Logger(trt.Logger.WARNING)) as runtime:
+        engine: trt.ICudaEngine = runtime.deserialize_cuda_engine(interpreter_result.serialized_engine)
 
-        interpreter_result = compile(
-            exported_program,
-            arg_inputs=(),
-            kwarg_inputs=arguments.get_torch_trt_inputs(optimal_sizes=optimal_dims),
-            assume_dynamic_shape_support=True,
-            enabled_precisions={dtype.f32, dtype.f16},
-            enable_experimental_decompositions=enable_experimental_decompositions,
-            extra_pre_inline_passes=[
-                eliminate_empty_tensors_from_cat_or_stack,
-                eliminate_nop_cat_or_stack,
-            ],
-            extra_post_inline_passes=[
-                remove_second_outputs_of_scaled_dot_product_attention,
-                remove_assert_scalar,
-                replace_operator_sub_by_aten_sub,
-            ],
-        )
-        with trt.Runtime(trt.Logger(trt.Logger.WARNING)) as runtime:
-            engine: trt.ICudaEngine = runtime.deserialize_cuda_engine(interpreter_result.serialized_engine)
-
-        for i in range(engine.num_io_tensors):
-            name = engine.get_tensor_name(i)
-            print(f"({i}) {name}: {engine.get_tensor_shape(name)}")
-        return engine
+    for i in range(engine.num_io_tensors):
+        name = engine.get_tensor_name(i)
+        print(f"({i}) {name}: {engine.get_tensor_shape(name)}")
+    return engine
 
 
 def remove_second_outputs_of_scaled_dot_product_attention(gm: GraphModule) -> GraphModule:
