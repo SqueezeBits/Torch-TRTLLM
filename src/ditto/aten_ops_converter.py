@@ -19,7 +19,8 @@ from torch_tensorrt.dynamo.conversion.converter_utils import (
 )
 
 dynamo_tensorrt_converter(torch.ops.aten.sub.default, supports_dynamic_shapes=False)(aten_ops_sub)
-dynamo_tensorrt_converter(torch.ops.aten._safe_softmax.default, supports_dynamic_shapes=False)(aten_ops_softmax)
+if hasattr(torch.ops.aten, "_safe_softmax"):
+    dynamo_tensorrt_converter(torch.ops.aten._safe_softmax.default, supports_dynamic_shapes=False)(aten_ops_softmax)
 
 # dynamo_tensorrt_converter(torch._C._nn.scaled_dot_product_attention, supports_dynamic_shapes=True)(
 #     tensorrt_scaled_dot_product_attention

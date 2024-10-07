@@ -1,5 +1,6 @@
-from ._convert import convert
+from ._compile import build_engine, get_inlined_graph_module
 from ._export import export
+from .arguments_for_export import ArgumentsForExport
 from .aten_ops_converter import *
 from .cache_handler import CacheHandler, DynamicCacheHandler, StaticCacheHandler
 from .dynamic_dim import DynamicDimension, DynamicDimensionType

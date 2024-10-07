@@ -15,10 +15,10 @@ def export(
     model: torch.nn.Module,
     arguments: ArgumentsForExport,
     *,
-    input_processors: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
-    output_processors: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
+    process_inputs: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    process_outputs: Callable[[Any], Any] | None = None,
     force_static_export: bool = False,
-    strict: bool = True,
+    strict: bool = False,
     pre_dispatch: bool = False,
     sdp_backends: SDPBackend | list[SDPBackend] = SDPBackend.MATH,
 ) -> ExportedProgram:
@@ -26,8 +26,8 @@ def export(
         return torch_export(
             PreExportWrapper(
                 model,
-                input_processors=input_processors,
-                output_processors=output_processors,
+                process_inputs=process_inputs,
+                process_outputs=process_outputs,
                 constant_inputs=arguments.constant_inputs,
             ),
             args=(),

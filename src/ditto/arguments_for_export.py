@@ -1,18 +1,28 @@
+from typing import TypedDict
+
 import torch
 from pydantic import BaseModel, Field
 from torch_tensorrt._Input import Input
+from typing_extensions import Self
 
+from .dynamic_dim import DynamicDimensionType
 from .pretty_print import brief_tensor_repr
 from .types import BuiltInConstant, DimType
+
+
+class InputHint(TypedDict):
+    shape: tuple[int | DynamicDimensionType, ...]
+    dtype: torch.dtype
+    device: torch.device | str
 
 
 class ArgumentsForExport(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     tensor_inputs: dict[str, torch.Tensor]
-    constraints: dict[str, dict[int, DimType]] = Field(default_factory=dict)
-    optimal_sizes: dict[str, dict[int, int]] = Field(default_factory=dict)
     constant_inputs: dict[str, BuiltInConstant] = Field(default_factory=dict)
+    constraints: dict[str, dict[int, DimType] | None] = Field(default_factory=dict)
+    optimal_sizes: dict[str, dict[int, int]] = Field(default_factory=dict)
 
     def print_readable(self) -> None:
         def dim_repr(dim: DimType) -> str:
@@ -29,9 +39,48 @@ class ArgumentsForExport(BaseModel):
                 print(f"{name}: {constant}")
             print("======================Constraints=======================")
             for name, constraint in self.constraints.items():
+                if constraint is None:
+                    print(f"{name}: None")
+                    continue
                 dim_reprs = {axis: dim_repr(dim) for axis, dim in constraint.items()}
                 print(f"{name}: {dim_reprs}")
             print("========================================================")
+
+    @classmethod
+    def from_hint(cls, **input_hints: InputHint | BuiltInConstant) -> Self:
+        tensor_inputs: dict[str, torch.Tensor] = {}
+        constant_inputs: dict[str, BuiltInConstant] = {}
+        constraints: dict[str, dict[int, DimType] | None] = {}
+        optimal_sizes: dict[str, dict[int, int]] = {}
+
+        for name, hint in input_hints.items():
+            if isinstance(hint, BuiltInConstant):
+                constant_inputs[name] = hint
+                continue
+            shape = tuple(s if isinstance(s, int) else s.example for s in hint["shape"])
+            tensor_inputs[name] = torch.zeros(*shape, dtype=hint["dtype"], device=hint["device"])
+
+            for dim, s in enumerate(hint["shape"]):
+                if not isinstance(s, DynamicDimensionType):
+                    continue
+                if name not in constraints:
+                    constraints[name] = {}
+                assert (constraint := constraints[name]) is not None
+                constraint[dim] = s.export_dim
+
+            if not constraints[name]:
+                constraints[name] = None
+
+            optimal_sizes[name] = {
+                dim: s.opt for dim, s in enumerate(hint["shape"]) if isinstance(s, DynamicDimensionType)
+            }
+
+        return cls(
+            tensor_inputs=tensor_inputs,
+            constant_inputs=constant_inputs,
+            constraints=constraints,
+            optimal_sizes=optimal_sizes,
+        )
 
     @property
     def torch_trt_inputs(self) -> dict[str, Input]:
@@ -45,11 +94,11 @@ class ArgumentsForExport(BaseModel):
             constraint = self.constraints.get(name, {})
             opt_sizes = self.optimal_sizes.get(name, {})
             min_shape = tuple(
-                (getattr(constraint[dim], "min", size) if dim in constraint else size)
+                (getattr(constraint[dim], "min", size) if constraint and dim in constraint else size)
                 for dim, size in enumerate(tensor.shape)
             )
             max_shape = tuple(
-                (getattr(constraint[dim], "max", size) if dim in constraint else size)
+                (getattr(constraint[dim], "max", size) if constraint and dim in constraint else size)
                 for dim, size in enumerate(tensor.shape)
             )
             opt_shape = tuple(opt_sizes.get(dim, size) for dim, size in enumerate(tensor.shape))

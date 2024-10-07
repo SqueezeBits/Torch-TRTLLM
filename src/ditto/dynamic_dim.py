@@ -131,7 +131,7 @@ class DerivedDynamicDimension(DynamicDimensionType):
             rhs = self.rhs.export_dim if isinstance(self.rhs, DynamicDimensionType) else self.rhs
             return self.op(lhs, rhs)  # type: ignore[arg-type, return-value]
         except Exception as e:
-            print(f"[WARNING] Failed to create `torch.export.DerivedDim` for {self.name} (The exception was: {e})")
+            print(f"[WARNING] the derived dynamic dimension {self.name} will be detached (reason: {e})")
         return self.detach().export_dim
 
     @property

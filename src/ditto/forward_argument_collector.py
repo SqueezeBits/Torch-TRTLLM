@@ -78,7 +78,7 @@ class ArgumentHistory(BaseModel):
         default_max: int = 1 << 15 - 1,
         default_opt: int | None = None,
         default_example_for_export: int | None = None,
-    ) -> tuple[dict[str, dict[int, DimType]], dict[str, dict[int, int]], dict[str, torch.Tensor]]:
+    ) -> tuple[dict[str, dict[int, DimType] | None], dict[str, dict[int, int]], dict[str, torch.Tensor]]:
         def _autogen_name(param_name: str, axis: int) -> str:
             return f"{param_name}_dim_{axis}"
 
@@ -125,7 +125,7 @@ class ArgumentHistory(BaseModel):
                     max=default_max,
                     example_for_export=default_example_for_export,
                 )
-        constraints = {
+        constraints: dict[str, dict[int, DimType] | None] = {
             param: {i: resolved_dims[dim_name].export_dim for i, dim_name in constraint.items()}
             for param, constraint in _constraints.items()
         }
@@ -148,6 +148,7 @@ class ArgumentHistory(BaseModel):
             input_tensors[param] = opt_tensor
         for param, tensors in self.static.items():
             input_tensors[param] = tensors[-1]
+            constraints[param] = None
 
         return constraints, optimal_sizes, input_tensors
 
@@ -199,7 +200,7 @@ class ForwardArgumentCollector:
                 f"[WARNING] {len(args)} positional arguments passed to the model will be converted as "
                 f"keyword arguments with the following keys: {', '.join(keys)}"
             )
-            kwargs.update(zip(keys, copy.deepcopy(args)))
+            kwargs = {**dict(zip(keys, copy.deepcopy(args))), **kwargs}
 
         if self.preprocess_inputs:
             kwargs = self.preprocess_inputs(kwargs)
@@ -247,12 +248,14 @@ class ForwardArgumentCollector:
         self._count_range = range(self._count + skip_first_n, self._count + skip_first_n + max_num_arguments)
         return ArgumentCollectorSession(self)
 
-    def get_argument_history(self, start: int | None = None, stop: int | None = None) -> ArgumentHistory:
+    def get_argument_history(
+        self, start: int | None = None, stop: int | None = None, step: int | None = None
+    ) -> ArgumentHistory:
         dynamic_argument_histories = TensorArgumentHistories()
         static_argument_histories = TensorArgumentHistories()
         constant_arguments: dict[str, BuiltInConstant] = {}
         for name, full_argument_history in self._argument_history.items():
-            argument_history = full_argument_history[slice(start, stop)]
+            argument_history = full_argument_history[slice(start, stop, step)]
             tensors = [x for x in argument_history if isinstance(x, torch.Tensor)]
             constants = [x for x in argument_history if isinstance(x, BuiltInConstant)]
             if len(tensors) == len(argument_history):
@@ -284,6 +287,7 @@ class ForwardArgumentCollector:
         self,
         start: int | None = None,
         stop: int | None = None,
+        step: int | None = None,
         *,
         dynamic_dims: dict[str, dict[int, DynamicDimensionType]] | None = None,
         default_min: int = 0,
@@ -291,7 +295,7 @@ class ForwardArgumentCollector:
         default_opt: int | None = None,
         default_example_for_export: int | None = None,
     ) -> ArgumentsForExport:
-        argument_history = self.get_argument_history(start, stop)
+        argument_history = self.get_argument_history(start, stop, step)
         constraints, optimial_sizes, tensor_inputs = argument_history.resolve_dynamic_dims(
             predefined_dims=dynamic_dims,
             default_min=default_min,

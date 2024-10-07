@@ -12,31 +12,30 @@ class ExportWrapper(torch.nn.Module, Generic[InnerModuleType]):
         self,
         model: InnerModuleType,
         *,
-        input_processors: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
-        output_processors: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] | None = None,
+        process_inputs: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        process_outputs: Callable[[Any], Any] | None = None,
         constant_inputs: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.model: InnerModuleType = model
-        self.input_processors = input_processors or {}
-        self.output_processors = output_processors or {}
+        self.process_inputs = process_inputs
+        self.process_outputs = process_outputs
         self.constant_inputs = constant_inputs or {}
 
     def preprocess(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        for _name, input_processor in self.input_processors.items():
-            kwargs = input_processor(kwargs)
+        if self.process_inputs:
+            return self.process_inputs(kwargs)
         return kwargs
 
-    def postprocess(self, outputs: dict[str, Any]) -> dict[str, Any]:
-        for _name, output_processor in self.output_processors.items():
-            outputs = output_processor(outputs)
+    def postprocess(self, outputs: Any) -> Any:
+        if self.process_outputs:
+            return self.process_outputs(outputs)
         return outputs
 
     def forward(self, **kwargs: Any) -> dict[str, Any]:
         kwargs = self.preprocess(kwargs)
         outputs = self.model(**kwargs, **self.constant_inputs)
-        assert isinstance(outputs, dict), "The tuple output is not supported. You may need to set `return_dict=True`"
-        return self.postprocess({**outputs})
+        return self.postprocess(outputs)
 
 
 class PreExportWrapper(ExportWrapper[torch.nn.Module]):

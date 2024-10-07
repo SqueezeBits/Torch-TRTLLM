@@ -1,9 +1,8 @@
-import pprint
-from collections.abc import Callable
 from typing import Annotated, Any
 
 import torch
-from torch.fx import GraphModule
+import torch_tensorrt as torch_trt
+from torch_tensorrt.dynamo.conversion import CompilationSettings
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -18,15 +17,15 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from typer import Option, Typer
 
 from . import (
+    ArgumentsForExport,
     DynamicCacheHandler,
     DynamicDimension,
-    ForwardArgumentCollector,
-    PostExportWrapper,
     SDPBackend,
     StaticCacheHandler,
     brief_tensor_repr,
-    convert,
+    build_engine,
     export,
+    get_inlined_graph_module,
 )
 from .constants import DEFAULT_DEVICE
 
@@ -36,16 +35,24 @@ app = Typer()
 @app.command()
 def generate(
     model_id: str,
-    prompt: str = "Who are you?",
+    prompts: Annotated[list[str], Option(default_factory=list)],
     device: str = DEFAULT_DEVICE,
     use_static_cache: bool = False,
     debug: bool = False,
     max_batch_size: int = 1,
     max_seq_len: int = 256,
 ) -> None:
+    if not prompts:
+        print("Using default ", end="")
+        prompts = ["Tell me about pikachu.", "What's the difference between python2 and python3?"]
+    _prompts = "\n".join(f"* {p}" for p in prompts)
+    print(f"prompts:\n{_prompts}")
+
     model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16)
     model.to(device)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer.pad_token_id = model.config.pad_token_id or 0
+    tokenizer.padding_side = "left"
 
     if debug:
         cache_handler = (
@@ -61,19 +68,14 @@ def generate(
         def debug_hook(self: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any], results: Any) -> None:
             _args, _kwargs = cache_handler.map_to_tensor(args, kwargs)
             with brief_tensor_repr():
-                pprint.pp(
-                    {
-                        "args": _args,
-                        "kwargs": _kwargs,
-                        "results": results,
-                    },
-                    indent=2,
-                )
+                print(f"args: {_args}")
+                print(f"kwargs: {_kwargs}")
+                print(f"results: {results}")
 
         model.register_forward_hook(debug_hook, with_kwargs=True)
 
     if use_static_cache:
-        prompt_cache = StaticCache(
+        cache = StaticCache(
             model.config,
             max_batch_size=max_batch_size,
             max_cache_len=max_seq_len,
@@ -81,21 +83,13 @@ def generate(
             dtype=torch.float16,
         )
     else:
-        prompt_cache = DynamicCache()
-    inputs = tokenizer(prompt, return_tensors="pt").to(device=device)
-    outputs = model.generate(
-        **inputs,
-        past_key_values=prompt_cache,
-        do_sample=False,
-        max_new_tokens=max_seq_len - inputs["input_ids"].shape[-1],
-    )
-    response = tokenizer.batch_decode(outputs)[0]
-    pprint.pp(response)
-    pprint.pp(type(prompt_cache))
-    pprint.pp(len(prompt_cache.key_cache))
-    pprint.pp(prompt_cache.key_cache[0].shape)
-    pprint.pp(len(prompt_cache.value_cache))
-    pprint.pp(prompt_cache.value_cache[0].shape)
+        cache = DynamicCache()
+
+    responses = run_generation(prompts, model, tokenizer, initial_cache=cache, device=device)
+    print("============================Responses=============================")
+    for response in responses:
+        print(response)
+        print("==================================================================")
 
 
 @app.command()
@@ -103,166 +97,75 @@ def generate(
 def run(
     model_id: str,
     sdp_backends: Annotated[list[str], Option(default_factory=list)],
-    prompts: Annotated[list[str], Option(default_factory=list)],
     device: str = DEFAULT_DEVICE,
     dtype: str = "float16",
-    use_static_cache: bool = False,
-    max_seq_len: int = 256,
-    export_inner_model: bool = False,
     verbose: bool = False,
 ) -> None:
     backends = parse_sdp_backends(sdp_backends)
     print(f"Using SDP backends: {backends}")
 
-    if not prompts:
-        print("Using default ", end="")
-        prompts = ["Tell me about pikachu.", "What's the difference between python2 and python3?"]
-    _prompts = "\n".join(f"* {p}" for p in prompts)
-    print(f"prompts:\n{_prompts}")
-
     torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
+    print(f"device: {device} | dtype: {dtype}")
     model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch_dtype, trust_remote_code=True).to(device)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token_id = model.config.pad_token_id or 0
     tokenizer.padding_side = "left"
-    cache_handler = (
-        StaticCacheHandler(
-            config=model.config,
-            batch_size=len(prompts),
-            max_seq_len=max_seq_len,
-        )
-        if use_static_cache
-        else DynamicCacheHandler(config=model.config)
+
+    b = DynamicDimension(name="batch", min=1, opt=1, max=32)
+    arguments_for_export = ArgumentsForExport.from_hint(
+        input_ids={"shape": (b,), "dtype": torch.int64, "device": device},
+        use_cache=False,
     )
 
-    model_to_export = model.model if export_inner_model else model
+    def unsqueeze_input_ids(kwargs: dict[str, Any]) -> dict[str, Any]:
+        if not (isinstance(input_ids := kwargs.get("input_ids", None), torch.Tensor) and input_ids.ndim == 1):
+            return kwargs
+        kwargs["input_ids"] = input_ids.unsqueeze(-1)
+        return kwargs
 
-    def unpack_past_key_values(arguments: dict[str, Any]) -> dict[str, Any]:
-        if not (
-            isinstance((past_key_values := arguments.pop("past_key_values", None)), Cache)
-            and isinstance((key_cache := getattr(past_key_values, "key_cache", None)), list)
-            and isinstance((value_cache := getattr(past_key_values, "value_cache", None)), list)
-        ):
-            return arguments
-        arguments.update({f"past_key_{i}": tensor for i, tensor in enumerate(key_cache)})
-        arguments.update({f"past_value_{i}": tensor for i, tensor in enumerate(value_cache)})
-        return arguments
-
-    def pack_past_key_values(get_batch_size_from: str, dim: int) -> Callable[[dict[str, Any]], dict[str, Any]]:
-        def impl(arguments: dict[str, Any]) -> dict[str, Any]:
-            cache = cache_handler.init_cache(batch_size=arguments[get_batch_size_from].shape[dim])
-            i = 0
-            while True:
-                if not (
-                    isinstance((key := arguments.pop(f"past_key_{i}", None)), torch.Tensor)
-                    and isinstance((value := arguments.pop(f"past_value_{i}", None)), torch.Tensor)
-                ):
-                    break
-                cache.update(key, value, i)
-                i += 1
-            if i > 0:
-                arguments["past_key_values"] = cache
-            return arguments
-
-        return impl
-
-    argument_collector = ForwardArgumentCollector(
-        model_to_export,
-        preprocess_inputs=unpack_past_key_values,
-        verbose=verbose,
-    )
-    if not use_static_cache:
-        # collect at most two arguments forwarded to the model with batch_size=1
-        with argument_collector.collect(2):
-            _ = run_generation(
-                prompts[:1],
-                model,
-                tokenizer,
-                initial_cache=cache_handler.init_cache(batch_size=1),
-                device=device,
-            )
-
-    # collect at most two arguments forwarded to the model with batch_size=len(prompts)
-    with argument_collector.collect(2):
-        responses = run_generation(
-            prompts,
-            model,
-            tokenizer,
-            initial_cache=cache_handler.init_cache(batch_size=len(prompts), device=device),
-            device=device,
-        )
-
-    print("==================Model Outputs Before Exporting==================")
-    for response in responses:
-        print(response)
-        print("==================================================================")
-
-    batch = DynamicDimension(name="N", min=1, opt=1, max=32)
-    q_size = DynamicDimension(name="Sq", min=0, opt=1, max=16384)
-    kv_size = DynamicDimension(name="Skv", min=0, opt=256, max=16384)
-    qkv_size = q_size + kv_size
-
-    arguments_for_export = argument_collector.get_arguments_for_export(
-        dynamic_dims={
-            "input_ids": {0: batch, 1: q_size},
-            "attention_mask": {1: qkv_size},
-            "past_key_0": {2: kv_size},
-        },
-    )
+    def squeeze_output_logits(outputs: Any) -> Any:
+        if isinstance(outputs, tuple) and isinstance(logits := outputs[0], torch.Tensor) and logits.ndim == 3:
+            return (logits.squeeze(1), *outputs[1:])
+        if isinstance(outputs, CausalLMOutputWithPast) and outputs.logits.ndim == 3:
+            outputs.logits.squeeze_(1)
+            return outputs
+        return outputs
 
     if verbose:
         arguments_for_export.print_readable()
 
+    print("torch.exporting module ...")
     exported_program = export(
-        model_to_export,
+        model,
         arguments_for_export,
-        input_processors={"pack_past_key_values": pack_past_key_values("input_ids", 0)},
-        output_processors={"unpack_past_key_values": unpack_past_key_values},
+        process_inputs=unsqueeze_input_ids,
+        process_outputs=squeeze_output_logits,
         sdp_backends=backends,
     )
 
-    def cast_to_model_output(outputs: dict[str, Any]) -> CausalLMOutputWithPast:
-        return CausalLMOutputWithPast(**outputs)
-
-    graph_module = exported_program.module()
-    graph_module._forward_pre_hooks.clear()
-    assert isinstance(graph_module, GraphModule)
-    exported_model = PostExportWrapper(
-        graph_module,
-        input_processors={"unpack_past_key_values": unpack_past_key_values},
-        output_processors={
-            "pack_past_key_values": pack_past_key_values("logits", 0),
-            "cast_to_model_output": cast_to_model_output,
-        },
-    )
-
+    print("Lowering exported program into graph module ...")
+    graph_module = get_inlined_graph_module(exported_program)
     if verbose:
-        exported_model.model.print_readable()
-    else:
-        print("GraphModule exported!")
-
-    if export_inner_model:
-        model.model = exported_model
-    else:
-
-        def patched_top_model_forward(*args: Any, **kwargs: Any) -> Any:
-            return exported_model(*args, **kwargs)
-
-        model.forward = patched_top_model_forward
-
-    print("======Model Outputs After Exporting (with two extra prompts)======")
-    for response in run_generation(
-        prompts + ["Hey, are you conscious?", "Why is pi irrational?"],
-        model,
-        tokenizer,
-        initial_cache=cache_handler.init_cache(batch_size=len(prompts) + 2, device=device),
-        device=device,
-    ):
-        print(response)
-        print("==================================================================")
+        model_name = type(model).__name__
+        with open(f"{model_name}_graph_module.txt", "w") as f:
+            f.write(graph_module.print_readable(print_output=False))
+        with open(f"{model_name}_graph.txt", "w") as f:
+            f.write(f"{graph_module.graph}")
 
     print("Building TensorRT engine ...")
-    convert(exported_program, arguments_for_export.torch_trt_inputs)
+    settings = CompilationSettings(
+        assume_dynamic_shape_support=True,
+        enabled_precisions={torch_trt.dtype.f16, torch_trt.dtype.f32},
+        debug=verbose,
+        optimization_level=5,
+    )
+    build_engine(
+        graph_module,
+        (),
+        arguments_for_export.torch_trt_inputs,
+        settings=settings,
+        name=type(model).__name__,
+    )
 
 
 def parse_sdp_backends(sdp_backends: list[str]) -> list[SDPBackend] | SDPBackend:
