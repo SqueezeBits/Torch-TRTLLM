@@ -220,5 +220,5 @@ ops
 *.pt
 *.pth
 
-# Temporary files created by conda
-condaenv*requirements.txt
+# Text files
+*.txt
