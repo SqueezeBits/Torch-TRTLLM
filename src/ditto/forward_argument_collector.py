@@ -6,13 +6,12 @@ from types import TracebackType
 from typing import Any
 
 import torch
-from pydantic import BaseModel
 from torch.utils.hooks import RemovableHandle
 
 from .arguments_for_export import ArgumentsForExport
 from .dynamic_dim import DynamicDimension, DynamicDimensionType
 from .pretty_print import brief_tensor_repr
-from .types import BuiltInConstant, DimType
+from .types import BuiltInConstant, DimType, StrictlyTyped
 
 
 class ShapeHistory(tuple[int | torch.LongTensor, ...]):
@@ -63,9 +62,7 @@ class TensorArgumentHistories(dict[str, list[torch.Tensor]]):
         return {name: get_shape_history(self[name]) for name in self}
 
 
-class ArgumentHistory(BaseModel):
-    model_config = {"arbitrary_types_allowed": True}
-
+class ArgumentHistory(StrictlyTyped):
     dynamic: TensorArgumentHistories
     static: TensorArgumentHistories
     constants: dict[str, BuiltInConstant]

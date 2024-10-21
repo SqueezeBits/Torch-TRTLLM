@@ -1,14 +1,23 @@
 import logging
+import re
 from typing import Any
 
 import tensorrt as trt
+import torch
 from torch.fx import GraphModule
-from torch.fx.node import Node as Node
+from torch.fx.node import Node, Target
 from torch_tensorrt import dtype
 from torch_tensorrt._Input import Input
 from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from torch_tensorrt.dynamo._settings import CompilationSettings
-from torch_tensorrt.dynamo.conversion import TRTInterpreter
+from torch_tensorrt.dynamo.conversion import (
+    DYNAMO_CONVERTERS,
+    CallingConvention,
+    TRTInterpreter,
+    UnsupportedOperatorException,
+)
+
+from .fake_gpt_attention_plugin import FakeGPTAttentionPlugin
 
 
 class DynamicTRTInterpreter(TRTInterpreter):
@@ -50,7 +59,6 @@ class DynamicTRTInterpreter(TRTInterpreter):
 
     def _construct_trt_network_def(self) -> None:
         super()._construct_trt_network_def()
-        import re
 
         def reformat_unnamed_layer(input_string: str) -> str:
             """E.g. "(Unnamed Layer* 1095) [Slice]" -> "slice_1095"."""
@@ -113,6 +121,24 @@ class DynamicTRTInterpreter(TRTInterpreter):
         output = super().run_node(n)
         self.logger.info(f"{n.name} -> {_format_output(output)}")
         return output
+
+    def call_function(self, target: Target, args: Any, kwargs: Any) -> Any:
+        # TODO: Why is this stateful? We should be able to take in the inputs
+        converter_packet = (
+            DYNAMO_CONVERTERS.get_unvalidated(FakeGPTAttentionPlugin)
+            if isinstance(target, FakeGPTAttentionPlugin)
+            else DYNAMO_CONVERTERS.get(self._cur_node)
+        )
+        if converter_packet is None:
+            raise UnsupportedOperatorException(
+                f"Conversion of function {torch.typename(target)} not currently supported!"
+            )
+
+        converter, calling_convention = converter_packet
+
+        if calling_convention is CallingConvention.LEGACY:
+            return converter(self.ctx.net, target, args, kwargs, self._cur_node_name)
+        return converter(self.ctx, target, args, kwargs, self._cur_node_name)
 
 
 def _format_output(output: Any) -> str:

@@ -24,6 +24,7 @@ from . import (
     StaticCacheHandler,
     brief_tensor_repr,
     build_engine,
+    detailed_sym_node_str,
     export,
     get_inlined_graph_module,
 )
@@ -100,20 +101,25 @@ def run(
     device: str = DEFAULT_DEVICE,
     dtype: str = "float16",
     verbose: bool = False,
+    trust_remote_code: bool = False,
 ) -> None:
     backends = parse_sdp_backends(sdp_backends)
     print(f"Using SDP backends: {backends}")
 
     torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
     print(f"device: {device} | dtype: {dtype}")
-    model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch_dtype, trust_remote_code=True).to(device)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=torch_dtype,
+        trust_remote_code=trust_remote_code,
+    ).to(device)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token_id = model.config.pad_token_id or 0
     tokenizer.padding_side = "left"
 
-    b = DynamicDimension(name="batch", min=1, opt=1, max=32)
-    arguments_for_export = ArgumentsForExport.from_hint(
-        input_ids={"shape": (b,), "dtype": torch.int64, "device": device},
+    arguments_for_export = ArgumentsForExport.get_trtllm_inputs(
+        batch_dim=DynamicDimension(name="batch", min=1, opt=1, max=32),
+        device=device,
         use_cache=False,
     )
 
@@ -145,12 +151,13 @@ def run(
 
     print("Lowering exported program into graph module ...")
     graph_module = get_inlined_graph_module(exported_program)
+    model_name = type(model).__name__
     if verbose:
-        model_name = type(model).__name__
-        with open(f"{model_name}_graph_module.txt", "w") as f:
-            f.write(graph_module.print_readable(print_output=False))
-        with open(f"{model_name}_graph.txt", "w") as f:
-            f.write(f"{graph_module.graph}")
+        with detailed_sym_node_str():
+            with open(f"{model_name}_graph_module.txt", "w") as f:
+                f.write(graph_module.print_readable(print_output=False))
+            with open(f"{model_name}_graph.txt", "w") as f:
+                f.write(f"{graph_module.graph}")
 
     print("Building TensorRT engine ...")
     settings = CompilationSettings(
@@ -159,13 +166,18 @@ def run(
         debug=verbose,
         optimization_level=5,
     )
-    build_engine(
+    engine = build_engine(
         graph_module,
         (),
         arguments_for_export.torch_trt_inputs,
         settings=settings,
         name=type(model).__name__,
     )
+    for i in range(engine.num_io_tensors):
+        name = engine.get_tensor_name(i)
+        print(f"({i}) {name}: {engine.get_tensor_shape(name)}")
+    with open(f"{model_name}.engine", "wb") as f:
+        f.write(engine.serialize())
 
 
 def parse_sdp_backends(sdp_backends: list[str]) -> list[SDPBackend] | SDPBackend:
@@ -177,7 +189,7 @@ def parse_sdp_backends(sdp_backends: list[str]) -> list[SDPBackend] | SDPBackend
             "MATH": SDPBackend.MATH,
         }
         backends = [available_backends[x.upper()] for x in sdp_backends]
-        return backends or SDPBackend.MATH
+        return backends or SDPBackend.EFFICIENT_ATTENTION
     except KeyError as e:
         raise ValueError(f"--sdp-backends must be one of {','.join(available_backends.keys())}") from e
 

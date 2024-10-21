@@ -1,13 +1,14 @@
 from typing import TypedDict
 
 import torch
-from pydantic import BaseModel, Field
+from pydantic import Field
 from torch_tensorrt._Input import Input
 from typing_extensions import Self
 
-from .dynamic_dim import DynamicDimensionType
+from .constants import DEFAULT_DEVICE
+from .dynamic_dim import DynamicDimension, DynamicDimensionType
 from .pretty_print import brief_tensor_repr
-from .types import BuiltInConstant, DimType
+from .types import BuiltInConstant, DimType, StrictlyTyped
 
 
 class InputHint(TypedDict):
@@ -16,9 +17,7 @@ class InputHint(TypedDict):
     device: torch.device | str
 
 
-class ArgumentsForExport(BaseModel):
-    model_config = {"arbitrary_types_allowed": True}
-
+class ArgumentsForExport(StrictlyTyped):
     tensor_inputs: dict[str, torch.Tensor]
     constant_inputs: dict[str, BuiltInConstant] = Field(default_factory=dict)
     constraints: dict[str, dict[int, DimType] | None] = Field(default_factory=dict)
@@ -47,7 +46,49 @@ class ArgumentsForExport(BaseModel):
             print("========================================================")
 
     @classmethod
-    def from_hint(cls, **input_hints: InputHint | BuiltInConstant) -> Self:
+    def get_trtllm_inputs(
+        cls,
+        batch_dim: DynamicDimensionType,
+        device: torch.device | str = DEFAULT_DEVICE,
+        **other_flags: BuiltInConstant,
+    ) -> Self:
+        beam_width = DynamicDimension(
+            name="beam_width",
+            min=1,
+            opt=1,
+            max=1 << 15 - 1,
+            example_for_export=batch_dim.example + 1,
+        )
+        max_seq_len = DynamicDimension(
+            name="max_seq_len",
+            min=1,
+            opt=1,
+            max=1 << 15 - 1,
+            example_for_export=batch_dim.example + 2,
+        )
+        hints = {
+            "input_ids": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "sequence_length": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "host_past_key_value_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "host_max_attention_window_sizes": InputHint(shape=(32,), dtype=torch.int32, device=device),
+            "host_sink_token_length": InputHint(shape=(1,), dtype=torch.int32, device=device),
+            "context_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "cache_indirection": InputHint(
+                shape=(batch_dim, beam_width, max_seq_len), dtype=torch.int32, device=device
+            ),
+            "host_request_types": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "kv_cache_block_offsets": InputHint(shape=(batch_dim, 2, max_seq_len), dtype=torch.int32, device=device),
+            "host_kv_cache_block_offsets": InputHint(
+                shape=(batch_dim, 2, max_seq_len), dtype=torch.int32, device=device
+            ),
+            "host_kv_cache_pool_pointers": InputHint(shape=(2,), dtype=torch.int64, device=device),
+            "host_context_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "host_runtime_perf_knobs": InputHint(shape=(16,), dtype=torch.int64, device=device),
+        }
+        return cls.from_hints(**hints, **other_flags)
+
+    @classmethod
+    def from_hints(cls, **input_hints: InputHint | BuiltInConstant) -> Self:
         tensor_inputs: dict[str, torch.Tensor] = {}
         constant_inputs: dict[str, BuiltInConstant] = {}
         constraints: dict[str, dict[int, DimType] | None] = {}
@@ -61,10 +102,10 @@ class ArgumentsForExport(BaseModel):
             tensor_inputs[name] = torch.zeros(*shape, dtype=hint["dtype"], device=hint["device"])
 
             for dim, s in enumerate(hint["shape"]):
-                if not isinstance(s, DynamicDimensionType):
-                    continue
                 if name not in constraints:
                     constraints[name] = {}
+                if not isinstance(s, DynamicDimensionType):
+                    continue
                 assert (constraint := constraints[name]) is not None
                 constraint[dim] = s.export_dim
 

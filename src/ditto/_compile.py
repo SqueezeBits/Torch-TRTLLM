@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import logging
-import operator
 from collections.abc import Callable
 
 import tensorrt as trt
 import torch
 import torch.utils._pytree as pytree
+from tensorrt_llm._common import _is_building
 from torch.export import ExportedProgram
-from torch.fx import GraphModule, Node
+from torch.fx import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch_tensorrt._Device import Device
 from torch_tensorrt._enums import dtype
@@ -28,6 +28,14 @@ from torch_tensorrt.dynamo.lowering.passes import (
 )
 from torch_tensorrt.logging import TRT_LOGGER
 
+from .fx.passes import (
+    eliminate_empty_tensors_from_cat_or_stack,
+    eliminate_nop_cat_or_stack,
+    populate_fake_gpt_attention_plugin_kwargs,
+    refine_fake_gpt_attention_plugin_subgraphs,
+    replace_operator_sub_by_aten_sub,
+    replace_sdpa_by_fake_gpt_attention_plugin,
+)
 from .interpreter import DynamicTRTInterpreter
 
 logger = logging.getLogger(__name__)
@@ -35,6 +43,7 @@ logger = logging.getLogger(__name__)
 CURRENT_DEVICE = Device._current_device()
 
 
+@_is_building
 def build_engine(
     graph_module: GraphModule,
     arg_inputs: tuple[Input, ...],
@@ -51,7 +60,7 @@ def build_engine(
         logger.setLevel(logging.DEBUG)
 
     DYNAMO_CONVERTERS.set_compilation_settings(settings)
-    logger.info("Compilation Settings: %s\n", settings)
+    logger.info(f"Compilation Settings: {settings}\n")
 
     flattened_inputs, _ = get_flat_args(arg_inputs, kwarg_inputs)
     output_dtypes = infer_module_output_dtypes(
@@ -72,9 +81,6 @@ def build_engine(
         with trt.Runtime(TRT_LOGGER) as runtime:
             engine: trt.ICudaEngine = runtime.deserialize_cuda_engine(result.serialized_engine)
 
-        for i in range(engine.num_io_tensors):
-            name = engine.get_tensor_name(i)
-            print(f"({i}) {name}: {engine.get_tensor_shape(name)}")
         return engine
     except UnsupportedOperatorException as e:
         logger.error(
@@ -134,6 +140,7 @@ def get_inlined_graph_module(
     extra_pre_inline_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
     extra_post_inline_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
 ) -> GraphModule:
+    pretrained_config = exported_program.graph_module.meta.get("pretrained_config", None)
     pre_inline_pass_manager = DynamoPassManager.build_from_passlist(
         [*ATEN_PRE_LOWERING_PASSES.passes, *(extra_pre_inline_passes or [])]
     )
@@ -143,124 +150,19 @@ def get_inlined_graph_module(
             *(
                 eliminate_empty_tensors_from_cat_or_stack,
                 eliminate_nop_cat_or_stack,
-                # remove_second_outputs_of_scaled_dot_product_attention,
-                remove_assert_scalar,
                 replace_operator_sub_by_aten_sub,
+                replace_sdpa_by_fake_gpt_attention_plugin,
+                refine_fake_gpt_attention_plugin_subgraphs,
+                populate_fake_gpt_attention_plugin_kwargs,
             ),
             *(extra_post_inline_passes or []),
         ]
     )
     _ = pre_inline_pass_manager(exported_program.graph_module)
-
-    # Decompose the exported program
     exported_program = exported_program.run_decompositions(get_decompositions(enable_experimental_decompositions))
     graph_module = exported_program.module()
-    logger.debug(f"Input graph: {graph_module.graph}")
-
-    # Apply lowering on the graph module
+    assert isinstance(graph_module, GraphModule)
+    graph_module.meta["pretrained_config"] = pretrained_config
     graph_module = post_inline_pass_manager(graph_module)
-    logger.debug(f"Lowered Input graph: {graph_module.graph}")
-
     graph_module._forward_pre_hooks.clear()
-    return graph_module
-
-
-def remove_second_outputs_of_scaled_dot_product_attention(graph_module: GraphModule) -> GraphModule:
-    for node in graph_module.graph.nodes:
-        if node.target not in (
-            torch.ops.aten._scaled_dot_product_efficient_attention.default,
-            torch.ops.aten._scaled_dot_product_flash_attention.default,
-        ):
-            continue
-        if not (
-            len(node.users) == 1
-            and (user := list(node.users)[0]).target is operator.getitem
-            and len(user.args) == 2
-            and user.args[1] == 0
-        ):
-            print(f"[WARNING] Found a scaled_dot_product_attention node {node} whose second mask output is used")
-            continue
-        node.target = torch.nn.functional.scaled_dot_product_attention
-        user.replace_all_uses_with(node)
-    graph_module.graph.eliminate_dead_code()
-    graph_module.graph.lint()
-    graph_module.recompile()
-    return graph_module
-
-
-def remove_assert_scalar(graph_module: GraphModule) -> GraphModule:
-    nodes_to_remove: list[Node] = []
-    for node in graph_module.graph.nodes:
-        if node.target is not torch.ops.aten._assert_scalar.default:
-            continue
-        nodes_to_remove.append(node)
-    for node in nodes_to_remove:
-        graph_module.graph.erase_node(node)
-    return graph_module
-
-
-def replace_operator_sub_by_aten_sub(graph_module: GraphModule) -> GraphModule:
-    for node in graph_module.graph.nodes:
-        if not (node.target is operator.sub and len(node.args) == 2):
-            continue
-        lhs, rhs = node.args
-        if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
-            node.target = torch.ops.aten.sub.Tensor
-        elif isinstance(lhs, torch.Tensor) and isinstance(rhs, bool | complex | float | int):
-            node.target = torch.ops.aten.sub.Scalar
-        elif isinstance(lhs, bool | complex | float | int) and isinstance(rhs, torch.Tensor):
-            node.target = torch.ops.aten.sub.Scalar
-            node.args = node.args[::-1]
-        elif isinstance(lhs, int) and isinstance(rhs, int):
-            node.target = torch.ops.aten.sub.int
-        elif isinstance(lhs, float) and isinstance(rhs, float):
-            node.target = torch.ops.aten.sub.float
-        elif isinstance(lhs, float) and isinstance(rhs, complex):
-            node.target = torch.ops.aten.sub.float_complex
-        elif isinstance(lhs, complex) and isinstance(rhs, float):
-            node.target = torch.ops.aten.sub.complex_float
-        elif isinstance(lhs, int) and isinstance(rhs, float):
-            node.target = torch.ops.aten.sub.int_float
-        elif isinstance(lhs, float) and isinstance(rhs, int):
-            node.target = torch.ops.aten.sub.float_int
-        else:
-            node.target = torch.ops.aten.sub.default
-    return graph_module
-
-
-def eliminate_empty_tensors_from_cat_or_stack(graph_module: GraphModule) -> GraphModule:
-    for node in graph_module.graph.nodes:
-        if not (
-            node.target in (torch.ops.aten.cat.default, torch.ops.aten.stack.default)
-            and isinstance((tensors := node.args[0]), list | tuple)
-            and all(isinstance(tensor, Node) for tensor in tensors)
-        ):
-            continue
-        non_empty_tensors = tuple(
-            tensor
-            for tensor in tensors
-            if isinstance(tensor, Node)
-            and isinstance((tensor_meta := tensor.meta.get("tensor_meta", None)), TensorMetadata)
-            and tensor_meta.shape.numel() > 0
-        )
-        node.args = (non_empty_tensors,) + node.args[1:]
-    graph_module.graph.eliminate_dead_code()
-    graph_module.graph.lint()
-    graph_module.recompile()
-    return graph_module
-
-
-def eliminate_nop_cat_or_stack(graph_module: GraphModule) -> GraphModule:
-    for node in graph_module.graph.nodes:
-        if not (
-            node.target in (torch.ops.aten.cat.default, torch.ops.aten.stack.default)
-            and isinstance((tensors := node.args[0]), list | tuple)
-            and len(tensors) == 1
-            and isinstance((the_input := tensors[0]), Node)
-        ):
-            continue
-        node.replace_all_uses_with(the_input)
-    graph_module.graph.eliminate_dead_code()
-    graph_module.graph.lint()
-    graph_module.recompile()
     return graph_module

@@ -1,10 +1,10 @@
 from ._compile import build_engine, get_inlined_graph_module
 from ._export import export
 from .arguments_for_export import ArgumentsForExport
-from .aten_ops_converter import *
 from .cache_handler import CacheHandler, DynamicCacheHandler, StaticCacheHandler
+from .conversion import *
 from .dynamic_dim import DynamicDimension, DynamicDimensionType
 from .forward_argument_collector import ForwardArgumentCollector
-from .pretty_print import brief_tensor_repr
+from .pretty_print import brief_tensor_repr, detailed_sym_node_str
 from .types import *
 from .wrappers import PostExportWrapper, PreExportWrapper
