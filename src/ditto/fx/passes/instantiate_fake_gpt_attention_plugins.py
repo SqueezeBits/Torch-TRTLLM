@@ -9,7 +9,7 @@ from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_afte
 from ...fake_gpt_attention_plugin import FakeGPTAttentionPlugin, ROPEConfig
 
 
-def refine_fake_gpt_attention_plugin_subgraphs(graph_module: GraphModule) -> GraphModule:
+def instantiate_fake_gpt_attention_plugins(graph_module: GraphModule) -> GraphModule:
     graph = graph_module.graph
     batch_size_node: Node | None = find_or_create_batch_size_node(graph)
 

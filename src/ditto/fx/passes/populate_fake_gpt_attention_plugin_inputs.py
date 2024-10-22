@@ -3,12 +3,12 @@ from tensorrt_llm.functional import RopeEmbeddingUtils
 from torch.fx import GraphModule
 from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
 
-from ...fake_gpt_attention_plugin import FakeGPTAttentionPlugin, GPTAttentionPluginKwargs, ROPEConfig
+from ...fake_gpt_attention_plugin import FakeGPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
 
 
-def populate_fake_gpt_attention_plugin_kwargs(graph_module: GraphModule) -> GraphModule:
+def populate_fake_gpt_attention_plugin_inputs(graph_module: GraphModule) -> GraphModule:
     graph = graph_module.graph
-    fake_gpt_attention_plugin_kwargs: GPTAttentionPluginKwargs | None = None
+    fake_gpt_attention_plugin_kwargs: GPTAttentionPluginInputs | None = None
     for node in graph.nodes:
         if not (
             node.op == "call_function"
@@ -33,7 +33,7 @@ def populate_fake_gpt_attention_plugin_kwargs(graph_module: GraphModule) -> Grap
             with graph.inserting_after(last_placeholder):
                 _ = graph.get_attr("rotary_cos_sin")
                 _ = graph.get_attr("rotary_inv_freq")
-            fake_gpt_attention_plugin_kwargs = GPTAttentionPluginKwargs.find_from(graph)
+            fake_gpt_attention_plugin_kwargs = GPTAttentionPluginInputs.find_from(graph)
         with graph.inserting_after(node):
             new_node = graph.call_function(
                 fake_gpt_attention_plugin,

@@ -82,7 +82,7 @@ class GPTAttentionPluginFields(StrictlyTyped):
     spec_decoding_max_generation_length: int = 1
 
     def get_plugin_fields(self) -> list[trt.PluginField]:
-        def convert_to_plugin_field(name: str, value: Any):
+        def convert_to_plugin_field(name: str, value: Any) -> trt.PluginField:
             dtype: type[np.number]
             if name in ("use_cache", "mask_type", "paged_kv_cache") or (
                 isinstance(value, trt.DataType | IntFlag | int) and not isinstance(value, bool | IntEnum)
@@ -120,7 +120,7 @@ class GPTAttentionPluginFields(StrictlyTyped):
         return plugin_creator, plugin, pfc
 
 
-class GPTAttentionPluginKwargs(StrictlyTyped):
+class GPTAttentionPluginInputs(StrictlyTyped):
     sequence_length: Node
     host_past_key_value_lengths: Node
     host_max_attention_window_sizes: Node

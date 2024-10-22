@@ -31,8 +31,8 @@ from torch_tensorrt.logging import TRT_LOGGER
 from .fx.passes import (
     eliminate_empty_tensors_from_cat_or_stack,
     eliminate_nop_cat_or_stack,
-    populate_fake_gpt_attention_plugin_kwargs,
-    refine_fake_gpt_attention_plugin_subgraphs,
+    instantiate_fake_gpt_attention_plugins,
+    populate_fake_gpt_attention_plugin_inputs,
     replace_operator_sub_by_aten_sub,
     replace_sdpa_by_fake_gpt_attention_plugin,
 )
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 CURRENT_DEVICE = Device._current_device()
 
 
-@_is_building
+@_is_building  # type: ignore
 def build_engine(
     graph_module: GraphModule,
     arg_inputs: tuple[Input, ...],
@@ -152,8 +152,8 @@ def get_inlined_graph_module(
                 eliminate_nop_cat_or_stack,
                 replace_operator_sub_by_aten_sub,
                 replace_sdpa_by_fake_gpt_attention_plugin,
-                refine_fake_gpt_attention_plugin_subgraphs,
-                populate_fake_gpt_attention_plugin_kwargs,
+                instantiate_fake_gpt_attention_plugins,
+                populate_fake_gpt_attention_plugin_inputs,
             ),
             *(extra_post_inline_passes or []),
         ]
@@ -161,8 +161,8 @@ def get_inlined_graph_module(
     _ = pre_inline_pass_manager(exported_program.graph_module)
     exported_program = exported_program.run_decompositions(get_decompositions(enable_experimental_decompositions))
     graph_module = exported_program.module()
-    assert isinstance(graph_module, GraphModule)
     graph_module.meta["pretrained_config"] = pretrained_config
     graph_module = post_inline_pass_manager(graph_module)
+    assert isinstance(graph_module, GraphModule)
     graph_module._forward_pre_hooks.clear()
     return graph_module
