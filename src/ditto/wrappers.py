@@ -1,3 +1,4 @@
+# pylint: disable=unused-argument
 from collections.abc import Callable
 from typing import Any, Generic, TypeVar
 
@@ -5,6 +6,7 @@ import torch
 from torch.fx import GraphModule
 from transformers import PreTrainedModel
 
+# pylint: disable-next=invalid-name
 InnerModuleType = TypeVar("InnerModuleType", torch.nn.Module, GraphModule)
 
 
@@ -52,22 +54,24 @@ class PostExportWrapper(ExportWrapper[GraphModule]):
 
 
 class TRTLLMPreTrainedModelWrapper(ExportWrapper[PreTrainedModel]):
+    # pylint: disable-next=arguments-differ
     def forward(  # type: ignore[override]
         self,
         *,
         input_ids: torch.Tensor,
-        sequence_length: torch.Tensor,
-        host_past_key_value_lengths: torch.Tensor,
-        host_max_attention_window_sizes: torch.Tensor,
-        host_sink_token_length: torch.Tensor,
-        context_lengths: torch.Tensor,
-        cache_indirection: torch.Tensor,
-        host_request_types: torch.Tensor,
+        last_token_ids: torch.Tensor,
         kv_cache_block_offsets: torch.Tensor,
         host_kv_cache_block_offsets: torch.Tensor,
         host_kv_cache_pool_pointers: torch.Tensor,
-        host_context_lengths: torch.Tensor,
+        sequence_length: torch.Tensor,
+        host_request_types: torch.Tensor,
+        host_past_key_value_lengths: torch.Tensor,
+        context_lengths: torch.Tensor,
         host_runtime_perf_knobs: torch.Tensor,
+        host_context_lengths: torch.Tensor,
+        host_max_attention_window_sizes: torch.Tensor,
+        host_sink_token_length: torch.Tensor,
+        cache_indirection: torch.Tensor,
         **kwargs: Any,
     ) -> dict[str, Any]:
         return super().forward(input_ids=input_ids, **kwargs)

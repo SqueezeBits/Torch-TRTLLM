@@ -66,24 +66,32 @@ class ArgumentsForExport(StrictlyTyped):
             max=1 << 15 - 1,
             example_for_export=batch_dim.example + 2,
         )
+        num_seq = DynamicDimension(
+            name="num_seq",
+            min=1,
+            opt=1,
+            max=batch_dim.max,
+            example_for_export=batch_dim.example + 3,
+        )
         hints = {
             "input_ids": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
-            "sequence_length": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
-            "host_past_key_value_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
-            "host_max_attention_window_sizes": InputHint(shape=(32,), dtype=torch.int32, device=device),
-            "host_sink_token_length": InputHint(shape=(1,), dtype=torch.int32, device=device),
-            "context_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
-            "cache_indirection": InputHint(
-                shape=(batch_dim, beam_width, max_seq_len), dtype=torch.int32, device=device
-            ),
-            "host_request_types": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "last_token_ids": InputHint(shape=(num_seq,), dtype=torch.int32, device=device),
             "kv_cache_block_offsets": InputHint(shape=(batch_dim, 2, max_seq_len), dtype=torch.int32, device=device),
             "host_kv_cache_block_offsets": InputHint(
                 shape=(batch_dim, 2, max_seq_len), dtype=torch.int32, device=device
             ),
             "host_kv_cache_pool_pointers": InputHint(shape=(2,), dtype=torch.int64, device=device),
-            "host_context_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "sequence_length": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "host_request_types": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "host_past_key_value_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "context_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
             "host_runtime_perf_knobs": InputHint(shape=(16,), dtype=torch.int64, device=device),
+            "host_context_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "host_max_attention_window_sizes": InputHint(shape=(32,), dtype=torch.int32, device=device),
+            "host_sink_token_length": InputHint(shape=(1,), dtype=torch.int32, device=device),
+            "cache_indirection": InputHint(
+                shape=(batch_dim, beam_width, max_seq_len), dtype=torch.int32, device=device
+            ),
         }
         return cls.from_hints(**hints, **other_flags)
 
@@ -127,6 +135,7 @@ class ArgumentsForExport(StrictlyTyped):
     def torch_trt_inputs(self) -> dict[str, Input]:
         trt_inputs: dict[str, Input] = {}
         for name, tensor in self.tensor_inputs.items():
+            # pylint: disable-next=unsupported-membership-test
             if name not in self.constraints:
                 trt_input = Input.from_tensor(tensor)
                 trt_input.name = name

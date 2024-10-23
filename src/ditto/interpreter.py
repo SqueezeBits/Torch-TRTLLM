@@ -1,3 +1,4 @@
+# pylint: disable=no-member
 import logging
 import re
 from typing import Any
@@ -30,6 +31,7 @@ class DynamicTRTInterpreter(TRTInterpreter):
         compilation_settings: CompilationSettings | None = None,
         engine_cache: BaseEngineCache | None = None,
         network_name: str | None = None,
+        output_names: list[str] | None = None,
     ) -> None:
         super().__init__(
             module,
@@ -54,6 +56,7 @@ class DynamicTRTInterpreter(TRTInterpreter):
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
         self.placeholder_names = [n.name for n in module.graph.nodes if n.op == "placeholder"]
+        self.user_output_names = output_names
         if network_name:
             self.ctx.net.name = network_name
 
@@ -114,7 +117,7 @@ class DynamicTRTInterpreter(TRTInterpreter):
 
         with open(f"{self.ctx.net.name}.txt", "w") as f:
             f.write(get_network_ir(self.ctx.net))
-        self.logger.info(f"Network info saved at {self.ctx.net.name}.txt")
+        self.logger.info(f"TensorRT Network saved at {self.ctx.net.name}.txt")
 
     def run_node(self, n: Node) -> Node:
         self.logger.info(f"Converting {n.format_node(self.placeholder_names) or str(n)}")
@@ -139,6 +142,20 @@ class DynamicTRTInterpreter(TRTInterpreter):
         if calling_convention is CallingConvention.LEGACY:
             return converter(self.ctx.net, target, args, kwargs, self._cur_node_name)
         return converter(self.ctx, target, args, kwargs, self._cur_node_name)
+
+    def output(self, target: str, args: Any, kwargs: Any) -> list[Any]:
+        outputs = super().output(target, args, kwargs)
+        if self.user_output_names is not None:
+            for i, output_name in enumerate(self.user_output_names):
+                if i >= len(outputs):
+                    self.logger.warning(
+                        f"The model has {len(outputs)} outputs, but got {len(self.user_output_names)} output names."
+                    )
+                    break
+                if isinstance(outputs[i], trt.ITensor):
+                    outputs[i].name = output_name
+                    self._output_names[i] = output_name
+        return outputs
 
 
 def _format_output(output: Any) -> str:

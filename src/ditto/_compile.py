@@ -1,3 +1,4 @@
+# pylint: disable=no-member, protected-access
 from __future__ import annotations
 
 import logging
@@ -31,6 +32,7 @@ from torch_tensorrt.logging import TRT_LOGGER
 from .fx.passes import (
     eliminate_empty_tensors_from_cat_or_stack,
     eliminate_nop_cat_or_stack,
+    insert_gather_last_token_ids,
     instantiate_fake_gpt_attention_plugins,
     populate_fake_gpt_attention_plugin_inputs,
     replace_operator_sub_by_aten_sub,
@@ -76,6 +78,7 @@ def build_engine(
             compilation_settings=settings,
             engine_cache=engine_cache,
             network_name=name,
+            output_names=["logits"],
         )
         result = interpreter.run()
         with trt.Runtime(TRT_LOGGER) as runtime:
@@ -154,6 +157,7 @@ def get_inlined_graph_module(
                 replace_sdpa_by_fake_gpt_attention_plugin,
                 instantiate_fake_gpt_attention_plugins,
                 populate_fake_gpt_attention_plugin_inputs,
+                insert_gather_last_token_ids,
             ),
             *(extra_post_inline_passes or []),
         ]

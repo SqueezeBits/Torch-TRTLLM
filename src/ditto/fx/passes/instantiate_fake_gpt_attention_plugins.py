@@ -2,16 +2,16 @@ import operator
 from functools import reduce
 
 import torch
-from torch.fx import Graph, GraphModule, Node
-from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
+from torch.fx import GraphModule, Node
 from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
 
 from ...fake_gpt_attention_plugin import FakeGPTAttentionPlugin, ROPEConfig
+from ..utils import find_or_create_placeholder_sym_size, get_tensor_metadata, populate_metadata
 
 
 def instantiate_fake_gpt_attention_plugins(graph_module: GraphModule) -> GraphModule:
     graph = graph_module.graph
-    batch_size_node: Node | None = find_or_create_batch_size_node(graph)
+    batch_size_node: Node | None = find_or_create_placeholder_sym_size(graph, "input_ids")
 
     layer_idx = -1
     for node in graph.nodes:
@@ -24,9 +24,9 @@ def instantiate_fake_gpt_attention_plugins(graph_module: GraphModule) -> GraphMo
             and (qkv_cat := input_reshape.all_input_nodes[0]).target is torch.ops.aten.cat.default
             and len(qkv_cat.all_input_nodes) == 3
             and isinstance(qkv_cat_dim := qkv_cat.args[1], int)
-            and isinstance(query := qkv_cat.all_input_nodes[0].meta.get("val"), torch.Tensor)
-            and isinstance(key := qkv_cat.all_input_nodes[1].meta.get("val"), torch.Tensor)
-            and isinstance(value := qkv_cat.all_input_nodes[2].meta.get("val"), torch.Tensor)
+            and (query := get_tensor_metadata(qkv_cat.all_input_nodes[0])) is not None
+            and (key := get_tensor_metadata(qkv_cat.all_input_nodes[1])) is not None
+            and (value := get_tensor_metadata(qkv_cat.all_input_nodes[2])) is not None
         ):
             continue
 
@@ -37,7 +37,7 @@ def instantiate_fake_gpt_attention_plugins(graph_module: GraphModule) -> GraphMo
         flat_input_shape = torch.Size((query.shape[0], reduce(operator.mul, query.shape[1:])))
         qkv_shape = torch.Size(
             sum(x.shape[i] for x in (query, key, value)) if i == qkv_cat_dim else query.shape[i]
-            for i in range(query.ndim)
+            for i in range(len(query.shape))
         )
         flat_qkv_shape = torch.Size((qkv_shape[0], reduce(operator.mul, qkv_shape[1:])))
 
@@ -52,7 +52,7 @@ def instantiate_fake_gpt_attention_plugins(graph_module: GraphModule) -> GraphMo
                 "The input key and value with different number of heads is not supported. "
                 f"(key.shape: {key.shape}, value.shape: {value.shape})"
             )
-        if not (hidden_size_per_head == k_hidden_size_per_head == v_hidden_size_per_head):
+        if not hidden_size_per_head == k_hidden_size_per_head == v_hidden_size_per_head:
             raise NotImplementedError(
                 "The input query, key and value with different hidden sizes per head is not supported. "
                 f"(query.shape: {query.shape}, key.shape: {key.shape}, value.shape: {value.shape})"
@@ -86,28 +86,3 @@ def instantiate_fake_gpt_attention_plugins(graph_module: GraphModule) -> GraphMo
 
     clean_up_graph_after_modifications(graph_module)
     return graph_module
-
-
-def find_or_create_batch_size_node(graph: Graph) -> Node | None:
-    if not (placeholders := [node for node in graph.nodes if node.op == "placeholder"]):
-        return None
-    for placeholder in placeholders:
-        for user in placeholder.users:
-            if user.target is torch.ops.aten.sym_size.int and len(user.args) == 2 and user.args[1] == 0:
-                return user
-    with graph.inserting_after(placeholders[-1]):
-        return graph.call_function(torch.ops.aten.sym_size.int, (placeholders[0], 0))
-
-
-def populate_metadata(
-    node: Node,
-    ref: torch.Tensor,
-    shape: torch.Size | None = None,
-) -> None:
-    tensor_meta = _extract_tensor_metadata(ref)
-    if shape is None:
-        node.meta["tensor_meta"] = tensor_meta
-        return
-    tensor_meta_as_dict = tensor_meta._asdict()
-    tensor_meta_as_dict["shape"] = shape
-    node.meta["tensor_meta"] = TensorMetadata(**tensor_meta_as_dict)

@@ -100,6 +100,7 @@ def run(
     sdp_backends: Annotated[list[str], Option(default_factory=list)],
     device: str = DEFAULT_DEVICE,
     dtype: str = "float16",
+    engine_path: str = "",
     verbose: bool = False,
     trust_remote_code: bool = False,
 ) -> None:
@@ -113,12 +114,9 @@ def run(
         torch_dtype=torch_dtype,
         trust_remote_code=trust_remote_code,
     ).to(device)
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    tokenizer.pad_token_id = model.config.pad_token_id or 0
-    tokenizer.padding_side = "left"
 
     arguments_for_export = ArgumentsForExport.get_trtllm_inputs(
-        batch_dim=DynamicDimension(name="batch", min=1, opt=1, max=32),
+        batch_dim=DynamicDimension(name="batch", min=1, opt=1, max=512),
         device=device,
         use_cache=False,
     )
@@ -176,8 +174,10 @@ def run(
     for i in range(engine.num_io_tensors):
         name = engine.get_tensor_name(i)
         print(f"({i}) {name}: {engine.get_tensor_shape(name)}")
-    with open(f"{model_name}.engine", "wb") as f:
-        f.write(engine.serialize())
+    engine_path = engine_path or f"{model_name}.engine"
+    print(f"Saving serialized engine at {engine_path}")
+    with open(engine_path, "wb") as engine_file:
+        engine_file.write(engine.serialize())
 
 
 def parse_sdp_backends(sdp_backends: list[str]) -> list[SDPBackend] | SDPBackend:
