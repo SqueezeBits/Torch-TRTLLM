@@ -1,24 +1,33 @@
 import logging
 from enum import IntEnum, IntFlag
-from typing import Any
+from typing import Any, TypeVar
 
 import numpy as np
 import tensorrt as trt
 import torch
+from pydantic import Field
 from tensorrt_llm.functional import (
     AttentionMaskType,
     PositionEmbeddingType,
     QuantMode,
+    RopeEmbeddingUtils,
     RotaryScalingType,
 )
-from tensorrt_llm.plugin import TRT_LLM_PLUGIN_NAMESPACE
 from tensorrt_llm.plugin.plugin import ContextFMHAType
 from torch.fx import Graph, Node
+from transformers import PretrainedConfig
 from typing_extensions import Self
 
-from .types import StrictlyTyped
+from ..types import StrictlyTyped
 
 logger = logging.getLogger(__name__)
+
+
+class Llama3ScalingConfig(StrictlyTyped):
+    factor: float = 8.0
+    low_freq_factor: float = 1.0
+    high_freq_factor: float = 4.0
+    original_max_position_embeddings: int = 8192
 
 
 class ROPEConfig(StrictlyTyped):
@@ -31,6 +40,59 @@ class ROPEConfig(StrictlyTyped):
     rotary_embedding_long_m_scale: float = 1.0
     rotary_embedding_max_positions: int = 1024
     rotary_embedding_original_max_positions: int = 1024
+    llama3_scaling_config: Llama3ScalingConfig = Field(default_factory=Llama3ScalingConfig, exclude=True)
+
+    @classmethod
+    def from_pretrained_config(
+        cls,
+        pretrained_config: PretrainedConfig | None = None,
+        positional_embedding_type: PositionEmbeddingType | None = None,
+        embedding_dim: int | None = None,
+    ) -> Self:
+        rope_config = cls()
+        rope_config.rotary_embedding_base = lookup_attributes(
+            pretrained_config,
+            "rope_theta",
+            default=rope_config.rotary_embedding_base,
+        )
+        rope_config.rotary_embedding_max_positions = lookup_attributes(
+            pretrained_config,
+            "max_position_embeddings",
+            default=rope_config.rotary_embedding_max_positions,
+        )
+        if positional_embedding_type is not None:
+            rope_config.position_embedding_type = positional_embedding_type
+        if embedding_dim is not None:
+            rope_config.rotary_embedding_dim = embedding_dim
+        return rope_config
+
+    def compute_rope_constants(self) -> tuple[np.ndarray, np.ndarray]:
+        # TODO: replace this by `Attention.create_attention_const_params`
+        rotary_inv_freq, embed_positions = RopeEmbeddingUtils.create_sinusoidal_positions_for_attention_plugin(
+            self.rotary_embedding_max_positions,
+            self.rotary_embedding_dim,
+            self.rotary_embedding_base,
+            self.rotary_embedding_scale,
+            self.rotary_embedding_scale_type,
+            self.llama3_scaling_config.model_dump(),
+        )
+        return rotary_inv_freq, embed_positions
+
+
+T = TypeVar("T")
+
+
+def lookup_attributes(pretrained_config: PretrainedConfig | None, *names: str, default: T) -> T:
+    if pretrained_config is None:
+        return default
+    for name in names:
+        if hasattr(pretrained_config, name):
+            return getattr(pretrained_config, name)
+    logger.warning(
+        "None of the following attributes are found in pretrained config. "
+        f"Will use the default value {default}: {', '.join(names)}"
+    )
+    return default
 
 
 class GPTAttentionPluginFields(StrictlyTyped):
@@ -68,7 +130,7 @@ class GPTAttentionPluginFields(StrictlyTyped):
     paged_kv_cache: bool = True
     tokens_per_block: int = 64
     type_id: trt.DataType = trt.float16
-    max_context_length: int = 2048
+    max_context_length: int = 1024
     qkv_bias_enabled: bool = False
     do_cross_attention: bool = False
     max_distance: int = 0  # for relative attention
@@ -107,17 +169,6 @@ class GPTAttentionPluginFields(StrictlyTyped):
             return trt.PluginField(name, np.array(value, dtype=dtype), plugin_field_type)
 
         return [convert_to_plugin_field(name, value) for name, value in self.model_dump().items()]
-
-    def create_plugin(self) -> tuple[trt.IPluginCreator, trt.IPluginV2, trt.PluginFieldCollection]:
-        plugin_creator = trt.get_plugin_registry().get_plugin_creator("GPTAttention", "1", TRT_LLM_PLUGIN_NAMESPACE)
-        plugin_fields = self.get_plugin_fields()
-        pfc = trt.PluginFieldCollection(plugin_fields)
-        print(
-            "plugin fields:\n"
-            + "\n".join(f"{f.name} ({f.type}): {f.data} (dtype={f.data.dtype}, shape={f.data.shape})" for f in pfc)
-        )
-        plugin = plugin_creator.create_plugin("causal_attn", pfc)
-        return plugin_creator, plugin, pfc
 
 
 class GPTAttentionPluginInputs(StrictlyTyped):

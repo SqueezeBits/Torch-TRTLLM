@@ -48,49 +48,57 @@ class ArgumentsForExport(StrictlyTyped):
     @classmethod
     def get_trtllm_inputs(
         cls,
-        batch_dim: DynamicDimensionType,
         device: torch.device | str = DEFAULT_DEVICE,
         **other_flags: BuiltInConstant,
     ) -> Self:
+        batch_size = DynamicDimension(
+            name="batch_size",
+            min=1,
+            opt=1,
+            max=1024,
+        )
+        s = DynamicDimension(name="s", min=0, opt=0, max=128)
+        input_size = 8 * s + 1
         beam_width = DynamicDimension(
             name="beam_width",
             min=1,
             opt=1,
             max=1 << 15 - 1,
-            example_for_export=batch_dim.example + 1,
+            example_for_export=batch_size.example + 1,
         )
         max_seq_len = DynamicDimension(
             name="max_seq_len",
             min=1,
             opt=1,
             max=1 << 15 - 1,
-            example_for_export=batch_dim.example + 2,
+            example_for_export=batch_size.example + 2,
         )
         num_seq = DynamicDimension(
             name="num_seq",
             min=1,
             opt=1,
-            max=batch_dim.max,
-            example_for_export=batch_dim.example + 3,
+            max=batch_size.max,
+            example_for_export=batch_size.example + 3,
         )
         hints = {
-            "input_ids": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "input_ids": InputHint(shape=(input_size,), dtype=torch.int32, device=device),
+            "position_ids": InputHint(shape=(batch_size,), dtype=torch.int32, device=device),
             "last_token_ids": InputHint(shape=(num_seq,), dtype=torch.int32, device=device),
-            "kv_cache_block_offsets": InputHint(shape=(batch_dim, 2, max_seq_len), dtype=torch.int32, device=device),
+            "kv_cache_block_offsets": InputHint(shape=(batch_size, 2, max_seq_len), dtype=torch.int32, device=device),
             "host_kv_cache_block_offsets": InputHint(
-                shape=(batch_dim, 2, max_seq_len), dtype=torch.int32, device=device
+                shape=(batch_size, 2, max_seq_len), dtype=torch.int32, device=device
             ),
             "host_kv_cache_pool_pointers": InputHint(shape=(2,), dtype=torch.int64, device=device),
-            "sequence_length": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
-            "host_request_types": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
-            "host_past_key_value_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
-            "context_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "sequence_length": InputHint(shape=(batch_size,), dtype=torch.int32, device=device),
+            "host_request_types": InputHint(shape=(batch_size,), dtype=torch.int32, device=device),
+            "host_past_key_value_lengths": InputHint(shape=(batch_size,), dtype=torch.int32, device=device),
+            "context_lengths": InputHint(shape=(batch_size,), dtype=torch.int32, device=device),
             "host_runtime_perf_knobs": InputHint(shape=(16,), dtype=torch.int64, device=device),
-            "host_context_lengths": InputHint(shape=(batch_dim,), dtype=torch.int32, device=device),
+            "host_context_lengths": InputHint(shape=(batch_size,), dtype=torch.int32, device=device),
             "host_max_attention_window_sizes": InputHint(shape=(32,), dtype=torch.int32, device=device),
             "host_sink_token_length": InputHint(shape=(1,), dtype=torch.int32, device=device),
             "cache_indirection": InputHint(
-                shape=(batch_dim, beam_width, max_seq_len), dtype=torch.int32, device=device
+                shape=(batch_size, beam_width, max_seq_len), dtype=torch.int32, device=device
             ),
         }
         return cls.from_hints(**hints, **other_flags)

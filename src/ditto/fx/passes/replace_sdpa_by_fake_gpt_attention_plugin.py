@@ -1,133 +1,162 @@
 import logging
-from typing import TypeVar
 
 import torch
-from tensorrt_llm.functional import PositionEmbeddingType
-from torch.fx import Graph, GraphModule, Node
+from torch.fx import GraphModule, Node
+from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.shape_prop import TensorMetadata
-from torch.fx.subgraph_rewriter import replace_pattern_with_filters
-from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
-from transformers import PretrainedConfig
 
-from ...fake_gpt_attention_plugin import FakeGPTAttentionPlugin, ROPEConfig
+from ...fake_targets import FAKE_ROPE_TARGETS, FakeGPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
+from ..subgraphs import LinearSubgraph
+from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata, traceback_reformats
+from .graph_pass import GraphOptimizationPass
+from .specialized_node import SDPANode
 
 logger = logging.getLogger(__name__)
 
 
-def replace_sdpa_by_fake_gpt_attention_plugin(graph_module: GraphModule) -> GraphModule:
-    # TODO: add more pattern matching logics for other ROPE with types other than `rope_gpt_neox`.
-    replaced_patterns = replace_pattern_with_filters(
-        graph_module,
-        pattern=get_gpt_attention_plugin_pattern(),
-        replacement=get_gpt_attention_plugin_replacement(),
-        ignore_literals=True,
-    )
-    if (
-        isinstance(
-            pretrained_config := graph_module.meta.get("pretrained_config"),
-            PretrainedConfig,
-        )
-        and replaced_patterns
-    ):
-        for replaced_pattern in replaced_patterns:
-            node_map = {k.name: v for k, v in replaced_pattern.nodes_map.items()}
-            plugin_node: Node | None = None
-            for node in replaced_pattern.replacements:
-                if node.target is FakeGPTAttentionPlugin:
-                    plugin_node = node
-                    break
-            else:
+class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
+    """Replace F.scaled_dot_product_attention by FakeGPTAttentionPlugin (required for trtllm)."""
+
+    def call(self, graph_module: GraphModule) -> PassResult:
+        layer_idx = -1
+        graph = graph_module.graph
+        global_rope_config: ROPEConfig | None = None
+        global_plugin_inputs: GPTAttentionPluginInputs | None = None
+
+        modified = False
+        for node in graph.nodes:
+            if not (
+                (sdpa := SDPANode.specialize_from(node))
+                and sdpa.is_eligible_for_gpt_attention_plugin
+                and (query := get_tensor_metadata(sdpa.query))
+                and (key := get_tensor_metadata(sdpa.key))
+                and (value := get_tensor_metadata(sdpa.value))
+                and (q_rope := traceback_reformats(sdpa.query)).target in FAKE_ROPE_TARGETS
+                and (k_rope := traceback_reformats(sdpa.key)).target in FAKE_ROPE_TARGETS
+                and (q_proj := find_projection(sdpa.query))
+                and (k_proj := find_projection(sdpa.key))
+                and (v_proj := find_projection(sdpa.value))
+                and (q_proj.mm == traceback_reformats(q_rope.all_input_nodes[0]))
+                and (k_proj.mm == traceback_reformats(k_rope.all_input_nodes[0]))
+                and (v_proj.mm == traceback_reformats(sdpa.value))
+            ):
                 continue
 
-            rope_config = ROPEConfig()
-            rope_config.position_embedding_type = PositionEmbeddingType.rope_gpt_neox
-            rope_config.rotary_embedding_base = lookup_attributes(
-                pretrained_config,
-                "rope_theta",
-                default=rope_config.rotary_embedding_base,
+            layer_idx += 1
+            num_heads = query.shape[-3]
+            sdpa_out_shape = (*query.shape[:-1], value.shape[-1])
+            if (num_kv_heads := key.shape[-3]) != value.shape[-3]:
+                logger.error(
+                    "The input key and value with different number of heads is not supported. "
+                    f"(key.shape: {key.shape}, value.shape: {value.shape})"
+                )
+                continue
+            if not (embed_dim := query.shape[-1]) == key.shape[-1] == value.shape[-1]:
+                logger.error(
+                    "The input query, key and value with different embedding dimensions is not supported. "
+                    f"(query.shape: {query.shape}, key.shape: {key.shape}, value.shape: {value.shape})"
+                )
+                continue
+            if not isinstance(query_rope_config := q_rope.meta.get("rope_config"), ROPEConfig):
+                logger.error(f"rope config for query not found in GPTAttentionPlugin pattern {layer_idx}")
+                continue
+            if not isinstance(key_rope_config := k_rope.meta.get("rope_config"), ROPEConfig):
+                logger.error(f"rope config for key not found in GPTAttentionPlugin pattern {layer_idx}")
+                continue
+
+            if global_rope_config is None:
+                global_rope_config = query_rope_config
+            if global_plugin_inputs is None:
+                rotary_inv_freq, rotary_cos_sin = (
+                    torch.nn.Parameter(torch.from_numpy(x)) for x in global_rope_config.compute_rope_constants()
+                )
+                graph_module.register_parameter("rotary_inv_freq", rotary_inv_freq)
+                graph_module.register_parameter("rotary_cos_sin", rotary_cos_sin)
+                last_placeholder = [n for n in graph.nodes if n.op == "placeholder"][-1]
+                with graph.inserting_after(last_placeholder):
+                    populate_tensor_metadata(graph.get_attr("rotary_inv_freq"), rotary_inv_freq)
+                    populate_tensor_metadata(graph.get_attr("rotary_cos_sin"), rotary_cos_sin)
+                global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph)
+            if global_rope_config != query_rope_config:
+                logger.warning(
+                    f"rope config for key mismatched in GPTAttentionPlugin pattern {layer_idx}:\n"
+                    f"  * global: {global_rope_config}\n"
+                    f"  * key: {query_rope_config}\n"
+                    "Will use the global rope config anyway."
+                )
+            if global_rope_config != key_rope_config:
+                logger.warning(
+                    f"rope config for key mismatched in GPTAttentionPlugin pattern {layer_idx}:\n"
+                    f"  * global: {global_rope_config}\n"
+                    f"  * key: {key_rope_config}\n"
+                    "Will use the global rope config anyway."
+                )
+
+            fake_gpt_attention_plugin = FakeGPTAttentionPlugin(
+                layer_idx=layer_idx,
+                num_heads=num_heads,
+                num_kv_heads=num_kv_heads,
+                head_size=embed_dim,
+                **global_rope_config.model_dump(),
             )
-            if (query := node_map.get("query")) is not None and isinstance(
-                query_meta := query.meta.get("tensor_meta"), TensorMetadata
-            ):
-                rope_config.rotary_embedding_dim = query_meta.shape[-1]
-            else:
-                logger.warning("Failed to infer `rotary_embedding_dim`")
-            rope_config.rotary_embedding_max_positions = lookup_attributes(
-                pretrained_config,
-                "max_position_embeddings",
-                default=rope_config.rotary_embedding_max_positions,
-            )
-            plugin_node.meta["rope_config"] = rope_config
-    clean_up_graph_after_modifications(graph_module)
-    return graph_module
+            with graph.inserting_before(node):
+                qkv_cat = graph.call_function(torch.ops.aten.cat.default, ((q_proj.mm, k_proj.mm, v_proj.mm), -1))
+                (q, k, v) = (get_tensor_metadata(x) for x in (q_proj.mm, k_proj.mm, v_proj.mm))
+                prev_metadata: TensorMetadata | None = None
+                if q and k and v:
+                    qkv_cat_shape = torch.Size((*q.shape[:-1], sum(x.shape[-1] for x in (q, k, v))))
+                    prev_metadata = populate_tensor_metadata(qkv_cat, q, shape=qkv_cat_shape)
+                out_dtype: torch.dtype | None = None
+                if prev_metadata and len(prev_metadata.shape) == 3 and prev_metadata.shape[0] == 1:
+                    qkv_cat = graph.call_function(torch.ops.aten.squeeze.dim, (qkv_cat, 0))
+                    prev_metadata = populate_tensor_metadata(qkv_cat, prev_metadata, shape=prev_metadata.shape[1:])
+                if prev_metadata and prev_metadata.dtype != torch.float16:
+                    # pylint: disable-next=protected-access
+                    qkv_cat = graph.call_function(torch.ops.aten._to_copy.default, (qkv_cat,), {"dtype": torch.float16})
+                    out_dtype = prev_metadata.dtype
+                    prev_metadata = populate_tensor_metadata(qkv_cat, prev_metadata, dtype=torch.float16)
+                plugin_node = graph.call_function(
+                    fake_gpt_attention_plugin, (qkv_cat, *global_plugin_inputs.model_dump().values())
+                )
+                if q:
+                    prev_metadata = populate_tensor_metadata(plugin_node, q, dtype=torch.float16)
+                if out_dtype is not None:
+                    plugin_node = graph.call_function(
+                        # pylint: disable-next=protected-access
+                        torch.ops.aten._to_copy.default,
+                        (plugin_node,),
+                        {"dtype": out_dtype},
+                    )
+                    if prev_metadata:
+                        populate_tensor_metadata(plugin_node, prev_metadata, dtype=out_dtype)
+
+                # See https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
+                # pylint: disable-next=invalid-name
+                N, *others, Hq, L, Ev = sdpa_out_shape  # noqa: N806
+                out_reshape = graph.call_function(
+                    torch.ops.aten.reshape.default, (plugin_node, [N, *others, -1, Hq, Ev])
+                )
+                if prev_metadata:
+                    prev_metadata = populate_tensor_metadata(out_reshape, prev_metadata, shape=(N, *others, L, Hq, Ev))
+                ndim = 4 + len(others)
+                dims = [*range(ndim)]
+                dims[-2], dims[-3] = dims[-3], dims[-2]
+                output = graph.call_function(torch.ops.aten.permute.default, (out_reshape, dims))
+                if prev_metadata:
+                    prev_metadata = populate_tensor_metadata(output, prev_metadata, shape=sdpa_out_shape)
+
+            node.replace_all_uses_with(output)
+            modified = True
+        return PassResult(graph_module, modified)
 
 
-def get_gpt_attention_plugin_pattern() -> Graph:
-    graph = Graph()
-    query = graph.placeholder("query")
-    key = graph.placeholder("key")
-    value = graph.placeholder("value")
-    cos = graph.placeholder("cos")
-    sin = graph.placeholder("sin")
-
-    query = insert_rotary_pos_emb_subgraph(graph, query, cos, sin)
-    key = insert_rotary_pos_emb_subgraph(graph, key, cos, sin)
-
-    output = graph.call_function(
-        torch._C._nn.scaled_dot_product_attention,
-        (query, key, value, None, 0.0, False),
-    )
-    _ = graph.output((output,))
-    graph.lint()
-    return graph
-
-
-def get_gpt_attention_plugin_replacement() -> Graph:
-    graph = Graph()
-    query = graph.placeholder("query")
-    key = graph.placeholder("key")
-    value = graph.placeholder("value")
-    _ = graph.placeholder("cos")
-    _ = graph.placeholder("sin")
-
-    qkv = graph.call_function(torch.ops.aten.cat.default, ((query, key, value), -3))
-    batch_size = graph.call_function(torch.ops.aten.sym_size.int, (query, 0))
-    query_shape = graph.call_function(torch.ops.aten.sym_size.default, (query,))
-    qkv_2d = graph.call_function(torch.ops.aten.reshape.default, (qkv, (batch_size, -1)))
-    fake_plugin = graph.call_function(
-        FakeGPTAttentionPlugin,
-        (qkv_2d,),
-    )
-    output = graph.call_function(torch.ops.aten.reshape.default, (fake_plugin, query_shape))
-    _ = graph.output((output,))
-    graph.lint()
-    return graph
-
-
-def insert_rotary_pos_emb_subgraph(
-    graph: Graph,
-    x: Node,
-    cos: Node,
-    sin: Node,
-    *,
-    axis: int = -1,
-    embed_dim: int = 128,
-) -> Node:
-    x_cos = graph.call_function(torch.ops.aten.mul.Tensor, (x, cos))
-    # Note: integer literals used in the slice nodes will be considered as wild cards by the subgraph matcher
-    x_slice_0 = graph.call_function(torch.ops.aten.slice.Tensor, (x, axis, 0, embed_dim // 2))
-    x_slice_1 = graph.call_function(torch.ops.aten.slice.Tensor, (x, axis, embed_dim // 2, (1 << 63) - 1))
-    neg_x_slice_1 = graph.call_function(torch.ops.aten.neg.default, (x_slice_1,))
-    rotated_x = graph.call_function(torch.ops.aten.cat.default, ((neg_x_slice_1, x_slice_0), axis))
-    rotated_x_sin = graph.call_function(torch.ops.aten.mul.Tensor, (rotated_x, sin))
-    return graph.call_function(torch.ops.aten.add.Tensor, (x_cos, rotated_x_sin))
-
-
-T = TypeVar("T")
-
-
-def lookup_attributes(pretrained_config: PretrainedConfig, *names: str, default: T) -> T:
-    for name in names:
-        if hasattr(pretrained_config, name):
-            return getattr(pretrained_config, name)
-    return default
+def find_projection(x: Node) -> LinearSubgraph | None:
+    if not (
+        ancester_linear_subgraphs := {
+            subgraph: depth
+            for node, depth in get_ancestors_with_depth(x).items()
+            if (subgraph := LinearSubgraph.configure_from(node))
+        }
+    ):
+        return None
+    return min(ancester_linear_subgraphs, key=lambda subgraph: ancester_linear_subgraphs[subgraph])

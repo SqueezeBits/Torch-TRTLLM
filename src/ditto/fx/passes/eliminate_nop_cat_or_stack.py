@@ -1,17 +1,18 @@
-import torch
-from torch.fx import GraphModule, Node
-from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
+from torch.fx import Node
+
+from .node_wise_pass import NodeWiseOptimizationPass
+from .specialized_node import CatNode, StackNode
 
 
-def eliminate_nop_cat_or_stack(graph_module: GraphModule) -> GraphModule:
-    for node in graph_module.graph.nodes:
+class EliminateNopCatOrStack(NodeWiseOptimizationPass):
+    """Eliminate cat or stack called with just one input tensor."""
+
+    @classmethod
+    def rewrite(cls, node: Node) -> dict[Node, Node]:
+        cat_or_stack: CatNode | StackNode | None
         if not (
-            node.target in (torch.ops.aten.cat.default, torch.ops.aten.stack.default)
-            and isinstance((tensors := node.args[0]), list | tuple)
-            and len(tensors) == 1
-            and isinstance((the_input := tensors[0]), Node)
+            (cat_or_stack := CatNode.specialize_from(node) or StackNode.specialize_from(node))
+            and len(cat_or_stack.tensors) == 1
         ):
-            continue
-        node.replace_all_uses_with(the_input)
-    clean_up_graph_after_modifications(graph_module)
-    return graph_module
+            return {}
+        return {node: cat_or_stack.tensors[0]}

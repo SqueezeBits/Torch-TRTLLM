@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import numpy as np
 import tensorrt as trt
 from tensorrt_llm.functional import PluginInfo, set_plugin_info
+from tensorrt_llm.plugin import TRT_LLM_PLUGIN_NAMESPACE
 from torch.fx.node import Argument, Target
 from torch_tensorrt.dynamo.conversion._ConversionContext import ConversionContext
 from torch_tensorrt.dynamo.conversion._ConverterRegistry import (
@@ -13,7 +14,7 @@ from torch_tensorrt.dynamo.conversion._ConverterRegistry import (
 )
 from torch_tensorrt.dynamo.conversion.converter_utils import get_trt_tensor
 
-from ..fake_gpt_attention_plugin import FakeGPTAttentionPlugin
+from ..fake_targets import FakeGPTAttentionPlugin
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +30,11 @@ def convert_fake_gpt_attention_plugin(
     kwargs: dict[str, Argument],
     name: str,
 ) -> trt.ITensor | Sequence[trt.ITensor]:
-    # plugin_creator = trt.get_plugin_registry().get_plugin_creator("GPTAttention", "1", TRT_LLM_PLUGIN_NAMESPACE)
     assert isinstance(target, FakeGPTAttentionPlugin)
-    plugin_creator, attn_plugin, pfc = target.create_plugin()
+    plugin_creator = trt.get_plugin_registry().get_plugin_creator("GPTAttention", "1", TRT_LLM_PLUGIN_NAMESPACE)
+    plugin_fields = target.get_plugin_fields()
+    pfc = trt.PluginFieldCollection(plugin_fields)
+    attn_plugin = plugin_creator.create_plugin("causal_attn", pfc)
     assert attn_plugin is not None
     args_kwargs = {f"arg_{i}": arg for i, arg in enumerate(args)}
     args_kwargs.update(kwargs)
@@ -40,10 +43,13 @@ def convert_fake_gpt_attention_plugin(
         for key, x in args_kwargs.items()
         if isinstance(x, trt.ITensor | np.ndarray)
     ]
-    print(
-        "plugin inputs:\n"
-        + "\n".join(f"Tensor(name={t.name}, dtype={t.dtype.name}, shape={t.shape})" for t in plugin_inputs)
-    )
+    if target.layer_idx == 0:
+        print("plugin field collection:")
+        print("\n".join(f"{f.name} ({f.type}): {f.data} (dtype={f.data.dtype}, shape={f.data.shape})" for f in pfc))
+        print(
+            "plugin inputs:\n"
+            + "\n".join(f"Tensor(name={t.name}, dtype={t.dtype.name}, shape={t.shape})" for t in plugin_inputs)
+        )
     layer = ctx.net.add_plugin_v2(plugin_inputs, attn_plugin)
     plugin_info = PluginInfo(plugin_creator, "causal_attn", pfc)
     set_plugin_info(ctx.net, layer.name, plugin_info)

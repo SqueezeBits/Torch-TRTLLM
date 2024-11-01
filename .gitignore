@@ -222,3 +222,12 @@ ops
 
 # Text files
 *.txt
+
+# TRT-LLM artifacts
+model.cache
+
+# nohup artifacts
+nohup.out
+
+# JSON files
+*.json

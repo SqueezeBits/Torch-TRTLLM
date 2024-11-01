@@ -8,22 +8,6 @@ logger = logging.getLogger(__name__)
 
 
 def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
-    # Helper function to find all ancestors along with their depths for a given node
-    def get_ancestors_with_depth(node: Node) -> dict:
-        ancestors: dict[Node, int] = {}
-        stack = [(node, 0)]  # Initialize stack with (node, depth)
-
-        while stack:
-            current, depth = stack.pop()
-            # If node is not visited or found at a greater depth
-            if current not in ancestors or depth < ancestors[current]:
-                ancestors[current] = depth
-                # Traverse input nodes and increase the depth by 1
-                for input_node in current.all_input_nodes:
-                    stack.append((input_node, depth + 1))
-
-        return ancestors
-
     # Get ancestors with their depths for both nodes x and y
     ancestors_x = get_ancestors_with_depth(x)
     ancestors_y = get_ancestors_with_depth(y)
@@ -49,17 +33,36 @@ def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
     return closest_common_ancestor
 
 
-def find_or_create_placeholder_sym_size(graph: Graph, name: str, idx: int = 0) -> Node | None:
+def get_ancestors_with_depth(node: Node) -> dict[Node, int]:
+    ancestors: dict[Node, int] = {}
+    stack = [(node, 0)]  # Initialize stack with (node, depth)
+
+    while stack:
+        current, depth = stack.pop()
+        # If node is not visited or found at a greater depth
+        if current not in ancestors or depth < ancestors[current]:
+            ancestors[current] = depth
+            # Traverse input nodes and increase the depth by 1
+            for input_node in current.all_input_nodes:
+                stack.append((input_node, depth + 1))
+
+    return ancestors
+
+
+def find_or_create_placeholder_sym_size(graph: Graph, name: str, dim: int = 0) -> Node | None:
     if name not in (placeholders := {node.name: node for node in graph.nodes if node.op == "placeholder"}):
         logger.warning(f"No such placholder: {name}")
         return None
     placeholder = placeholders[name]
     for user in placeholder.users:
-        if user.target is torch.ops.aten.sym_size.int and len(user.args) == 2 and user.args[1] == idx:
+        if user.target is torch.ops.aten.sym_size.int and len(user.args) == 2 and user.args[1] == dim:
             return user
     last_placeholder = [*placeholders.values()][-1]
     with graph.inserting_after(last_placeholder):
-        return graph.call_function(torch.ops.aten.sym_size.int, (placeholder, 0))
+        node = graph.call_function(torch.ops.aten.sym_size.int, (placeholder, dim))
+        if (metadata := get_tensor_metadata(placeholder)) and isinstance(s := metadata.shape[dim], torch.SymInt):
+            node.meta["val"] = s
+        return node
 
 
 def get_tensor_metadata(node: Node) -> TensorMetadata | None:
@@ -70,14 +73,27 @@ def get_tensor_metadata(node: Node) -> TensorMetadata | None:
     return None
 
 
-def populate_metadata(
+def populate_tensor_metadata(
     node: Node,
-    tensor_metadata: TensorMetadata,
-    shape: torch.Size | None = None,
-) -> None:
-    if shape is None:
-        node.meta["tensor_meta"] = tensor_metadata
-        return
+    tensor_metadata: TensorMetadata | torch.Tensor,
+    *,
+    shape: torch.Size | tuple[int, ...] | None = None,
+    dtype: torch.dtype | None = None,
+) -> TensorMetadata:
+    if isinstance(tensor_metadata, torch.Tensor):
+        tensor_metadata = _extract_tensor_metadata(tensor_metadata)
     tensor_meta_as_dict = tensor_metadata._asdict()
-    tensor_meta_as_dict["shape"] = shape
-    node.meta["tensor_meta"] = TensorMetadata(**tensor_meta_as_dict)
+    if shape is not None:
+        if not isinstance(shape, torch.Size):
+            shape = torch.Size(shape)
+        tensor_meta_as_dict["shape"] = shape
+    if dtype is not None:
+        tensor_meta_as_dict["dtype"] = dtype
+    node.meta["tensor_meta"] = (metadata := TensorMetadata(**tensor_meta_as_dict))
+    return metadata
+
+
+def traceback_reformats(node: Node) -> Node:
+    if node.target not in (torch.ops.aten.reshape.default, torch.ops.aten.permute.default):
+        return node
+    return traceback_reformats(node.all_input_nodes[0])

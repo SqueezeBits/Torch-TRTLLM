@@ -1,8 +1,9 @@
 # pylint: disable=no-member, protected-access
 from __future__ import annotations
 
+import contextlib
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 
 import tensorrt as trt
 import torch
@@ -10,6 +11,7 @@ import torch.utils._pytree as pytree
 from tensorrt_llm._common import _is_building
 from torch.export import ExportedProgram
 from torch.fx import GraphModule
+from torch.fx.experimental.symbolic_shapes import log
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch_tensorrt._Device import Device
 from torch_tensorrt._enums import dtype
@@ -29,16 +31,8 @@ from torch_tensorrt.dynamo.lowering.passes import (
 )
 from torch_tensorrt.logging import TRT_LOGGER
 
-from .fx.passes import (
-    eliminate_empty_tensors_from_cat_or_stack,
-    eliminate_nop_cat_or_stack,
-    insert_gather_last_token_ids,
-    instantiate_fake_gpt_attention_plugins,
-    populate_fake_gpt_attention_plugin_inputs,
-    replace_operator_sub_by_aten_sub,
-    replace_sdpa_by_fake_gpt_attention_plugin,
-)
-from .interpreter import DynamicTRTInterpreter
+from .fx.optimize import optimize
+from .interpreter import TRTLLMInterpreter
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +57,8 @@ def build_engine(
 
     DYNAMO_CONVERTERS.set_compilation_settings(settings)
     logger.info(f"Compilation Settings: {settings}\n")
+    logger.info(f"arg_inputs: {arg_inputs}")
+    logger.info(f"kwarg_inputs: {kwarg_inputs}")
 
     flattened_inputs, _ = get_flat_args(arg_inputs, kwarg_inputs)
     output_dtypes = infer_module_output_dtypes(
@@ -70,7 +66,7 @@ def build_engine(
         truncate_double=settings.truncate_double,
     )
     try:
-        interpreter = DynamicTRTInterpreter(
+        interpreter = TRTLLMInterpreter(
             graph_module,
             flattened_inputs,
             logger_level=(trt.Logger.VERBOSE if settings.debug else trt.Logger.WARNING),
@@ -150,23 +146,26 @@ def get_inlined_graph_module(
     post_inline_pass_manager = DynamoPassManager.build_from_passlist(
         [
             *ATEN_POST_LOWERING_PASSES.passes,
-            *(
-                eliminate_empty_tensors_from_cat_or_stack,
-                eliminate_nop_cat_or_stack,
-                replace_operator_sub_by_aten_sub,
-                replace_sdpa_by_fake_gpt_attention_plugin,
-                instantiate_fake_gpt_attention_plugins,
-                populate_fake_gpt_attention_plugin_inputs,
-                insert_gather_last_token_ids,
-            ),
+            optimize,
             *(extra_post_inline_passes or []),
         ]
     )
-    _ = pre_inline_pass_manager(exported_program.graph_module)
-    exported_program = exported_program.run_decompositions(get_decompositions(enable_experimental_decompositions))
-    graph_module = exported_program.module()
-    graph_module.meta["pretrained_config"] = pretrained_config
-    graph_module = post_inline_pass_manager(graph_module)
+    with ignore_symbolic_shapes_warning():
+        _ = pre_inline_pass_manager(exported_program.graph_module)
+        exported_program = exported_program.run_decompositions(get_decompositions(enable_experimental_decompositions))
+        graph_module = exported_program.module()
+        graph_module.meta["pretrained_config"] = pretrained_config
+        graph_module = post_inline_pass_manager(graph_module)
     assert isinstance(graph_module, GraphModule)
     graph_module._forward_pre_hooks.clear()
     return graph_module
+
+
+@contextlib.contextmanager
+def ignore_symbolic_shapes_warning() -> Generator[None, None, None]:
+    log_level = log.level
+    log.setLevel(logging.ERROR)
+    try:
+        yield None
+    finally:
+        log.setLevel(log_level)

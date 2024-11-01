@@ -1,3 +1,4 @@
+import os
 from typing import Annotated, Any
 
 import torch
@@ -13,14 +14,11 @@ from transformers import (
     PreTrainedTokenizerFast,
     StaticCache,
 )
-from transformers.modeling_outputs import CausalLMOutputWithPast
 from typer import Option, Typer
 
 from . import (
     ArgumentsForExport,
     DynamicCacheHandler,
-    DynamicDimension,
-    SDPBackend,
     StaticCacheHandler,
     brief_tensor_repr,
     build_engine,
@@ -97,16 +95,14 @@ def generate(
 @torch.no_grad()
 def run(
     model_id: str,
-    sdp_backends: Annotated[list[str], Option(default_factory=list)],
     device: str = DEFAULT_DEVICE,
     dtype: str = "float16",
     engine_path: str = "",
     verbose: bool = False,
     trust_remote_code: bool = False,
+    show_locals_on_exception: bool = False,
 ) -> None:
-    backends = parse_sdp_backends(sdp_backends)
-    print(f"Using SDP backends: {backends}")
-
+    app.pretty_exceptions_show_locals = show_locals_on_exception
     torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
     print(f"device: {device} | dtype: {dtype}")
     model = AutoModelForCausalLM.from_pretrained(
@@ -116,39 +112,19 @@ def run(
     ).to(device)
 
     arguments_for_export = ArgumentsForExport.get_trtllm_inputs(
-        batch_dim=DynamicDimension(name="batch", min=1, opt=1, max=512),
         device=device,
         use_cache=False,
     )
-
-    def unsqueeze_input_ids(kwargs: dict[str, Any]) -> dict[str, Any]:
-        if not (isinstance(input_ids := kwargs.get("input_ids", None), torch.Tensor) and input_ids.ndim == 1):
-            return kwargs
-        kwargs["input_ids"] = input_ids.unsqueeze(-1)
-        return kwargs
-
-    def squeeze_output_logits(outputs: Any) -> Any:
-        if isinstance(outputs, tuple) and isinstance(logits := outputs[0], torch.Tensor) and logits.ndim == 3:
-            return (logits.squeeze(1), *outputs[1:])
-        if isinstance(outputs, CausalLMOutputWithPast) and outputs.logits.ndim == 3:
-            outputs.logits.squeeze_(1)
-            return outputs
-        return outputs
 
     if verbose:
         arguments_for_export.print_readable()
 
     print("torch.exporting module ...")
-    exported_program = export(
-        model,
-        arguments_for_export,
-        process_inputs=unsqueeze_input_ids,
-        process_outputs=squeeze_output_logits,
-        sdp_backends=backends,
-    )
+    exported_program = export(model, arguments_for_export)
 
     print("Lowering exported program into graph module ...")
     graph_module = get_inlined_graph_module(exported_program)
+
     model_name = type(model).__name__
     if verbose:
         with detailed_sym_node_str():
@@ -162,7 +138,8 @@ def run(
         assume_dynamic_shape_support=True,
         enabled_precisions={torch_trt.dtype.f16, torch_trt.dtype.f32},
         debug=verbose,
-        optimization_level=5,
+        optimization_level=3,
+        max_aux_streams=-1,
     )
     engine = build_engine(
         graph_module,
@@ -174,24 +151,17 @@ def run(
     for i in range(engine.num_io_tensors):
         name = engine.get_tensor_name(i)
         print(f"({i}) {name}: {engine.get_tensor_shape(name)}")
-    engine_path = engine_path or f"{model_name}.engine"
+    engine_path = engine_path or (
+        os.path.join(
+            f"{os.path.abspath(model_id)}-{'fp16' if torch_dtype == torch.float16 else 'fp32'}-ditto", "rank0.engine"
+        )
+        if os.path.isdir(model_id)
+        else f"{model_id}.engine"
+    )
     print(f"Saving serialized engine at {engine_path}")
+    os.makedirs(os.path.dirname(engine_path), exist_ok=True)
     with open(engine_path, "wb") as engine_file:
         engine_file.write(engine.serialize())
-
-
-def parse_sdp_backends(sdp_backends: list[str]) -> list[SDPBackend] | SDPBackend:
-    try:
-        available_backends = {
-            "CUDNN_ATTENTION": SDPBackend.CUDNN_ATTENTION,
-            "EFFICIENT_ATTENTION": SDPBackend.EFFICIENT_ATTENTION,
-            "FLASH_ATTENTION": SDPBackend.FLASH_ATTENTION,
-            "MATH": SDPBackend.MATH,
-        }
-        backends = [available_backends[x.upper()] for x in sdp_backends]
-        return backends or SDPBackend.EFFICIENT_ATTENTION
-    except KeyError as e:
-        raise ValueError(f"--sdp-backends must be one of {','.join(available_backends.keys())}") from e
 
 
 def run_generation(

@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from functools import cached_property
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from torch.export import Dim
 from typing_extensions import Self
 
@@ -41,11 +41,16 @@ class DynamicDimensionType(BaseModel, ABC):
     def example(self) -> int:
         ...
 
-    def _apply_binary_op(self, other: Self | int, op: Callable[[int, int], int]) -> "DerivedDynamicDimension":
+    def _apply_binary_op(
+        self,
+        other: Self | int,
+        op: Callable[[int, int], int],
+        flip_order: bool = False,
+    ) -> "DerivedDynamicDimension":
         if isinstance(other, DynamicDimensionType | int):
             return DerivedDynamicDimension(
-                lhs=self,
-                rhs=other,
+                lhs=other if flip_order else self,
+                rhs=self if flip_order else other,
                 op=op,
             )
         raise ValueError(f"Cannot {op.__name__} {self} and {other}")
@@ -58,6 +63,9 @@ class DynamicDimensionType(BaseModel, ABC):
 
     def __mul__(self, other: Self | int) -> "DerivedDynamicDimension":
         return self._apply_binary_op(other, operator.mul)
+
+    def __rmul__(self, other: Self | int) -> "DerivedDynamicDimension":
+        return self._apply_binary_op(other, operator.mul, flip_order=True)
 
     def __floordiv__(self, other: Self | int) -> "DerivedDynamicDimension":
         return self._apply_binary_op(other, operator.floordiv)
@@ -106,14 +114,19 @@ class DynamicDimension(DynamicDimensionType):
 
     @model_validator(mode="after")
     def check_given_values(self) -> Self:
-        assert self.name.isidentifier(), f"name must be an identifier but got '{self.name}'"
-        assert 0 <= self.min < self.max, f"0 <= min < max must be satified, but got min={self.min}, max={self.max}"
-        assert (
-            self.min <= self.opt <= self.max
-        ), f"min <= opt <= max must be satisfied, but got min={self.min}, opt={self.opt}, max={self.max}"
-        assert self.min <= self.example <= self.max, (
-            "min <= example <= max must be satisfied, " f"but got min={self.min}, opt={self.example}, max={self.max}"
-        )
+        if not self.name.isidentifier():
+            raise ValidationError(f"name must be an identifier but got '{self.name}'")
+        if not 0 <= self.min < self.max:
+            raise ValidationError(f"0 <= min < max must be satified, but got min={self.min}, max={self.max}")
+        if not self.min <= self.opt <= self.max:
+            raise ValidationError(
+                f"min <= opt <= max must be satisfied, but got min={self.min}, opt={self.opt}, max={self.max}"
+            )
+        if not self.min <= self.example <= self.max:
+            raise ValidationError(
+                "min <= example <= max must be satisfied, "
+                f"but got min={self.min}, opt={self.example}, max={self.max}"
+            )
         return self
 
 
@@ -129,6 +142,7 @@ class DerivedDynamicDimension(DynamicDimensionType):
         try:
             lhs = self.lhs.export_dim if isinstance(self.lhs, DynamicDimensionType) else self.lhs
             rhs = self.rhs.export_dim if isinstance(self.rhs, DynamicDimensionType) else self.rhs
+            # pylint: disable-next=not-callable
             return self.op(lhs, rhs)  # type: ignore[arg-type, return-value]
         except Exception as e:
             print(f"[WARNING] the derived dynamic dimension {self.name} will be detached (reason: {e})")
@@ -148,6 +162,7 @@ class DerivedDynamicDimension(DynamicDimensionType):
         rhs_max = self.rhs.max if isinstance(self.rhs, DynamicDimensionType) else self.rhs
         return min(
             (
+                # pylint: disable-next=not-callable
                 self.op(lhs, rhs)
                 for lhs, rhs in (
                     (lhs_min, rhs_min),
@@ -166,6 +181,7 @@ class DerivedDynamicDimension(DynamicDimensionType):
         rhs_max = self.rhs.max if isinstance(self.rhs, DynamicDimensionType) else self.rhs
         return max(
             (
+                # pylint: disable-next=not-callable
                 self.op(lhs, rhs)
                 for lhs, rhs in (
                     (lhs_min, rhs_min),
@@ -180,12 +196,14 @@ class DerivedDynamicDimension(DynamicDimensionType):
     def opt(self) -> int:
         lhs = self.lhs.opt if isinstance(self.lhs, DynamicDimensionType) else self.lhs
         rhs = self.rhs.opt if isinstance(self.rhs, DynamicDimensionType) else self.rhs
+        # pylint: disable-next=not-callable
         return self.op(lhs, rhs)
 
     @property
     def example(self) -> int:
         lhs = self.lhs.example if isinstance(self.lhs, DynamicDimensionType) else self.lhs
         rhs = self.rhs.example if isinstance(self.rhs, DynamicDimensionType) else self.rhs
+        # pylint: disable-next=not-callable
         return self.op(lhs, rhs)
 
     def detach(self) -> DynamicDimension:

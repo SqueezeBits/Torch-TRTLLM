@@ -59,6 +59,7 @@ class TRTLLMPreTrainedModelWrapper(ExportWrapper[PreTrainedModel]):
         self,
         *,
         input_ids: torch.Tensor,
+        position_ids: torch.Tensor,
         last_token_ids: torch.Tensor,
         kv_cache_block_offsets: torch.Tensor,
         host_kv_cache_block_offsets: torch.Tensor,
