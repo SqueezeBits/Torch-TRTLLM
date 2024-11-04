@@ -31,7 +31,8 @@ from torch_tensorrt.dynamo.lowering.passes import (
 )
 from torch_tensorrt.logging import TRT_LOGGER
 
-from .fx.optimize import optimize
+from .config import PassName
+from .fx.optimize import get_optimizer_pass
 from .interpreter import TRTLLMInterpreter
 
 logger = logging.getLogger(__name__)
@@ -136,18 +137,21 @@ def get_inlined_graph_module(
     exported_program: ExportedProgram,
     *,
     enable_experimental_decompositions: bool = _defaults.ENABLE_EXPERIMENTAL_DECOMPOSITIONS,
-    extra_pre_inline_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
-    extra_post_inline_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
+    skipped_optimizers: list[PassName] | None = None,
+    enforce_projections_in_fp32: bool = False,
+    extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
 ) -> GraphModule:
     pretrained_config = exported_program.graph_module.meta.get("pretrained_config", None)
     pre_inline_pass_manager = DynamoPassManager.build_from_passlist(
-        [*ATEN_PRE_LOWERING_PASSES.passes, *(extra_pre_inline_passes or [])]
+        [
+            *ATEN_PRE_LOWERING_PASSES.passes,
+        ]
     )
     post_inline_pass_manager = DynamoPassManager.build_from_passlist(
         [
             *ATEN_POST_LOWERING_PASSES.passes,
-            optimize,
-            *(extra_post_inline_passes or []),
+            get_optimizer_pass(skipped_optimizers, enforce_projections_in_fp32),
+            *(extra_passes or []),
         ]
     )
     with ignore_symbolic_shapes_warning():

@@ -61,14 +61,14 @@ def export(
 def unsqueeze_input_ids(kwargs: dict[str, Any]) -> dict[str, Any]:
     if not (isinstance(input_ids := kwargs.get("input_ids", None), torch.Tensor) and input_ids.ndim == 1):
         return kwargs
-    kwargs["input_ids"] = input_ids.unsqueeze(0)
+    kwargs["input_ids"] = input_ids.unsqueeze(1)
     return kwargs
 
 
 def squeeze_output_logits(outputs: Any) -> Any:
     if isinstance(outputs, tuple) and isinstance(logits := outputs[0], torch.Tensor) and logits.ndim == 3:
-        return (logits.squeeze(0), *outputs[1:])
+        return (logits.squeeze(1), *outputs[1:])
     if isinstance(outputs, CausalLMOutputWithPast) and outputs.logits.ndim == 3:
-        outputs.logits.squeeze_(0)
+        outputs.logits.squeeze_(1)
         return outputs
     return outputs

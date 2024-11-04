@@ -2,24 +2,25 @@ import os
 from typing import Literal
 
 PassName = Literal[
+    "CastMMConstToFP32",
     "ConstantSharing",
-    "EliminateEmptyTensorsFromCatOrStack",
+    "DeferUnsqueeze",
+    "EliminateCopy",
     "EliminateNopCatOrStack",
     "EliminateNopPermute",
     "EliminateNopReshape",
-    "EliminateUniqueClone",
+    "EliminateNopSlice",
+    "EliminateUnsqueezeSqueeze",
     "FuseConsecutivePermutes",
     "FuseConsecutiveReshapes",
     "FuseConsecutiveSplitConcat",
     "FuseEquivalentNodes",
-    "FuseMMSiblings",
+    "FuseMMConstSiblings",
     "InsertGatherLastTokenIds",
-    "ReplaceOperatorSubByATenSub",
     "ReplaceSDPAByFakeGPTAttentionPlugin",
+    "RewriteReshapeAsUnsqueeze",
     "WrapRoPESubgraphs",
 ]
 
 # Maximum iteration limit for FX graph transformations.
 FX_TRANSFORM_MAXIMUM_ITERATION = int(os.environ.get("FX_TRANSFORM_MAXIMUM_ITERATION", 100))
-
-SKIPPED_OPTIMIZERS: list[PassName] = []

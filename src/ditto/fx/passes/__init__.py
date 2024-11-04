@@ -2,7 +2,6 @@ from .cast_mm_const_to_fp32 import CastMMConstToFP32
 from .constant_sharing import ConstantSharing
 from .defer_unsqueeze import DeferUnsqueeze
 from .eliminate_copy import EliminateCopy
-from .eliminate_empty_tensors_from_cat_or_stack import EliminateEmptyTensorsFromCatOrStack
 from .eliminate_nop_cat_or_stack import EliminateNopCatOrStack
 from .eliminate_nop_permute import EliminateNopPermute
 from .eliminate_nop_reshape import EliminateNopReshape
@@ -14,7 +13,6 @@ from .fuse_consecutive_split_concat import FuseConsecutiveSplitConcat
 from .fuse_equivalent_nodes import FuseEquivalentNodes
 from .fuse_mm_const_siblings import FuseMMConstSiblings
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
-from .replace_operator_sub_by_aten_sub import ReplaceOperatorSubByATenSub
 from .replace_sdpa_by_fake_gpt_attention_plugin import ReplaceSDPAByFakeGPTAttentionPlugin
 from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
 from .wrap_rope_subgraphs import WrapRoPESubgraphs
