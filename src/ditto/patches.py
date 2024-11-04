@@ -7,12 +7,30 @@ import tensorrt_llm as trtllm
 from .pretty_print import builder_config_as_dict, get_network_ir
 
 
-def patched_trtllm_network_to_dot(self: trtllm.Network, path: str):
+def patched_trtllm_network_to_dot(self: trtllm.Network, path: str | None) -> str | None:
+    messages: list[str] = []
+    if input_tensors := self._inputs:
+        num_profiles = len(list(input_tensors.values())[0].profiles)
+        for i in range(num_profiles):
+            for input_name, input_tensor in input_tensors.items():
+                if len(input_tensor.profiles) == 0:
+                    continue
+                shape_profile = input_tensor.profiles[i]
+                messages.append(f"# Profile {i} for '{input_name}':")
+                messages.append(f"#   Min shape: {(*shape_profile.min,)}")
+                messages.append(f"#   Opt shape: {(*shape_profile.opt,)}")
+                messages.append(f"#   Max shape: {(*shape_profile.max,)}")
+    messages.append(get_network_ir(self._trt_network))
+    network_ir = "\n".join(messages)
+    if not path:
+        return network_ir
     network_path = path.replace(".dot", ".txt")
-    network_ir = get_network_ir(self._trt_network)
+    if not network_path.endswith(".txt"):
+        network_path = f"{network_path}.txt"
     with open(network_path, "w") as f:
         f.write(network_ir)
     trtllm.logger.info(f"Network IR saved at {network_path}")
+    return None
 
 
 original_builder_build_engine = trtllm.Builder.build_engine

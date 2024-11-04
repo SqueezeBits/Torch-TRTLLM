@@ -69,9 +69,7 @@ class TRTLLMInterpreter(TRTInterpreter):
     def _construct_trt_network_def(self) -> None:
         super()._construct_trt_network_def()
         with open(f"{self.ctx.net.name}.txt", "w") as f:
-            f.write(get_network_ir(self.ctx.net))
-        if profiles := self.optimization_profiles:
-            print_dynamic_input_ranges(self.ctx.net, profiles, self.logger)
+            f.write(get_network_ir(self.ctx.net, self.optimization_profiles))
         self.logger.info(f"TensorRT Network saved at {self.ctx.net.name}.txt")
 
     def _populate_trt_builder_config(
@@ -200,27 +198,3 @@ def _format_output(output: Any) -> str:
         tokens = (f"{key}: {_format_output(x)}" for key, x in output.items())
         return f"[{','.join(tokens)}]"
     return f"{type(output).__name__}({output})"
-
-
-def print_dynamic_input_ranges(
-    network: trt.INetworkDefinition,
-    optimization_profiles: list[trt.IOptimizationProfile],
-    logger: logging.Logger,
-) -> None:
-    # Loop through all network inputs
-    for i in range(network.num_inputs):
-        input_tensor = network.get_input(i)
-        # Check if the input has a dynamic shape (i.e., dimensions are not fully specified)
-        if input_tensor.is_shape_tensor or any(dim == -1 for dim in input_tensor.shape):
-            logger.info(f"Input '{input_tensor.name}' is dynamic.")
-
-            # Loop through all optimization profiles in the builder configuration
-            for profile_index, profile in enumerate(optimization_profiles):
-                # Get the min, opt, and max shape for this input
-                min_shape, opt_shape, max_shape = profile.get_shape(input_tensor.name)
-                logger.info(f"Profile {profile_index} for '{input_tensor.name}':")
-                logger.info(f"  Min shape: {min_shape}")
-                logger.info(f"  Opt shape: {opt_shape}")
-                logger.info(f"  Max shape: {max_shape}")
-        else:
-            logger.info(f"Input '{input_tensor.name}' is static with shape {input_tensor.shape}")

@@ -3,13 +3,12 @@ import operator
 import torch
 from torch.fx import Node
 
-from ...config import MAX_FUSIBLE_MATMUL_OUT_SIZE
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .node_wise_pass import NodeWiseOptimizationPass
 from .specialized_node import MMConstNode
 
 
-class FuseMMSiblings(NodeWiseOptimizationPass):
+class FuseMMConstSiblings(NodeWiseOptimizationPass):
     """Fuse a group of constant matmul nodes sharing the same input tensor and reduction dimension size."""
 
     @classmethod
@@ -29,14 +28,12 @@ class FuseMMSiblings(NodeWiseOptimizationPass):
         fused_weight = torch.cat([user.weight for user in children], dim=1).contiguous()
         fused_weight_name = "".join(user.weight_name for user in children)
         output_sizes = [user.weight.shape[1] for user in children]
-        if sum(output_sizes) > MAX_FUSIBLE_MATMUL_OUT_SIZE:
-            return {}
 
         graph = node.graph
         if not (graph_module := graph.owning_module):
             return {}
 
-        graph_module.register_buffer(fused_weight_name, fused_weight)
+        graph_module.register_parameter(fused_weight_name, torch.nn.Parameter(fused_weight, requires_grad=False))
         with graph.inserting_before(children[0].node):
             get_attr = graph.get_attr(fused_weight_name)
             populate_tensor_metadata(get_attr, fused_weight)

@@ -1,11 +1,16 @@
 import contextlib
+import keyword
+import operator
 import re
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from typing import Any
 
 import tensorrt as trt
 import torch
+from torch.fx import Graph, GraphModule, Node
 from torch.fx.experimental.sym_node import SymNode
+from torch.fx.passes.shape_prop import TensorMetadata
+from torch_tensorrt import dtype
 
 
 @contextlib.contextmanager
@@ -77,18 +82,145 @@ def get_tensor_repr(tensor: trt.ITensor | None) -> str:
     return f"{name}: {dtype_}{shape}@{device}"
 
 
-def get_network_ir(network: trt.INetworkDefinition) -> str:
-    lines: list[str] = []
+def get_network_ir(
+    network: trt.INetworkDefinition,
+    profiles: list[trt.IOptimizationProfile] | None = None,
+) -> str:
+    return "\n".join(
+        [
+            get_dynamic_input_ranges(network, profiles) if profiles else "",
+            build_fake_graph_module(network).print_readable(print_output=False),
+        ]
+    )
+
+
+def build_fake_graph_module(network: trt.INetworkDefinition) -> GraphModule:
+    graph = Graph()
+    nodes: dict[str, Node] = {}
+
+    def extract_tensor_metadata(t: trt.ITensor) -> TensorMetadata:
+        return TensorMetadata(
+            shape=torch.Size(t.shape[:]),
+            dtype=dtype._from(t.dtype).to(torch.dtype),  # type: ignore
+            requires_grad=False,
+            stride=(),
+            memory_format=None,
+            is_quantized=False,
+            qparams={},
+        )
+
+    def make_as_identifier(s: str) -> str:
+        # Remove invalid characters and replace them with underscores
+        s = re.sub(r"\W|^(?=\d)", "_", s)
+
+        # If the result is a Python keyword, add a suffix to make it a valid identifier
+        if keyword.iskeyword(s):
+            s += "_id"
+
+        return s
+
+    def make_fake_stack_trace(layer_name: str) -> str:
+        return f'File "None", line 0, in <None>\n  {layer_name}'
+
+    fake_targets: dict[str, Callable[..., Any]] = {}
+
+    def get_fake_target(layer: trt.ILayer) -> Callable[..., Any]:
+        if (layer_type := layer.type.name.lower()) in fake_targets:
+            return fake_targets[layer_type]
+
+        def fake_target(*args, **kwargs):
+            ...
+
+        fake_target.__name__ = layer_type
+        fake_target.__module__ = "trt"
+        fake_targets[layer_type] = fake_target
+        return fake_target
+
+    class FakeModule(torch.nn.Module):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.fake_params: dict[str, torch.nn.Parameter] = {}
+
+        def register_fake_parameter(self, name: str, param: torch.nn.Parameter) -> None:
+            self.fake_params[name] = param
+
+        def __getattr__(self, name: str) -> Any:
+            if name in self.fake_params:
+                return self.fake_params[name]
+            return super().__getattr__(name)
+
+    fake_module = FakeModule()
+    graph_module = GraphModule(FakeModule(), graph)
+
     for i in range(network.num_inputs):
-        lines.append(f"{get_tensor_repr(network.get_input(i))} [network input]")
+        t = network.get_input(i)
+        placeholder = nodes[t.name] = graph.placeholder(t.name)
+        placeholder.meta["tensor_meta"] = extract_tensor_metadata(t)
     for i in range(network.num_layers):
         layer = network.get_layer(i)
-        inputs = ", ".join(get_alias(layer.get_input(j)) for j in range(layer.num_inputs))
-        outputs = ", ".join(get_tensor_repr(layer.get_output(j)) for j in range(layer.num_outputs))
-        lines.append(f"{outputs} = {layer.type.name}({inputs})")
-    for i in range(network.num_outputs):
-        lines.append(f"{get_tensor_repr(network.get_output(i))} [network output]")
-    return "\n".join(lines)
+        inputs = [layer.get_input(j) for j in range(layer.num_inputs)]
+        outputs = [layer.get_output(j) for j in range(layer.num_outputs)]
+        assert len(outputs) > 0
+
+        fake_target = get_fake_target(layer)
+        if len(outputs) == 1:
+            output = outputs[0]
+            tensor_meta = extract_tensor_metadata(output)
+            identifier = make_as_identifier(layer.name)
+            if layer.type == trt.LayerType.CONSTANT:
+                fake_module.register_fake_parameter(
+                    identifier,
+                    torch.nn.Parameter(
+                        torch.zeros(size=tensor_meta.shape, dtype=tensor_meta.dtype),
+                        requires_grad=False,
+                    ),
+                )
+            output_node = nodes[outputs[0].name] = (
+                graph.get_attr(identifier)
+                if layer.type == trt.LayerType.CONSTANT
+                else graph.call_function(
+                    fake_target,
+                    tuple(None if x is None else nodes[x.name] for x in inputs),
+                )
+            )
+            output_node.meta["tensor_meta"] = tensor_meta
+            output_node.stack_trace = make_fake_stack_trace(layer.name)
+        else:
+            outputs_node = nodes[f"{layer.name}_output"] = graph.call_function(
+                fake_target,
+                tuple(nodes[x.name] for x in inputs),
+            )
+            for i, output in enumerate(outputs):
+                output_node = nodes[output.name] = graph.call_function(
+                    operator.getitem,
+                    (outputs_node, i),
+                )
+                output_node.meta["tensor_meta"] = extract_tensor_metadata(output)
+                output_node.stack_trace = make_fake_stack_trace(layer.name)
+    graph.output(tuple(nodes[network.get_output(i).name] for i in range(network.num_outputs)))
+    for node in graph.nodes:
+        if stack_trace := node.stack_trace:
+            node.stack_trace = f"{stack_trace}, users: {len(node.users)}"
+    return graph_module
+
+
+def get_dynamic_input_ranges(
+    network: trt.INetworkDefinition,
+    optimization_profiles: list[trt.IOptimizationProfile],
+) -> str:
+    messages = []
+    # Loop through all network inputs
+    for i in range(network.num_inputs):
+        input_tensor = network.get_input(i)
+        # Loop through all optimization profiles in the builder configuration
+        for profile_index, profile in enumerate(optimization_profiles):
+            # Get the min, opt, and max shape for this input
+            min_shape, opt_shape, max_shape = profile.get_shape(input_tensor.name)
+            messages.append(f"# Profile {profile_index} for '{input_tensor.name}':")
+            messages.append(f"#   Min shape: {min_shape}")
+            messages.append(f"#   Opt shape: {opt_shape}")
+            messages.append(f"#   Max shape: {max_shape}")
+    return "\n".join(messages)
 
 
 def builder_config_as_dict(builder_config: trt.IBuilderConfig) -> dict[str, Any]:

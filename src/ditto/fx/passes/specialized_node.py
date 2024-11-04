@@ -162,6 +162,7 @@ def get_argument(
     )
 
 
+Asterick = Field(default=None, exclude=True)
 SymInt = int | torch.SymInt | Node
 Number = int | float | bool
 
@@ -190,7 +191,7 @@ class BinaryElementwiseNode(ATenOpNode):
 
 
 class BinaryElementwiseWithAlphaNode(BinaryElementwiseNode):
-    asterick: None = Field(default=None, exclude=True)
+    asterick: None = Asterick
     alpha: Number = 1
 
     @classmethod
@@ -217,7 +218,7 @@ class ReductionIntListNode(ATenOpNode):
     x: Node
     dim: list[int] = Field(max_length=1, min_length=1)
     keepdim: bool = False
-    asterick: None = Field(default=None, exclude=True)
+    asterick: None = Asterick
     dtype: torch.dtype | None = None
 
     @classmethod
@@ -285,6 +286,16 @@ class CatNode(CombineNode):
     @classmethod
     def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
         return (torch.ops.aten.cat.default,)
+
+
+class CloneNode(ATenOpNode):
+    x: Node
+    asterick: None = Asterick
+    memory_format: torch.memory_format | None = None
+
+    @classmethod
+    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+        return (torch.ops.aten.clone.default,)
 
 
 class DivNode(BinaryElementwiseNode):
@@ -451,6 +462,18 @@ class SDPANode(SpecializedNode):
         return True
 
 
+class SliceNode(ATenOpNode):
+    x: Node
+    dim: int = 0
+    start: SymInt | None = None
+    end: SymInt | None = None
+    step: SymInt = 1
+
+    @classmethod
+    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+        return (torch.ops.aten.slice.Tensor,)
+
+
 class SqrtNode(UnaryElementwiseNode):
     @classmethod
     def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
@@ -499,7 +522,7 @@ class SumDimIntListNode(ReductionIntListNode):
 
 class ToCopyNode(ATenOpNode):
     x: Node
-    asterick: None = Field(default=None, exclude=True)
+    asterick: None = Asterick
     dtype: torch.dtype | None = None
     layout: torch.layout | None = None
     device: torch.device | None = None

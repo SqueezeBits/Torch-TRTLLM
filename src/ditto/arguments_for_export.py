@@ -54,39 +54,30 @@ class ArgumentsForExport(StrictlyTyped):
         batch_size = DynamicDimension(
             name="batch_size",
             min=1,
-            opt=1,
-            max=1024,
+            opt=128,
+            max=256,
         )
-        s = DynamicDimension(name="s", min=0, opt=0, max=128)
-        input_size = 8 * s + 1
-        beam_width = DynamicDimension(
-            name="beam_width",
+        s = DynamicDimension(name="s", min=0, opt=32, max=1024)
+        input_size = 8 * s
+        block_size = DynamicDimension(
+            name="block_size",
             min=1,
-            opt=1,
-            max=1 << 15 - 1,
-            example_for_export=batch_size.example + 1,
+            opt=32,
+            max=64,
         )
-        max_seq_len = DynamicDimension(
-            name="max_seq_len",
+        cache_indirection_size = DynamicDimension(
+            name="cache_indirection_size",
             min=1,
-            opt=1,
-            max=1 << 15 - 1,
-            example_for_export=batch_size.example + 2,
-        )
-        num_seq = DynamicDimension(
-            name="num_seq",
-            min=1,
-            opt=1,
-            max=batch_size.max,
-            example_for_export=batch_size.example + 3,
+            opt=2048,
+            max=4096,
         )
         hints = {
             "input_ids": InputHint(shape=(input_size,), dtype=torch.int32, device=device),
-            "position_ids": InputHint(shape=(batch_size,), dtype=torch.int32, device=device),
-            "last_token_ids": InputHint(shape=(num_seq,), dtype=torch.int32, device=device),
-            "kv_cache_block_offsets": InputHint(shape=(batch_size, 2, max_seq_len), dtype=torch.int32, device=device),
+            "position_ids": InputHint(shape=(input_size,), dtype=torch.int32, device=device),
+            "last_token_ids": InputHint(shape=(batch_size,), dtype=torch.int32, device=device),
+            "kv_cache_block_offsets": InputHint(shape=(batch_size, 2, block_size), dtype=torch.int32, device=device),
             "host_kv_cache_block_offsets": InputHint(
-                shape=(batch_size, 2, max_seq_len), dtype=torch.int32, device=device
+                shape=(batch_size, 2, block_size), dtype=torch.int32, device=device
             ),
             "host_kv_cache_pool_pointers": InputHint(shape=(2,), dtype=torch.int64, device=device),
             "sequence_length": InputHint(shape=(batch_size,), dtype=torch.int32, device=device),
@@ -98,7 +89,7 @@ class ArgumentsForExport(StrictlyTyped):
             "host_max_attention_window_sizes": InputHint(shape=(32,), dtype=torch.int32, device=device),
             "host_sink_token_length": InputHint(shape=(1,), dtype=torch.int32, device=device),
             "cache_indirection": InputHint(
-                shape=(batch_size, beam_width, max_seq_len), dtype=torch.int32, device=device
+                shape=(batch_size, 1, cache_indirection_size), dtype=torch.int32, device=device
             ),
         }
         return cls.from_hints(**hints, **other_flags)
