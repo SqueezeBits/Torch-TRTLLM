@@ -3,7 +3,6 @@ from abc import abstractmethod
 from torch.fx import GraphModule
 from torch.fx.node import Node
 from torch.fx.passes.infra.pass_base import PassResult
-from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
 
 from .graph_pass import GraphOptimizationPass
 
@@ -29,9 +28,6 @@ class NodeWiseOptimizationPass(GraphOptimizationPass):
                     for original_node, replacement_node in replacement_map.items()
                 ]
                 modified = modified or any(is_replaced)
-
-        if modified:
-            clean_up_graph_after_modifications(graph_module)
 
         return PassResult(graph_module, modified)
 

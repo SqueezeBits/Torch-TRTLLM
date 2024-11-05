@@ -2,6 +2,7 @@ from collections.abc import Callable
 
 from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_manager import PassManager
+from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
 
 from ..config import FX_TRANSFORM_MAXIMUM_ITERATION, PassName
 from .passes import (
@@ -46,6 +47,8 @@ def get_optimizer_pass(
 
     def optimize(graph_module: GraphModule) -> GraphModule:
         result = pass_manager(graph_module)
+        if result.modified:
+            clean_up_graph_after_modifications(graph_module)
         return result.graph_module
 
     return optimize
