@@ -13,7 +13,7 @@ from .types import DimType
 class DynamicDimensionType(BaseModel, ABC):
     @property
     @abstractmethod
-    def export_dim(self) -> DimType:
+    def export_dim(self) -> DimType | int:
         ...
 
     @property
@@ -79,8 +79,8 @@ class DynamicDimension(DynamicDimensionType):
     given_example: int | None = Field(default=None, frozen=True, alias="example_for_export")
 
     @cached_property
-    def export_dim(self) -> DimType:
-        return Dim(self.name, min=self.min, max=self.max)
+    def export_dim(self) -> DimType | int:
+        return Dim(self.name, min=self.min, max=self.max) if self.min < self.max else self.min
 
     @property
     def name(self) -> str:
@@ -101,7 +101,7 @@ class DynamicDimension(DynamicDimensionType):
     @cached_property
     def example(self) -> int:
         ex = min(max(self.opt, 2), self.max) if self.given_example is None else self.given_example
-        if ex < 2:
+        if ex < 2 and self.min < self.max:
             the_example_size = (
                 "the inferred example size" if self.given_example is None else "the provided example size"
             )
@@ -116,7 +116,7 @@ class DynamicDimension(DynamicDimensionType):
     def check_given_values(self) -> Self:
         if not self.name.isidentifier():
             raise ValidationError(f"name must be an identifier but got '{self.name}'")
-        if not 0 <= self.min < self.max:
+        if not 0 <= self.min <= self.max:
             raise ValidationError(f"0 <= min < max must be satified, but got min={self.min}, max={self.max}")
         if not self.min <= self.opt <= self.max:
             raise ValidationError(
@@ -138,12 +138,12 @@ class DerivedDynamicDimension(DynamicDimensionType):
     op: Callable[[int, int], int] = Field(frozen=True)
 
     @cached_property
-    def export_dim(self) -> DimType:
+    def export_dim(self) -> DimType | int:
         try:
             lhs = self.lhs.export_dim if isinstance(self.lhs, DynamicDimensionType) else self.lhs
             rhs = self.rhs.export_dim if isinstance(self.rhs, DynamicDimensionType) else self.rhs
             # pylint: disable-next=not-callable
-            return self.op(lhs, rhs)  # type: ignore[arg-type, return-value]
+            return self.op(lhs, rhs)  # type: ignore[arg-type]
         except Exception as e:
             print(f"[WARNING] the derived dynamic dimension {self.name} will be detached (reason: {e})")
         return self.detach().export_dim

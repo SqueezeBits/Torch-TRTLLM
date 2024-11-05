@@ -123,7 +123,11 @@ class ArgumentHistory(StrictlyTyped):
                     example_for_export=default_example_for_export,
                 )
         constraints: dict[str, dict[int, DimType] | None] = {
-            param: {i: resolved_dims[dim_name].export_dim for i, dim_name in constraint.items()}
+            param: {
+                i: dim
+                for i, dim_name in constraint.items()
+                if not isinstance(dim := resolved_dims[dim_name].export_dim, int)
+            }
             for param, constraint in _constraints.items()
         }
         example_sizes = {

@@ -65,8 +65,9 @@ class ArgumentsForExport(StrictlyTyped):
             opt=32,
             max=64,
         )
-        cache_indirection_size = DynamicDimension(
-            name="cache_indirection_size",
+        beam_width = 1
+        max_attention_window_size = DynamicDimension(
+            name="max_attention_window_size",
             min=1,
             opt=2048,
             max=4096,
@@ -89,7 +90,7 @@ class ArgumentsForExport(StrictlyTyped):
             "host_max_attention_window_sizes": InputHint(shape=(32,), dtype=torch.int32, device=device),
             "host_sink_token_length": InputHint(shape=(1,), dtype=torch.int32, device=device),
             "cache_indirection": InputHint(
-                shape=(batch_size, 1, cache_indirection_size), dtype=torch.int32, device=device
+                shape=(batch_size, beam_width, max_attention_window_size), dtype=torch.int32, device=device
             ),
         }
         return cls.from_hints(**hints, **other_flags)
@@ -114,7 +115,8 @@ class ArgumentsForExport(StrictlyTyped):
                 if not isinstance(s, DynamicDimensionType):
                     continue
                 assert (constraint := constraints[name]) is not None
-                constraint[dim] = s.export_dim
+                if not isinstance(export_dim := s.export_dim, int):
+                    constraint[dim] = export_dim
 
             if not constraints[name]:
                 constraints[name] = None
@@ -135,7 +137,7 @@ class ArgumentsForExport(StrictlyTyped):
         trt_inputs: dict[str, Input] = {}
         for name, tensor in self.tensor_inputs.items():
             # pylint: disable-next=unsupported-membership-test
-            if name not in self.constraints:
+            if name not in self.constraints and name not in self.optimal_sizes:
                 trt_input = Input.from_tensor(tensor)
                 trt_input.name = name
                 trt_inputs[name] = trt_input
