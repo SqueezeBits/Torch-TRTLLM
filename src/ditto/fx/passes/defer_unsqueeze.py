@@ -83,7 +83,7 @@ class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodeWiseOptimizationPass):
         for input_name in cls.parent_keys():
             assert hasattr(child, input_name), (
                 f"No such attribute found in class {type(child).__name__}. "
-                f"Fix the implementation of the method {cls.__name__}.target_inputs"
+                f"Fix the implementation of the method {cls.__name__}.parent_keys"
             )
             if not (
                 isinstance(the_input := getattr(child, input_name), Node)
@@ -139,13 +139,13 @@ class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodeWiseOptimizationPass):
         original_output = get_tensor_metadata(child.node)
         with graph.inserting_before(child.node):
             new_child = graph.call_function(child_target, *child.args_kwargs(**hotfix))
-            append_stack_trace(new_child, child.node, cls.__name__)
+            append_stack_trace(new_child, child.node, DeferUnsqueeze.__name__)
             if original_output:
                 _ = populate_tensor_metadata(
                     new_child, original_output, shape=get_squeezed_shape(original_output.shape, unsqueeze_dim)
                 )
             new_unsqueeze = graph.call_function(torch.ops.aten.unsqueeze.default, (new_child, unsqueeze_dim))
-            append_stack_trace(new_unsqueeze, first_unsqueeze.node, cls.__name__)
+            append_stack_trace(new_unsqueeze, first_unsqueeze.node, DeferUnsqueeze.__name__)
             if original_output:
                 _ = populate_tensor_metadata(new_unsqueeze, original_output)
         return {child.node: new_unsqueeze}
@@ -281,7 +281,7 @@ class SwapUnsqueezeWithBinaryElementwiseNode(SwapUnsqueezeWith[BinaryElementwise
         return ("x", "y")
 
     @classmethod
-    def verify_parents(cls, child: BinaryElementwiseNode) -> dict[str, UnsqueezeNode]:
+    def verify_parents(cls, child: BinaryElementwiseNode | BinaryElementwiseWithAlphaNode) -> dict[str, UnsqueezeNode]:
         unsqueezes = super().verify_parents(child)
         # for a binary elementwise child, the pass should run only if the inputs must be one of the form:
         # i) (unsqueeze, unsqueeze_1)
@@ -289,7 +289,7 @@ class SwapUnsqueezeWithBinaryElementwiseNode(SwapUnsqueezeWith[BinaryElementwise
         # iii) (unsqueeze, get_attr) or (get_attr, unsqueeze),
         if len(unsqueezes) == 2:
             # The case i)
-            # If there are more than one unsqueeze nodes, we need several assumptions as follows.
+            # If there are unsqueeze nodes on both sides, we need several assumptions as follows.
             # Assumption 1: all unsqueeze nodes share the same output dimension sizes
             ndims = {unsqueeze.output_ndim for unsqueeze in unsqueezes.values()}
             if None in ndims or len(ndims) > 1:
