@@ -180,7 +180,7 @@ def build_fake_graph_module(network: trt.INetworkDefinition) -> GraphModule:
                 if layer.type == trt.LayerType.CONSTANT
                 else graph.call_function(
                     fake_target,
-                    tuple(None if x is None else nodes[x.name] for x in inputs),
+                    tuple(None if x is None else nodes.get(x.name, x.name) for x in inputs),
                 )
             )
             output_node.meta["tensor_meta"] = tensor_meta
@@ -188,7 +188,7 @@ def build_fake_graph_module(network: trt.INetworkDefinition) -> GraphModule:
         else:
             outputs_node = nodes[f"{layer.name}_output"] = graph.call_function(
                 fake_target,
-                tuple(nodes[x.name] for x in inputs),
+                tuple(None if x is None else nodes.get(x.name, x.name) for x in inputs),
             )
             for i, output in enumerate(outputs):
                 output_node = nodes[output.name] = graph.call_function(
