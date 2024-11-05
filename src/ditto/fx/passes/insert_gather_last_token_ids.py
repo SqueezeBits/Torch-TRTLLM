@@ -4,6 +4,7 @@ import torch
 from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 
+from ...config import INPUT_IDS_UNSQUEEZE_DIM
 from ..subgraphs import LinearSubgraph
 from ..utils import find_or_create_placeholder_sym_size, get_tensor_metadata, populate_tensor_metadata
 from .graph_pass import GraphOptimizationPass
@@ -17,6 +18,7 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
     def call(self, graph_module: GraphModule) -> PassResult:
         graph = graph_module.graph
         placeholders = {n.name: n for n in graph.nodes if n.op == "placeholder"}
+        input_ids_major_axis = 1 - INPUT_IDS_UNSQUEEZE_DIM
         if not (
             (last_token_ids := placeholders.get("last_token_ids"))
             and not any(user.target is torch.ops.aten.index_select.default for user in last_token_ids.users)
@@ -26,20 +28,25 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
             and (num_seq_node := find_or_create_placeholder_sym_size(graph, "last_token_ids"))
             and (lm_head := find_lm_head(graph))
             and (input_tensor_meta := get_tensor_metadata(lm_head.input_tensor))
-            and isinstance(input_ids_size := input_tensor_meta.shape[0], torch.SymInt)
+            and isinstance(input_ids_size := input_tensor_meta.shape[input_ids_major_axis], torch.SymInt)
         ):
             return PassResult(graph_module, False)
 
         with graph.inserting_before(lm_head.input_reshape):
             sub = graph.call_function(torch.ops.aten.sub.Scalar, (last_token_ids, 1))
+            populate_tensor_metadata(sub, last_token_ids_meta)
             index_select = graph.call_function(
                 torch.ops.aten.index_select.default,
-                (lm_head.input_tensor, 0, sub),
+                (lm_head.input_tensor, input_ids_major_axis, sub),
             )
             populate_tensor_metadata(
                 index_select,
                 input_tensor_meta,
-                shape=(num_seq, *input_tensor_meta.shape[1:]),
+                shape=(
+                    *input_tensor_meta.shape[:input_ids_major_axis],
+                    num_seq,
+                    *input_tensor_meta.shape[input_ids_major_axis + 1 :],
+                ),
             )
         lm_head.input_tensor.replace_all_uses_with(
             index_select,

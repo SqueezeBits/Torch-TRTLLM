@@ -10,6 +10,7 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from .arguments_for_export import ArgumentsForExport
+from .config import INPUT_IDS, INPUT_IDS_UNSQUEEZE_DIM
 from .types import SDPBackend
 from .wrappers import PreExportWrapper, TRTLLMPreTrainedModelWrapper
 
@@ -59,16 +60,17 @@ def export(
 
 
 def unsqueeze_input_ids(kwargs: dict[str, Any]) -> dict[str, Any]:
+    kwargs = {**kwargs}
     if not (isinstance(input_ids := kwargs.get("input_ids", None), torch.Tensor) and input_ids.ndim == 1):
         return kwargs
-    kwargs["input_ids"] = input_ids.unsqueeze(1)
+    kwargs[INPUT_IDS] = input_ids.unsqueeze(INPUT_IDS_UNSQUEEZE_DIM)
     return kwargs
 
 
 def squeeze_output_logits(outputs: Any) -> Any:
     if isinstance(outputs, tuple) and isinstance(logits := outputs[0], torch.Tensor) and logits.ndim == 3:
-        return (logits.squeeze(1), *outputs[1:])
+        return (logits.squeeze(INPUT_IDS_UNSQUEEZE_DIM), *outputs[1:])
     if isinstance(outputs, CausalLMOutputWithPast) and outputs.logits.ndim == 3:
-        outputs.logits.squeeze_(1)
+        outputs.logits.squeeze_(INPUT_IDS_UNSQUEEZE_DIM)
         return outputs
     return outputs
