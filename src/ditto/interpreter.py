@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import onnx
 import tensorrt as trt
 import tensorrt_llm as trtllm
 import torch
@@ -68,9 +69,13 @@ class TRTLLMInterpreter(TRTInterpreter):
 
     def _construct_trt_network_def(self) -> None:
         super()._construct_trt_network_def()
+        code, model_proto = get_network_ir(self.ctx.net, self.optimization_profiles)
         with open(f"{self.ctx.net.name}.txt", "w") as f:
-            f.write(get_network_ir(self.ctx.net, self.optimization_profiles))
+            f.write(code)
         self.logger.info(f"TensorRT Network saved at {self.ctx.net.name}.txt")
+        with open(f"{self.ctx.net.name}.onnx", "wb") as f:
+            onnx.save(model_proto, f, save_as_external_data=True, location=f"{self.ctx.net.name}.bin")
+        self.logger.info(f"TensorRT Network ONNX saved at {self.ctx.net.name}.onnx")
 
     def _populate_trt_builder_config(
         self,
