@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from transformers import PretrainedConfig
 from transformers.cache_utils import Cache, DynamicCache, StaticCache
 
-from .constants import DEFAULT_DEVICE
+from .config import DEFAULT_DEVICE
 
 
 class CacheHandler(BaseModel, ABC):
