@@ -1,5 +1,3 @@
-import operator
-
 import torch
 from torch.fx import Node
 
@@ -28,6 +26,7 @@ class FuseMMConstSiblings(NodeWiseOptimizationPass):
         fused_weight = torch.cat([user.weight for user in children], dim=1).contiguous()
         fused_weight_name = "".join(user.weight_name for user in children)
         output_sizes = [user.weight.shape[1] for user in children]
+        slice_indices = cumulative_sums(output_sizes)
 
         graph = node.graph
         if not (graph_module := graph.owning_module):
@@ -40,11 +39,20 @@ class FuseMMConstSiblings(NodeWiseOptimizationPass):
             fused_mm = graph.call_function(torch.ops.aten.mm.default, (node, get_attr))
             if lhs_meta := get_tensor_metadata(node):
                 populate_tensor_metadata(fused_mm, lhs_meta, shape=(*lhs_meta.shape[:-1], fused_weight.shape[-1]))
-            split = graph.call_function(torch.ops.aten.split.sizes, (fused_mm, output_sizes, -1))
-            getitems = [graph.call_function(operator.getitem, (split, i)) for i in range(len(output_sizes))]
+            slices = [
+                graph.call_function(torch.ops.aten.slice.Tensor, (fused_mm, 1, slice_indices[i], slice_indices[i + 1]))
+                for i in range(len(slice_indices) - 1)
+            ]
         replacements: dict[Node, Node] = {}
-        for user, getitem in zip(children, getitems):
+        for user, s in zip(children, slices):
             if user_meta := get_tensor_metadata(user.node):
-                populate_tensor_metadata(getitem, user_meta)
-            replacements[user.node] = getitem
+                populate_tensor_metadata(s, user_meta)
+            replacements[user.node] = s
         return replacements
+
+
+def cumulative_sums(values: list[int]) -> list[int]:
+    sums = [0]
+    for value in values:
+        sums.append(sums[-1] + value)
+    return sums
