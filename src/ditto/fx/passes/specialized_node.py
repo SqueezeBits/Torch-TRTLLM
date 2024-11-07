@@ -287,6 +287,18 @@ class CatNode(CombineNode):
     def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
         return (torch.ops.aten.cat.default,)
 
+    @property
+    def ndim(self) -> int | None:
+        if t := get_tensor_metadata(self.node):
+            return len(t.shape)
+        return None
+
+    @property
+    def nonnegative_dim(self) -> int | None:
+        if (ndim := self.ndim) is not None:
+            return make_dim_nonnegative(self.dim, ndim=ndim)
+        return None
+
 
 class CloneNode(ATenOpNode):
     x: Node
@@ -473,17 +485,41 @@ class SliceNode(ATenOpNode):
     def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
         return (torch.ops.aten.slice.Tensor,)
 
+    @property
+    def dim_size(self) -> int | None:
+        if (t := get_tensor_metadata(self.x)) and isinstance(s := t.shape[self.dim], int):
+            return s
+        return None
+
+    @property
+    def ndim(self) -> int | None:
+        if t := get_tensor_metadata(self.x):
+            return len(t.shape)
+        return None
+
+    @property
+    def nonnegative_dim(self) -> int | None:
+        if (ndim := self.ndim) is not None:
+            return make_dim_nonnegative(self.dim, ndim=ndim)
+        return None
+
+    @property
+    def nonnegative_start(self) -> int | None:
+        if isinstance(self.start, int) and (dim_size := self.dim_size) is not None:
+            return make_axis_nonnegative(self.start, dim_size=dim_size)
+        return None
+
+    @property
+    def nonnegative_end(self) -> int | None:
+        if isinstance(self.end, int) and (dim_size := self.dim_size) is not None:
+            return make_axis_nonnegative(self.end, dim_size=dim_size)
+        return None
+
 
 class SqrtNode(UnaryElementwiseNode):
     @classmethod
     def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
         return (torch.ops.aten.sqrt.default,)
-
-
-class StackNode(CombineNode):
-    @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
-        return (torch.ops.aten.stack.default,)
 
 
 class SplitNode(ATenOpNode):
@@ -494,6 +530,12 @@ class SplitNode(ATenOpNode):
     @classmethod
     def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
         return (torch.ops.aten.split.default, torch.ops.aten.split.sizes)
+
+
+class StackNode(CombineNode):
+    @classmethod
+    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+        return (torch.ops.aten.stack.default,)
 
 
 class SqueezeDimNode(SingleDimensionReshape):
@@ -548,5 +590,12 @@ class UnsqueezeNode(SingleDimensionReshape):
 
 
 def make_dim_nonnegative(dim: int, *, ndim: int) -> int:
-    assert -ndim <= dim < ndim
+    if not -ndim <= dim < ndim:
+        logger.warning(f"dimension out of range: expected dim={dim} to in range({-ndim}, {ndim})")
     return dim if dim >= 0 else dim + ndim
+
+
+def make_axis_nonnegative(axis: int, *, dim_size: int) -> int:
+    if not -dim_size <= axis <= dim_size:
+        logger.warning(f"axis out of range: expected axis={axis} to in range({-dim_size}, {dim_size})")
+    return axis if axis >= 0 else axis + dim_size
