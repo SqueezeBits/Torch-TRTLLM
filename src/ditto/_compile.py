@@ -32,7 +32,7 @@ from torch_tensorrt.dynamo.lowering.passes import (
 from torch_tensorrt.logging import TRT_LOGGER
 
 from .config import PassName
-from .fx.optimize import get_optimizer_pass
+from .fx.optimize import get_optimization_transform
 from .interpreter import TRTLLMInterpreter
 
 logger = logging.getLogger(__name__)
@@ -150,7 +150,7 @@ def get_inlined_graph_module(
     post_inline_pass_manager = DynamoPassManager.build_from_passlist(
         [
             *ATEN_POST_LOWERING_PASSES.passes,
-            get_optimizer_pass(skipped_optimizers, enforce_projections_in_fp32),
+            get_optimization_transform(skipped_optimizers, enforce_projections_in_fp32),
             *(extra_passes or []),
         ]
     )

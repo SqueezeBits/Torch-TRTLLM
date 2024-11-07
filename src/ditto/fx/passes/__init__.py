@@ -9,6 +9,7 @@ from .eliminate_nop_slice import EliminateNopSlice
 from .eliminate_unsqueeze_squeeze import EliminateUnsqueezeSqueeze
 from .fuse_consecutive_permutes import FuseConsecutivePermutes
 from .fuse_consecutive_reshapes import FuseConsecutiveReshapes
+from .fuse_consecutive_slice_concat import FuseConsecutiveSliceConcat
 from .fuse_consecutive_split_concat import FuseConsecutiveSplitConcat
 from .fuse_equivalent_nodes import FuseEquivalentNodes
 from .fuse_mm_const_siblings import FuseMMConstSiblings
