@@ -26,7 +26,7 @@ from . import (
     export,
     get_inlined_graph_module,
 )
-from .constants import DEFAULT_DEVICE
+from .config import DEFAULT_DEVICE
 
 app = Typer()
 
@@ -123,7 +123,10 @@ def run(
     exported_program = export(model, arguments_for_export)
 
     print("Lowering exported program into graph module ...")
-    graph_module = get_inlined_graph_module(exported_program)
+    graph_module = get_inlined_graph_module(
+        exported_program,
+        enforce_projections_in_fp32=True,
+    )
 
     model_name = type(model).__name__
     if verbose:
