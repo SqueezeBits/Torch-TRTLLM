@@ -1,4 +1,4 @@
-from .fake_gpt_attention_plugin import (
+from .gpt_attention_plugin import (
     FakeGPTAttentionPlugin,
     GPTAttentionPluginInputs,
     Llama3ScalingConfig,
