@@ -177,7 +177,7 @@ class SwapUnsqueezeWithIndexSelectNode(SwapUnsqueezeWith[IndexSelectNode]):
 
         # case 1) when unsqueeze.dim == index_select.dim
         # the unsqueeze and index_select cannot be swapped, and it's rather
-        # obscure case as the entries of index tensor must be all zero
+        # an obscure case as the index tensor must be filled with zeros
         x.unsqueeze(2).index_select(2, torch.zeros_like(i)).shape  # torch.Size([2, 3, 10, 4, 5, 6])
 
         # case 2) when unsqueeze.dim < mean.dim
