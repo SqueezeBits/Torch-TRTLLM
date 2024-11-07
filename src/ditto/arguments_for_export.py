@@ -5,7 +5,7 @@ from pydantic import Field
 from torch_tensorrt._Input import Input
 from typing_extensions import Self
 
-from .constants import DEFAULT_DEVICE
+from .config import DEFAULT_DEVICE
 from .dynamic_dim import DynamicDimension, DynamicDimensionType
 from .pretty_print import brief_tensor_repr
 from .types import BuiltInConstant, DimType, StrictlyTyped
