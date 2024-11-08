@@ -74,7 +74,9 @@ class TRTLLMInterpreter(TRTInterpreter):
             f.write(code)
         self.logger.info(f"TensorRT Network saved at {self.ctx.net.name}.txt")
         with open(f"{self.ctx.net.name}.onnx", "wb") as f:
-            onnx.save(model_proto, f, save_as_external_data=True, location=f"{self.ctx.net.name}.bin")
+            weight_file = f"{self.ctx.net.name}.bin"
+            onnx.save(model_proto, f, save_as_external_data=True, location=weight_file)
+            os.remove(weight_file)
         self.logger.info(f"TensorRT Network ONNX saved at {self.ctx.net.name}.onnx")
 
     def _populate_trt_builder_config(

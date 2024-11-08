@@ -54,7 +54,9 @@ def build_fake_onnx_proto(graph_module: GraphModule) -> onnx.ModelProto:
             all_inputs.update(node.kwargs)
             input_tensors = [tensors[x.name] for x in all_inputs.values() if isinstance(x, Node)]
             attributes: dict[str, Any] = {
-                name: value for name, value in all_inputs.items() if not isinstance(value, Node)
+                name: "None" if value is None else value
+                for name, value in all_inputs.items()
+                if not isinstance(value, Node)
             }
             getitems = [user for user in node.users if user.op == "call_function" and user.target is operator.getitem]
             output_tensors: list[gs.Tensor] = []

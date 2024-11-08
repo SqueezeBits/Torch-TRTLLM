@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Any
 
 import numpy as np
@@ -33,7 +34,9 @@ def patched_trtllm_network_to_dot(self: trtllm.Network, path: str | None) -> str
         f.write(network_ir)
     trtllm.logger.info(f"Network IR saved at {name}.txt")
     with open(f"{name}.onnx", "wb") as f:
-        onnx.save(model_proto, f, save_as_external_data=True, location=f"{name}.bin")
+        weight_file = f"{name}.bin"
+        onnx.save(model_proto, f, save_as_external_data=True, location=weight_file)
+        os.remove(weight_file)
     trtllm.logger.info(f"Network ONNX saved at {name}.onnx")
     return None
 
@@ -52,6 +55,10 @@ def patched_builder_build_engine(
         config_dict = builder_config_as_dict(builder_config.trt_builder_config)
         json.dump(config_dict, f, indent=2, sort_keys=True)
     trtllm.logger.info(f"trt.IBuilderConfig saved at {path}")
+    with open(path := "builder_config_trtllm.json", "w") as f:
+        config_dict = builder_config.to_dict()
+        json.dump(config_dict, f, indent=2, sort_keys=True)
+    trtllm.logger.info(f"trtllm.BuilderConfig saved at {path}")
     return engine
 
 
