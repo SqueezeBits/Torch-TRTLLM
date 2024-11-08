@@ -101,10 +101,20 @@ def run(
     verbose: bool = False,
     trust_remote_code: bool = False,
     show_locals_on_exception: bool = False,
+    skip_engine_build: bool = False,
+    transpose_weights: bool = False,
+    mm_in_fp32: bool = False,
 ) -> None:
     app.pretty_exceptions_show_locals = show_locals_on_exception
     torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
     print(f"device: {device} | dtype: {dtype}")
+    suffix_items = ["fp16" if torch_dtype == torch.float16 else "fp32"]
+    if transpose_weights:
+        suffix_items.append("tw")
+    if mm_in_fp32:
+        suffix_items.append("fp32mm")
+    engine_suffix = "-".join(suffix_items)
+
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         torch_dtype=torch_dtype,
@@ -125,16 +135,20 @@ def run(
     print("Lowering exported program into graph module ...")
     graph_module = get_inlined_graph_module(
         exported_program,
-        enforce_projections_in_fp32=True,
+        enforce_projections_transposed=transpose_weights,
+        enforce_projections_in_fp32=mm_in_fp32,
     )
 
     model_name = type(model).__name__
-    if verbose:
-        with detailed_sym_node_str():
-            with open(f"{model_name}_graph_module.txt", "w") as f:
-                f.write(graph_module.print_readable(print_output=False))
-            with open(f"{model_name}_graph.txt", "w") as f:
-                f.write(f"{graph_module.graph}")
+    with detailed_sym_node_str():
+        with open(f"{model_name}-{engine_suffix}_graph_module.txt", "w") as f:
+            f.write(graph_module.print_readable(print_output=False))
+        with open(f"{model_name}-{engine_suffix}_graph.txt", "w") as f:
+            f.write(f"{graph_module.graph}")
+
+    if skip_engine_build:
+        print("Skipping TensorRT engine building")
+        return
 
     print("Building TensorRT engine ...")
     settings = CompilationSettings(
@@ -154,12 +168,11 @@ def run(
     for i in range(engine.num_io_tensors):
         name = engine.get_tensor_name(i)
         print(f"({i}) {name}: {engine.get_tensor_shape(name)}")
+
     engine_path = engine_path or (
-        os.path.join(
-            f"{os.path.abspath(model_id)}-{'fp16' if torch_dtype == torch.float16 else 'fp32'}-ditto", "rank0.engine"
-        )
+        os.path.join(f"{os.path.abspath(model_id)}-{engine_suffix}-ditto", "rank0.engine")
         if os.path.isdir(model_id)
-        else f"{model_id}.engine"
+        else f"{model_id}-{engine_suffix}.engine"
     )
     print(f"Saving serialized engine at {engine_path}")
     os.makedirs(os.path.dirname(engine_path), exist_ok=True)
