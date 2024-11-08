@@ -148,6 +148,7 @@ class ArgumentsForExport(StrictlyTyped):
                 (getattr(constraint[dim], "min", size) if constraint and dim in constraint else size)
                 for dim, size in enumerate(tensor.shape)
             )
+            min_shape = tuple(max(1, s) for s in min_shape)
             max_shape = tuple(
                 (getattr(constraint[dim], "max", size) if constraint and dim in constraint else size)
                 for dim, size in enumerate(tensor.shape)
