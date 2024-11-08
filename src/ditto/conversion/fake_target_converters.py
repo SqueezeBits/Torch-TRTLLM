@@ -8,13 +8,16 @@ import tensorrt as trt
 from tensorrt_llm.functional import PluginInfo, set_plugin_info
 from tensorrt_llm.plugin import TRT_LLM_PLUGIN_NAMESPACE
 from torch.fx.node import Argument, Target
+from torch_tensorrt.dynamo._SourceIR import SourceIR
+from torch_tensorrt.dynamo.conversion import impl
 from torch_tensorrt.dynamo.conversion._ConversionContext import ConversionContext
-from torch_tensorrt.dynamo.conversion._ConverterRegistry import (
-    dynamo_tensorrt_converter,
+from torch_tensorrt.dynamo.conversion._ConverterRegistry import dynamo_tensorrt_converter
+from torch_tensorrt.dynamo.conversion.converter_utils import (
+    get_trt_tensor,
+    set_layer_name,
 )
-from torch_tensorrt.dynamo.conversion.converter_utils import get_trt_tensor
 
-from ..fake_targets import FakeGPTAttentionPlugin
+from ..fake_targets import FakeGPTAttentionPlugin, fake_transposed_mm
 
 logger = logging.getLogger(__name__)
 
@@ -53,4 +56,25 @@ def convert_fake_gpt_attention_plugin(
     layer = ctx.net.add_plugin_v2(plugin_inputs, attn_plugin)
     plugin_info = PluginInfo(plugin_creator, "causal_attn", pfc)
     set_plugin_info(ctx.net, layer.name, plugin_info)
+    set_layer_name(layer, target, name, SourceIR.UNKNOWN)
     return layer.get_output(0)
+
+
+@dynamo_tensorrt_converter(fake_transposed_mm, supports_dynamic_shapes=True)
+def aten_ops_matmul(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    return impl.matmul.matrix_multiply(
+        ctx,
+        target,
+        SourceIR.UNKNOWN,
+        name,
+        args[0],
+        args[1],
+        input_matrix_op=trt.MatrixOperation.NONE,
+        other_matrix_op=trt.MatrixOperation.TRANSPOSE,
+    )
