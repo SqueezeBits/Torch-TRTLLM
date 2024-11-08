@@ -10,3 +10,4 @@ from .rope import (
     get_llama2_rope_pattern_graph,
     get_llama2_rope_replacment_graph,
 )
+from .transposed_mm import fake_transposed_mm

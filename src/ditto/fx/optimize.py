@@ -6,7 +6,7 @@ from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_afte
 
 from ..config import FX_TRANSFORM_MAXIMUM_ITERATION, PassName
 from .passes import (
-    CastMMConstToFP32,
+    CastFP16MMToFP32,
     ConstantSharing,
     DeferUnsqueeze,
     EliminateCopy,
@@ -19,10 +19,13 @@ from .passes import (
     FuseConsecutiveReshapes,
     FuseConsecutiveSliceConcat,
     FuseConsecutiveSplitConcat,
+    FuseConsecutiveToCopys,
     FuseEquivalentNodes,
     FuseMMConstSiblings,
+    FuseReciprocalMul,
     InsertGatherLastTokenIds,
     ReplaceSDPAByFakeGPTAttentionPlugin,
+    RewriteMMConstAsTransposedMM,
     RewriteReshapeAsUnsqueeze,
     WrapRoPESubgraphs,
 )
@@ -31,6 +34,8 @@ from .passes.graph_pass import GraphOptimizationPass
 
 def get_optimization_transform(
     skipped_optimizers: list[PassName] | None = None,
+    *,
+    enforce_projections_transposed: bool = False,
     enforce_projections_in_fp32: bool = False,
 ) -> Callable[[GraphModule], GraphModule]:
     """Optimize the given graph module inplace.
@@ -38,6 +43,8 @@ def get_optimization_transform(
     Args:
         skipped_optimizers (list[PassName] | None, optional): the names of optimization passes to skip.
             Defaults to None.
+        enforce_projections_transposed (bool, optional): whether to enforce nn.Linear layers' computation as transposed
+            matmul, storing weights as transposed. Defaults to False.
         enforce_projections_in_fp32 (bool, optional): whether to enforce nn.Linear layers' computation in FP32, while
             storing weights in FP16 precision. Defaults to False.
 
@@ -46,7 +53,11 @@ def get_optimization_transform(
     """
     return compose(
         get_level1_transform(skipped_optimizers),
-        get_trtllm_conversion_transform(skipped_optimizers, enforce_projections_in_fp32),
+        get_trtllm_conversion_transform(
+            skipped_optimizers,
+            enforce_projections_transposed=enforce_projections_transposed,
+            enforce_projections_in_fp32=enforce_projections_in_fp32,
+        ),
         get_level2_transform(skipped_optimizers),
     )
 
@@ -76,6 +87,7 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateNopSlice,
     FuseConsecutiveReshapes,
     FuseConsecutivePermutes,
+    FuseConsecutiveToCopys,
     FuseEquivalentNodes,
     EliminateNopReshape,
     EliminateNopPermute,
@@ -86,6 +98,7 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
 LEVEL2_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     FuseConsecutiveSliceConcat,
     FuseConsecutiveSplitConcat,
+    FuseReciprocalMul,
     DeferUnsqueeze,
     RewriteReshapeAsUnsqueeze,
 )
@@ -93,11 +106,15 @@ LEVEL2_PASSES: tuple[type[GraphOptimizationPass], ...] = (
 
 def get_trtllm_conversion_transform(
     skipped_optimizers: list[PassName] | None = None,
+    *,
+    enforce_projections_transposed: bool = False,
     enforce_projections_in_fp32: bool = False,
 ) -> Callable[[GraphModule], GraphModule]:
     passes = list(TRTLLM_CONVERSION_PASSES)
+    if enforce_projections_transposed:
+        passes.append(RewriteMMConstAsTransposedMM)
     if enforce_projections_in_fp32:
-        passes.append(CastMMConstToFP32)
+        passes.append(CastFP16MMToFP32)
     return get_transform(
         *passes,
         skipped_optimizers=skipped_optimizers,

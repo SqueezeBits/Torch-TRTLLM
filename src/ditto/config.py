@@ -4,7 +4,7 @@ from typing import Literal
 import torch
 
 PassName = Literal[
-    "CastMMConstToFP32",
+    "CastFP16MMToFP32",
     "ConstantSharing",
     "DeferUnsqueeze",
     "EliminateCopy",
@@ -17,10 +17,13 @@ PassName = Literal[
     "FuseConsecutiveReshapes",
     "FuseConsecutiveSliceConcat",
     "FuseConsecutiveSplitConcat",
+    "FuseConsecutiveToCopys",
     "FuseEquivalentNodes",
     "FuseMMConstSiblings",
+    "FuseReciprocalMul",
     "InsertGatherLastTokenIds",
     "ReplaceSDPAByFakeGPTAttentionPlugin",
+    "RewriteMMConstAsTransposedMM",
     "RewriteReshapeAsUnsqueeze",
     "WrapRoPESubgraphs",
 ]
@@ -48,3 +51,6 @@ DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 """
 The default device for the PyTorch modules and tensors.
 """
+
+GPT_ATTENTION_PLUGIN_DTYPE: torch.dtype = torch.float16
+"""The precision for the GPT attention plugin"""

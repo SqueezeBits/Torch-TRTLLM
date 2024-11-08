@@ -7,10 +7,10 @@ from typing import Any, TypeVar, overload
 import torch
 from pydantic import Field, ValidationError, model_validator
 from pydantic_core import PydanticUndefined
-from torch._ops import TorchBindOpOverload
 from torch.fx.node import Argument, Node, Target
 from typing_extensions import Self
 
+from ...fake_targets import fake_transposed_mm
 from ...types import StrictlyTyped
 from ..utils import get_tensor_metadata
 
@@ -105,14 +105,49 @@ class SpecializedNode(StrictlyTyped, ABC):
 
 
 class ATenOpNode(SpecializedNode):
+    @property
+    def target(self) -> Callable[..., Any]:
+        assert callable(op := super().target)
+        return op
+
     @classmethod
     def designated_op(cls) -> str:
         return "call_function"
 
     @classmethod
     @abstractmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         ...
+
+
+class GetAttrNode(SpecializedNode):
+    @property
+    def target(self) -> str:
+        assert isinstance(name := super().target, str)
+        return name
+
+    @classmethod
+    def designated_op(cls) -> str:
+        return "call_function"
+
+    @classmethod
+    def validate_node(cls, node: Node) -> bool:
+        if not (
+            super().validate_node(node)
+            and (graph_module := node.graph.owning_module)
+            and isinstance(name := node.target, str)
+        ):
+            return False
+        try:
+            _ = graph_module.get_parameter(name)
+            return True
+        except AttributeError:
+            return False
+
+    @property
+    def parameter(self) -> torch.nn.Parameter:
+        assert (graph_module := self.node.graph.owning_module) is not None
+        return graph_module.get_parameter(self.target)
 
 
 DefaultValue = TypeVar("DefaultValue")
@@ -180,7 +215,7 @@ class BinaryElementwiseNode(ATenOpNode):
         return self
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (
             torch.ops.aten.div.Tensor,
             torch.ops.aten.mul.Tensor,
@@ -195,7 +230,7 @@ class BinaryElementwiseWithAlphaNode(BinaryElementwiseNode):
     alpha: Number = 1
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (
             torch.ops.aten.add.Tensor,
             torch.ops.aten.sub.Tensor,
@@ -207,7 +242,7 @@ class CombineNode(ATenOpNode):
     dim: int = 0
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (
             torch.ops.aten.cat.default,
             torch.ops.aten.stack.default,
@@ -222,7 +257,7 @@ class ReductionIntListNode(ATenOpNode):
     dtype: torch.dtype | None = None
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (
             torch.ops.aten.mean.dim,
             torch.ops.aten.sum.dim_IntList,
@@ -246,7 +281,7 @@ class SingleDimensionReshape(ATenOpNode):
     dim: int
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (
             torch.ops.aten.squeeze.dim,
             torch.ops.aten.unsqueeze.default,
@@ -269,7 +304,7 @@ class UnaryElementwiseNode(ATenOpNode):
     x: Node
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (
             torch.ops.aten.sigmoid.default,
             torch.ops.aten.sqrt.default,
@@ -278,13 +313,13 @@ class UnaryElementwiseNode(ATenOpNode):
 
 class AddNode(BinaryElementwiseWithAlphaNode):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.add.Tensor,)
 
 
 class CatNode(CombineNode):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.cat.default,)
 
     @property
@@ -306,13 +341,13 @@ class CloneNode(ATenOpNode):
     memory_format: torch.memory_format | None = None
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.clone.default,)
 
 
 class DivNode(BinaryElementwiseNode):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.div.Tensor,)
 
 
@@ -324,7 +359,7 @@ class EmbeddingNode(ATenOpNode):
     sparse: bool = False
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.embedding.default,)
 
 
@@ -334,7 +369,7 @@ class IndexSelectNode(ATenOpNode):
     index: Node
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.index_select.default,)
 
     @property
@@ -352,7 +387,7 @@ class IndexSelectNode(ATenOpNode):
 
 class MeanDimNode(ReductionIntListNode):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.mean.dim,)
 
 
@@ -360,9 +395,16 @@ class MMNode(ATenOpNode):
     lhs: Node
     rhs: Node
 
+    @property
+    def is_rhs_transposed(self) -> bool:
+        return self.target is fake_transposed_mm
+
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
-        return (torch.ops.aten.mm.default,)
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
+        return (
+            torch.ops.aten.mm.default,
+            fake_transposed_mm,
+        )
 
 
 class MMConstNode(MMNode):
@@ -394,7 +436,7 @@ class MMConstNode(MMNode):
 
 class MulNode(BinaryElementwiseNode):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.mul.Tensor,)
 
 
@@ -403,7 +445,7 @@ class PermuteNode(ATenOpNode):
     dims: list[int]
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.permute.default,)
 
     @property
@@ -413,7 +455,7 @@ class PermuteNode(ATenOpNode):
 
 class PowNode(BinaryElementwiseNode):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (
             torch.ops.aten.pow.Scalar,
             torch.ops.aten.pow.Tensor_Scalar,
@@ -426,7 +468,7 @@ class ReshapeNode(ATenOpNode):
     shape: list[SymInt]
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.reshape.default,)
 
     @property
@@ -482,7 +524,7 @@ class SliceNode(ATenOpNode):
     step: SymInt = 1
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.slice.Tensor,)
 
     @property
@@ -518,7 +560,7 @@ class SliceNode(ATenOpNode):
 
 class SqrtNode(UnaryElementwiseNode):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.sqrt.default,)
 
 
@@ -528,19 +570,19 @@ class SplitNode(ATenOpNode):
     dim: int = 0
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.split.default, torch.ops.aten.split.sizes)
 
 
 class StackNode(CombineNode):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.stack.default,)
 
 
 class SqueezeDimNode(SingleDimensionReshape):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.squeeze.dim,)
 
     @property
@@ -552,13 +594,13 @@ class SqueezeDimNode(SingleDimensionReshape):
 
 class SubNode(BinaryElementwiseWithAlphaNode):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.sub.Tensor,)
 
 
 class SumDimIntListNode(ReductionIntListNode):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.sum.dim_IntList,)
 
 
@@ -573,13 +615,13 @@ class ToCopyNode(ATenOpNode):
     memory_format: torch.memory_format | None = None
 
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten._to_copy.default,)
 
 
 class UnsqueezeNode(SingleDimensionReshape):
     @classmethod
-    def possible_targets(cls) -> tuple[TorchBindOpOverload, ...]:
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return (torch.ops.aten.unsqueeze.default,)
 
     @property
