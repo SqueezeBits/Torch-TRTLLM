@@ -7,8 +7,8 @@ from .node_wise_pass import NodeWiseOptimizationPass
 from .specialized_node import MMConstNode
 
 
-class RewriteMMConstAsTransposedMM(NodeWiseOptimizationPass):
-    """Rewrite activation-weight matmul as matmul with weight side transposed."""
+class RewriteMMAsTransposedMM(NodeWiseOptimizationPass):
+    """Rewrite matmul as matmul with right-hand-side transposed."""
 
     @classmethod
     def rewrite(cls, node: Node) -> dict[Node, Node]:

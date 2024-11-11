@@ -120,6 +120,7 @@ def run(
         torch_dtype=torch_dtype,
         trust_remote_code=trust_remote_code,
     ).to(device)
+    model_name = type(model).__name__
 
     arguments_for_export = ArgumentsForExport.get_trtllm_inputs(
         device=device,
@@ -131,6 +132,8 @@ def run(
 
     print("torch.exporting module ...")
     exported_program = export(model, arguments_for_export)
+    with detailed_sym_node_str(), open(f"{model_name}_program.txt", "w") as f:
+        f.write(f"{exported_program}")
 
     print("Lowering exported program into graph module ...")
     graph_module = get_inlined_graph_module(
@@ -139,7 +142,6 @@ def run(
         enforce_projections_in_fp32=mm_in_fp32,
     )
 
-    model_name = type(model).__name__
     with detailed_sym_node_str():
         with open(f"{model_name}-{engine_suffix}_graph_module.txt", "w") as f:
             f.write(graph_module.print_readable(print_output=False))

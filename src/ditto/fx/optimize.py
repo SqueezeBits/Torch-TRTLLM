@@ -15,6 +15,7 @@ from .passes import (
     EliminateNopReshape,
     EliminateNopSlice,
     EliminateUnsqueezeSqueeze,
+    EliminateUnusedWeights,
     FuseConsecutivePermutes,
     FuseConsecutiveReshapes,
     FuseConsecutiveSliceConcat,
@@ -24,8 +25,9 @@ from .passes import (
     FuseMMConstSiblings,
     FuseReciprocalMul,
     InsertGatherLastTokenIds,
+    MakeWeightsContiguous,
     ReplaceSDPAByFakeGPTAttentionPlugin,
-    RewriteMMConstAsTransposedMM,
+    RewriteMMAsTransposedMM,
     RewriteReshapeAsUnsqueeze,
     WrapRoPESubgraphs,
 )
@@ -92,6 +94,8 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateNopReshape,
     EliminateNopPermute,
     EliminateUnsqueezeSqueeze,
+    EliminateUnusedWeights,
+    MakeWeightsContiguous,
 )
 
 # passes required after the TRT-LLM conversion passes
@@ -112,7 +116,7 @@ def get_trtllm_conversion_transform(
 ) -> Callable[[GraphModule], GraphModule]:
     passes = list(TRTLLM_CONVERSION_PASSES)
     if enforce_projections_transposed:
-        passes.append(RewriteMMConstAsTransposedMM)
+        passes.append(RewriteMMAsTransposedMM)
     if enforce_projections_in_fp32:
         passes.append(CastFP16MMToFP32)
     return get_transform(

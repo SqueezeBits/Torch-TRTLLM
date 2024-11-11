@@ -7,6 +7,7 @@ from .eliminate_nop_permute import EliminateNopPermute
 from .eliminate_nop_reshape import EliminateNopReshape
 from .eliminate_nop_slice import EliminateNopSlice
 from .eliminate_unsqueeze_squeeze import EliminateUnsqueezeSqueeze
+from .eliminate_unused_weights import EliminateUnusedWeights
 from .fuse_consecutive_permutes import FuseConsecutivePermutes
 from .fuse_consecutive_reshapes import FuseConsecutiveReshapes
 from .fuse_consecutive_slice_concat import FuseConsecutiveSliceConcat
@@ -16,7 +17,8 @@ from .fuse_equivalent_nodes import FuseEquivalentNodes
 from .fuse_mm_const_siblings import FuseMMConstSiblings
 from .fuse_reciprocal_mul import FuseReciprocalMul
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
+from .make_weights_contiguous import MakeWeightsContiguous
 from .replace_sdpa_by_fake_gpt_attention_plugin import ReplaceSDPAByFakeGPTAttentionPlugin
-from .rewrite_mm_const_as_transposed_mm import RewriteMMConstAsTransposedMM
+from .rewrite_mm_as_transposed_mm import RewriteMMAsTransposedMM
 from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
 from .wrap_rope_subgraphs import WrapRoPESubgraphs

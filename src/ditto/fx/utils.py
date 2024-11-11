@@ -95,6 +95,7 @@ def populate_tensor_metadata(
 
 def traceback_reformats(node: Node) -> Node:
     if node.target not in (
+        torch.ops.aten.clone.default,
         torch.ops.aten.expand.default,
         torch.ops.aten.reshape.default,
         torch.ops.aten.permute.default,

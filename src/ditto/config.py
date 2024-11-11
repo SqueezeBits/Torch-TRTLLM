@@ -13,6 +13,7 @@ PassName = Literal[
     "EliminateNopReshape",
     "EliminateNopSlice",
     "EliminateUnsqueezeSqueeze",
+    "EliminateUnusedWeights",
     "FuseConsecutivePermutes",
     "FuseConsecutiveReshapes",
     "FuseConsecutiveSliceConcat",
@@ -22,8 +23,9 @@ PassName = Literal[
     "FuseMMConstSiblings",
     "FuseReciprocalMul",
     "InsertGatherLastTokenIds",
+    "MakeWeightsContiguous",
     "ReplaceSDPAByFakeGPTAttentionPlugin",
-    "RewriteMMConstAsTransposedMM",
+    "RewriteMMAsTransposedMM",
     "RewriteReshapeAsUnsqueeze",
     "WrapRoPESubgraphs",
 ]

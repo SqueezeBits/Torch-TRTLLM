@@ -21,6 +21,7 @@ def build_fake_onnx_proto(graph_module: GraphModule) -> onnx.ModelProto:
     outputs: list[gs.Tensor] = []
     tensors: dict[str, gs.Tensor] = {}
     nodes: dict[str, gs.Node] = {}
+    empty = gs.Constant("None", np.array(0))
 
     def create_variable(node: Node, name: str | None = None) -> gs.Variable:
         assert (meta := get_tensor_metadata(node))
@@ -52,12 +53,7 @@ def build_fake_onnx_proto(graph_module: GraphModule) -> onnx.ModelProto:
                 continue
             all_inputs = {f"args_{i}": arg for i, arg in enumerate(node.args)}
             all_inputs.update(node.kwargs)
-            input_tensors = [tensors[x.name] for x in all_inputs.values() if isinstance(x, Node)]
-            attributes: dict[str, Any] = {
-                name: "None" if value is None else value
-                for name, value in all_inputs.items()
-                if not isinstance(value, Node)
-            }
+            input_tensors = [tensors[x.name] if isinstance(x, Node) else empty for x in all_inputs.values()]
             getitems = [user for user in node.users if user.op == "call_function" and user.target is operator.getitem]
             output_tensors: list[gs.Tensor] = []
             if len(getitems) == len(node.users) and len(getitems) > 1:
@@ -73,7 +69,6 @@ def build_fake_onnx_proto(graph_module: GraphModule) -> onnx.ModelProto:
             nodes[node.name] = gs.Node(
                 op=target.__name__,
                 name=node.name,
-                attrs=attributes,
                 inputs=input_tensors,
                 outputs=output_tensors,
             )
