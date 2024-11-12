@@ -1,3 +1,4 @@
+from . import config
 from ._compile import build_engine, get_inlined_graph_module
 from ._export import export
 from .api import trtllm_build, trtllm_export

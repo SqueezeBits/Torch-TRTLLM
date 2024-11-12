@@ -1,10 +1,7 @@
-import logging
-
 import torch
+from loguru import logger
 from torch.fx import Graph, Node
 from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
-
-logger = logging.getLogger(__name__)
 
 
 def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:

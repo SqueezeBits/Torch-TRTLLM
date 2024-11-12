@@ -1,9 +1,9 @@
-import logging
 from collections.abc import Sequence
 
 import numpy as np
 import tensorrt as trt
 import torch
+from loguru import logger
 from pydantic import ValidationError, model_validator
 from torch.fx.node import Argument, Target
 from torch_tensorrt.dynamo import SourceIR
@@ -26,8 +26,6 @@ from typing_extensions import Self
 
 from ..types import StrictlyTyped
 from ..utils import make_axis_nonnegative
-
-logger = logging.getLogger(__name__)
 
 
 @dynamo_tensorrt_converter(torch.ops.aten.all.default, supports_dynamic_shapes=True)

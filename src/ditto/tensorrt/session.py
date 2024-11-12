@@ -7,7 +7,9 @@ import pycuda.autoinit  # noqa: F401
 import pycuda.driver as cuda
 import tensorrt as trt
 import torch
+from loguru import logger
 from tensorrt import ICudaEngine
+from torch_tensorrt.logging import TRT_LOGGER
 from typing_extensions import Self
 
 from ..types import StrictlyTyped
@@ -42,8 +44,7 @@ class Allocation(StrictlyTyped):
 
 class TensorRTInferenceSession:
     def __init__(self, engine: trt.ICudaEngine | str) -> None:
-        self.logger = trt.Logger(trt.Logger.INFO)
-        self.runtime = trt.Runtime(self.logger)
+        self.runtime = trt.Runtime(TRT_LOGGER)
         self.engine = engine if isinstance(engine, trt.ICudaEngine) else self.load_engine(engine)
         self.context = self.engine.create_execution_context()
         self.inputs: dict[str, Allocation] = {}
@@ -95,7 +96,7 @@ class TensorRTInferenceSession:
             self.context.set_tensor_address(name, mem.binding)
             if is_input:
                 self.context.set_input_shape(name, mem.shape)
-            print(f"Allocated buffer for the {tag} {name}: {mem.shape} | {mem.host.dtype}")
+            logger.info(f"Allocated buffer for the {tag} {name}: {mem.shape} | {mem.host.dtype}")
 
     def run(self, input_tensors: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         self.allocate_inputs(input_tensors)

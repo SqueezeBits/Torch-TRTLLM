@@ -1,10 +1,10 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false
-import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, TypeVar, overload
 
 import torch
+from loguru import logger
 from pydantic import Field, ValidationError, model_validator
 from pydantic_core import PydanticUndefined
 from torch.fx.node import Argument, Node, Target
@@ -14,8 +14,6 @@ from ...fake_targets import fake_transposed_mm
 from ...types import StrictlyTyped
 from ...utils import make_axis_nonnegative, make_dim_nonnegative
 from ..utils import get_tensor_metadata
-
-logger = logging.getLogger(__name__)
 
 
 class SpecializedNode(StrictlyTyped, ABC):

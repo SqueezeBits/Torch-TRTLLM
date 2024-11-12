@@ -6,6 +6,7 @@ from types import TracebackType
 from typing import Any
 
 import torch
+from loguru import logger
 from torch.utils.hooks import RemovableHandle
 
 from .arguments_for_export import ArgumentsForExport
@@ -101,7 +102,7 @@ class ArgumentHistory(StrictlyTyped):
                 continue
             for existing_dim_name, existing_dim in resolved_dims.items():
                 if existing_dim_name not in dim_size_history:
-                    print(f"[WARNING] The predefined dynamic dimension {existing_dim.name} is actually static")
+                    logger.warning(f"The predefined dynamic dimension {existing_dim.name} is actually static")
                     continue
                 existing_size_history = dim_size_history[existing_dim_name]
                 if (existing_size_history == size_history).all():
@@ -114,7 +115,7 @@ class ArgumentHistory(StrictlyTyped):
                     break
             else:
                 readable_dim_name = dim_name.replace("_dim_", "'s dimension ")
-                print(f"[WARNING] No predefined dynamic dimension given for {readable_dim_name}.")
+                logger.warning(f"No predefined dynamic dimension given for {readable_dim_name}.")
                 resolved_dims[dim_name] = DynamicDimension(
                     name=dim_name,
                     min=default_min,
@@ -197,8 +198,8 @@ class ForwardArgumentCollector:
         kwargs = copy.deepcopy(kwargs)
         if args:
             keys = list(self.signature.parameters.keys())[: len(args)]
-            print(
-                f"[WARNING] {len(args)} positional arguments passed to the model will be converted as "
+            logger.warning(
+                f"{len(args)} positional arguments passed to the model will be converted as "
                 f"keyword arguments with the following keys: {', '.join(keys)}"
             )
             kwargs = {**dict(zip(keys, copy.deepcopy(args))), **kwargs}
@@ -224,9 +225,9 @@ class ForwardArgumentCollector:
     def print_readable(self) -> None:
         with brief_tensor_repr():
             for idx, iteration in enumerate(self._count_range or range(self._count)):
-                print(f"=======================Iteration {iteration}======================")
+                logger.info(f"=======================Iteration {iteration}======================")
                 for name, kwargs_history in self._argument_history.items():
-                    print(f"{name}: {kwargs_history[self._num_existing_arguments + idx]}")
+                    logger.info(f"{name}: {kwargs_history[self._num_existing_arguments + idx]}")
 
     def _insert_hook(self) -> None:
         if self._handle:

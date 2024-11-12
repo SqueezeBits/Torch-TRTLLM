@@ -1,10 +1,10 @@
-import logging
 from enum import IntEnum, IntFlag
 from typing import Any, TypeVar
 
 import numpy as np
 import tensorrt as trt
 import torch
+from loguru import logger
 from pydantic import Field
 from tensorrt_llm.functional import (
     AttentionMaskType,
@@ -21,8 +21,6 @@ from typing_extensions import Self
 
 from ..config import GPT_ATTENTION_PLUGIN_DTYPE
 from ..types import StrictlyTyped
-
-logger = logging.getLogger(__name__)
 
 
 class Llama3ScalingConfig(StrictlyTyped):
@@ -70,14 +68,14 @@ class ROPEConfig(StrictlyTyped):
 
     def compute_rope_constants(self) -> tuple[np.ndarray, np.ndarray]:
         # TODO: replace this by `Attention.create_attention_const_params`
-        print("=========ROPE constant inputs=========")
-        print(f"rotary_embedding_max_positions: {self.rotary_embedding_max_positions}")
-        print(f"rotary_embedding_dim: {self.rotary_embedding_dim}")
-        print(f"rotary_embedding_base: {self.rotary_embedding_base}")
-        print(f"rotary_embedding_scale: {self.rotary_embedding_scale}")
-        print(f"rotary_embedding_scale_type: {self.rotary_embedding_scale_type.name}")
-        print(f"llama3_scaling_config: {self.llama3_scaling_config}")
-        print("======================================")
+        logger.debug("=========ROPE constant inputs=========")
+        logger.debug(f"rotary_embedding_max_positions: {self.rotary_embedding_max_positions}")
+        logger.debug(f"rotary_embedding_dim: {self.rotary_embedding_dim}")
+        logger.debug(f"rotary_embedding_base: {self.rotary_embedding_base}")
+        logger.debug(f"rotary_embedding_scale: {self.rotary_embedding_scale}")
+        logger.debug(f"rotary_embedding_scale_type: {self.rotary_embedding_scale_type.name}")
+        logger.debug(f"llama3_scaling_config: {self.llama3_scaling_config}")
+        logger.debug("======================================")
         rotary_inv_freq, embed_positions = RopeEmbeddingUtils.create_sinusoidal_positions_for_attention_plugin(
             self.rotary_embedding_max_positions,
             self.rotary_embedding_dim,

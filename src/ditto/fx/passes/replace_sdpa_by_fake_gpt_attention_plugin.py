@@ -1,6 +1,5 @@
-import logging
-
 import torch
+from loguru import logger
 from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.shape_prop import TensorMetadata
@@ -11,8 +10,6 @@ from ..subgraphs import LinearSubgraph
 from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata, traceback_reformats
 from .graph_pass import GraphOptimizationPass
 from .specialized_node import SDPANode
-
-logger = logging.getLogger(__name__)
 
 
 class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):

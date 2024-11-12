@@ -1,8 +1,8 @@
-import logging
 from collections.abc import Callable
 from typing import Any
 
 import torch
+from loguru import logger
 from torch.export import ExportedProgram
 from torch.export._trace import _export as torch_export
 from torch.nn.attention import sdpa_kernel
@@ -13,8 +13,6 @@ from .arguments_for_export import ArgumentsForExport
 from .config import INPUT_IDS, INPUT_IDS_UNSQUEEZE_DIM
 from .types import SDPBackend
 from .wrappers import PreExportWrapper, TRTLLMPreTrainedModelWrapper
-
-logger = logging.getLogger(__name__)
 
 
 def export(

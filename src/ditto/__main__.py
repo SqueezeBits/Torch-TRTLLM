@@ -3,6 +3,7 @@ from collections.abc import Callable
 from typing import Annotated, Any
 
 import torch
+from loguru import logger
 from torch.fx import GraphModule
 from torch.fx.graph import CodeGen
 from transformers import (
@@ -43,10 +44,10 @@ def generate(
     max_seq_len: int = 256,
 ) -> None:
     if not prompts:
-        print("Using default ", end="")
+        logger.info("Using default prompts")
         prompts = ["Tell me about pikachu.", "What's the difference between python2 and python3?"]
     _prompts = "\n".join(f"* {p}" for p in prompts)
-    print(f"prompts:\n{_prompts}")
+    logger.info(f"prompts:\n{_prompts}")
 
     model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16)
     model.to(device)
@@ -68,9 +69,9 @@ def generate(
         def debug_hook(self: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any], results: Any) -> None:
             _args, _kwargs = cache_handler.map_to_tensor(args, kwargs)
             with brief_tensor_repr():
-                print(f"args: {_args}")
-                print(f"kwargs: {_kwargs}")
-                print(f"results: {results}")
+                logger.info(f"args: {_args}")
+                logger.info(f"kwargs: {_kwargs}")
+                logger.info(f"results: {results}")
 
         model.register_forward_hook(debug_hook, with_kwargs=True)
 
@@ -86,10 +87,10 @@ def generate(
         cache = DynamicCache()
 
     responses = run_generation(prompts, model, tokenizer, initial_cache=cache, device=device)
-    print("============================Responses=============================")
+    logger.info("============================Responses=============================")
     for response in responses:
-        print(response)
-        print("==================================================================")
+        logger.info(response)
+        logger.info("==================================================================")
 
 
 @app.command()
@@ -101,13 +102,12 @@ def run(
     engine_path: str = "",
     verbose: bool = False,
     trust_remote_code: bool = False,
-    show_locals_on_exception: bool = False,
     transpose_weights: bool = False,
     mm_in_fp32: bool = False,
 ) -> None:
-    app.pretty_exceptions_show_locals = show_locals_on_exception
+    app.pretty_exceptions_show_locals = verbose
     torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
-    print(f"device: {device} | dtype: {dtype}")
+    logger.info(f"device: {device} | dtype: {dtype}")
     suffix_items = ["fp16" if torch_dtype == torch.float16 else "fp32"]
     if transpose_weights:
         suffix_items.append("tw")
@@ -133,7 +133,7 @@ def run(
         if os.path.isdir(model_id)
         else f"{model_id}-{engine_suffix}.engine"
     )
-    print(f"Saving serialized engine at {engine_path}")
+    logger.info(f"Saving serialized engine at {engine_path}")
     os.makedirs(os.path.dirname(engine_path), exist_ok=True)
     with open(engine_path, "wb") as engine_file:
         engine_file.write(engine.serialize())
@@ -154,7 +154,7 @@ def debug(
 ) -> None:
     app.pretty_exceptions_show_locals = verbose
     torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
-    print(f"device: {device} | dtype: {dtype}")
+    logger.info(f"device: {device} | dtype: {dtype}")
 
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
@@ -166,9 +166,9 @@ def debug(
     tokenizer.padding_side = "left"
 
     if not prompt:
-        print("Using default ", end="")
+        logger.info("Using default prompt")
         prompt = "Hey, are you conscious?"
-    print(f"prompt: {prompt}")
+    logger.info(f"prompt: {prompt}")
     input_ids = torch.tensor(tokenizer.encode(prompt), dtype=torch.int32, device=device)
 
     def graph_break(at: str) -> Callable[[GraphModule], GraphModule]:
@@ -216,7 +216,7 @@ def debug(
     if verbose:
         graph_module.print_readable()
 
-    print("Building TensorRT engine ...")
+    logger.info("Building TensorRT engine ...")
     engine = build_engine(
         graph_module,
         (),
@@ -245,7 +245,7 @@ def debug(
         "TRT output": trt_output,
         "Absolute diff": diff,
     }.items():
-        print(f"{name}: {value}\n{summary(value)}")
+        logger.info(f"{name}: {value}\n{summary(value)}")
 
 
 def run_generation(

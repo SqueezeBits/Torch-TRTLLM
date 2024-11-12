@@ -1,6 +1,4 @@
-import logging
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 def make_dim_nonnegative(dim: int, *, ndim: int) -> int:

@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+from loguru import logger
 from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_manager import PassManager
 from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
@@ -167,7 +168,7 @@ def get_transform(
     skipped_optimizers = skipped_optimizers or []
     for fx_pass in fx_passes:
         if (pass_name := fx_pass.__name__) in skipped_optimizers:
-            print(f"Skipping FX optimization pass {pass_name}")
+            logger.info(f"Skipping FX optimization pass {pass_name}")
             continue
         pass_manager.add_pass(fx_pass())
 

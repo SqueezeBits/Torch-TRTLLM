@@ -2,6 +2,7 @@ import os
 from collections.abc import Callable
 
 import tensorrt as trt
+from loguru import logger
 from torch.fx import GraphModule
 from torch_tensorrt import dtype
 from torch_tensorrt.dynamo._settings import CompilationSettings
@@ -42,7 +43,7 @@ def trtllm_build(
         verbose=verbose,
     )
 
-    print("Building TensorRT engine ...")
+    logger.info("Building TensorRT engine ...")
     return build_engine(
         graph_module,
         (),
@@ -81,12 +82,12 @@ def trtllm_export(
     if verbose:
         arguments_for_export.print_readable()
 
-    print("torch.exporting module ...")
+    logger.info("torch.exporting module ...")
     exported_program = export(model, arguments_for_export)
     with detailed_sym_node_str(), open(f"{model_name}_program.txt", "w") as f:
         f.write(f"{exported_program}")
 
-    print("Lowering exported program into graph module ...")
+    logger.info("Lowering exported program into graph module ...")
     graph_module = get_inlined_graph_module(
         exported_program,
         enforce_projections_transposed=transpose_weights,

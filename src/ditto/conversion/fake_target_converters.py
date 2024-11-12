@@ -1,10 +1,10 @@
 # mypy: disallow-untyped-decorators=False
 
-import logging
 from collections.abc import Sequence
 
 import numpy as np
 import tensorrt as trt
+from loguru import logger
 from tensorrt_llm.functional import PluginInfo, set_plugin_info
 from tensorrt_llm.plugin import TRT_LLM_PLUGIN_NAMESPACE
 from torch.fx.node import Argument, Target
@@ -18,8 +18,6 @@ from torch_tensorrt.dynamo.conversion.converter_utils import (
 )
 
 from ..fake_targets import FakeGPTAttentionPlugin, fake_transposed_mm
-
-logger = logging.getLogger(__name__)
 
 
 @dynamo_tensorrt_converter(
@@ -47,9 +45,11 @@ def convert_fake_gpt_attention_plugin(
         if isinstance(x, trt.ITensor | np.ndarray)
     ]
     if target.layer_idx == 0:
-        print("plugin field collection:")
-        print("\n".join(f"{f.name} ({f.type}): {f.data} (dtype={f.data.dtype}, shape={f.data.shape})" for f in pfc))
-        print(
+        logger.debug("plugin field collection:")
+        logger.debug(
+            "\n".join(f"{f.name} ({f.type}): {f.data} (dtype={f.data.dtype}, shape={f.data.shape})" for f in pfc)
+        )
+        logger.debug(
             "plugin inputs:\n"
             + "\n".join(f"Tensor(name={t.name}, dtype={t.dtype.name}, shape={t.shape})" for t in plugin_inputs)
         )

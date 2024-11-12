@@ -1,3 +1,4 @@
+from loguru import logger
 from torch.fx import GraphModule
 from torch.fx.graph import dtype_abbrs
 from torch.fx.passes.infra.pass_base import PassResult
@@ -23,5 +24,5 @@ class EliminateUnusedWeights(GraphOptimizationPass):
             dtype = dtype_abbrs[param.dtype]
             if hasattr(graph_module, name):
                 delattr(graph_module, name)
-                print(f"{self.indent}  Removed the unused parameter {name} {dtype}[{shape}]")
+                logger.debug(f"{self.indent}  Removed the unused parameter {name} {dtype}[{shape}]")
         return PassResult(graph_module, modified)

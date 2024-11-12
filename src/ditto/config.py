@@ -57,3 +57,6 @@ GPT_ATTENTION_PLUGIN_DTYPE: torch.dtype = torch.float16
 
 DEBUG_ARTIFACTS_DIR: str | None = os.environ.get("DEBUG_ARTIFACTS_DIR", None)
 """The directory to save the debug artifacts such as graph module code."""
+
+if "LOGURU_LEVEL" not in os.environ:
+    os.environ["LOGURU_LEVEL"] = "INFO"

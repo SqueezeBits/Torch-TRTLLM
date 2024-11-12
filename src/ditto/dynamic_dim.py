@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from functools import cached_property
 
+from loguru import logger
 from pydantic import BaseModel, Field, ValidationError, model_validator
 from torch.export import Dim
 from typing_extensions import Self
@@ -105,8 +106,8 @@ class DynamicDimension(DynamicDimensionType):
             the_example_size = (
                 "the inferred example size" if self.given_example is None else "the provided example size"
             )
-            print(
-                f"[WARNING] {the_example_size} {ex} for `torch.export` of the dimension {self.name} is less than 2. "
+            logger.warning(
+                f"{the_example_size} {ex} for `torch.export` of the dimension {self.name} is less than 2. "
                 "This can be problematic for `torch.export` as it often considers the dimension of size 1 as static. "
                 f"Please set the `example_for_export` for {self.name} greater than or equal to 2"
             )
@@ -145,7 +146,7 @@ class DerivedDynamicDimension(DynamicDimensionType):
             # pylint: disable-next=not-callable
             return self.op(lhs, rhs)  # type: ignore[arg-type]
         except Exception as e:
-            print(f"[WARNING] the derived dynamic dimension {self.name} will be detached (reason: {e})")
+            logger.warning(f"the derived dynamic dimension {self.name} will be detached (reason: {e})")
         return self.detach().export_dim
 
     @property

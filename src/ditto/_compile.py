@@ -8,6 +8,7 @@ from collections.abc import Callable, Generator
 import tensorrt as trt
 import torch
 import torch.utils._pytree as pytree
+from loguru import logger
 from tensorrt_llm._common import _is_building
 from torch.export import ExportedProgram
 from torch.fx import GraphModule
@@ -35,8 +36,6 @@ from .config import PassName
 from .fx.optimize import get_optimization_transform
 from .interpreter import TRTLLMInterpreter
 
-logger = logging.getLogger(__name__)
-
 CURRENT_DEVICE = Device._current_device()
 
 
@@ -53,13 +52,10 @@ def build_engine(
     if settings is None:
         settings = CompilationSettings()
 
-    if settings.debug:
-        logger.setLevel(logging.DEBUG)
-
     DYNAMO_CONVERTERS.set_compilation_settings(settings)
-    logger.info(f"Compilation Settings: {settings}\n")
-    logger.info(f"arg_inputs: {arg_inputs}")
-    logger.info(f"kwarg_inputs: {kwarg_inputs}")
+    logger.debug(f"Compilation Settings: {settings}\n")
+    logger.debug(f"arg_inputs: {arg_inputs}")
+    logger.debug(f"kwarg_inputs: {kwarg_inputs}")
 
     flattened_inputs, _ = get_flat_args(arg_inputs, kwarg_inputs)
     output_dtypes = infer_module_output_dtypes(

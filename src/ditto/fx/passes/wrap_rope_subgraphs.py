@@ -1,5 +1,4 @@
-import logging
-
+from loguru import logger
 from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
@@ -13,8 +12,6 @@ from ...fake_targets import (
 )
 from ..utils import get_tensor_metadata
 from .graph_pass import GraphOptimizationPass
-
-logger = logging.getLogger(__name__)
 
 
 class WrapRoPESubgraphs(GraphOptimizationPass):

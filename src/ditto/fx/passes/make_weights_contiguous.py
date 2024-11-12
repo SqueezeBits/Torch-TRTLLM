@@ -1,4 +1,5 @@
 import torch
+from loguru import logger
 from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_base import PassResult
 
@@ -14,6 +15,6 @@ class MakeWeightsContiguous(GraphOptimizationPass):
             if param.is_contiguous():
                 continue
             setattr(graph_module, name, torch.nn.Parameter(param.contiguous()))
-            print(f"{self.indent}  Made the parameter {name} contiguous")
+            logger.debug(f"{self.indent}  Made the parameter {name} contiguous")
             modified = True
         return PassResult(graph_module, modified)
