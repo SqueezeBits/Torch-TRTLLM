@@ -6,7 +6,9 @@ import numpy as np
 import onnx
 import tensorrt as trt
 import tensorrt_llm as trtllm
+import torch
 from tensorrt_llm.functional import RopeEmbeddingUtils, RotaryScalingType
+from tensorrt_llm.runtime.generation import GenerationSession
 
 from .pretty_print import builder_config_as_dict, get_network_ir
 
@@ -89,6 +91,22 @@ def patched_create_sinusoidal_positions_for_attention_plugin(
     )
 
 
+original_generation_session_handle_per_step = GenerationSession.handle_per_step
+
+
+def patched_handle_per_step(self, cache_indirections: list, step: int, *args, **kwargs):
+    output = original_generation_session_handle_per_step(self, cache_indirections, step, *args, **kwargs)
+    if self.debug_mode:
+        if debug_input_dir := os.getenv("DEBUG_INPUT_DIR", None):
+            os.makedirs(debug_input_dir, exist_ok=True)
+            torch.save(self.debug_buffer, os.path.join(debug_input_dir, f"step{step}.pt"))
+        else:
+            for name, value in self.debug_buffer.items():
+                print(f"{name}: {value}")
+            print("==============================================================================")
+    return output
+
+
 trtllm.Network.to_dot = patched_trtllm_network_to_dot
 
 trtllm.Builder.build_engine = patched_builder_build_engine
@@ -96,3 +114,5 @@ trtllm.Builder.build_engine = patched_builder_build_engine
 RopeEmbeddingUtils.create_sinusoidal_positions_for_attention_plugin = (
     patched_create_sinusoidal_positions_for_attention_plugin
 )
+
+GenerationSession.handle_per_step = patched_handle_per_step
