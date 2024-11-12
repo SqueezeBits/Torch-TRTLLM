@@ -1,9 +1,10 @@
 import os
+from collections.abc import Callable
 from typing import Annotated, Any
 
 import torch
-import torch_tensorrt as torch_trt
-from torch_tensorrt.dynamo.conversion import CompilationSettings
+from torch.fx import GraphModule
+from torch.fx.graph import CodeGen
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -20,11 +21,11 @@ from . import (
     ArgumentsForExport,
     DynamicCacheHandler,
     StaticCacheHandler,
+    TensorRTInferenceSession,
     brief_tensor_repr,
     build_engine,
-    detailed_sym_node_str,
-    export,
-    get_inlined_graph_module,
+    trtllm_build,
+    trtllm_export,
 )
 from .config import DEFAULT_DEVICE
 
@@ -101,7 +102,6 @@ def run(
     verbose: bool = False,
     trust_remote_code: bool = False,
     show_locals_on_exception: bool = False,
-    skip_engine_build: bool = False,
     transpose_weights: bool = False,
     mm_in_fp32: bool = False,
 ) -> None:
@@ -120,56 +120,13 @@ def run(
         torch_dtype=torch_dtype,
         trust_remote_code=trust_remote_code,
     ).to(device)
-    model_name = type(model).__name__
 
-    arguments_for_export = ArgumentsForExport.get_trtllm_inputs(
-        device=device,
-        use_cache=False,
+    engine = trtllm_build(
+        model,
+        transpose_weights=transpose_weights,
+        mm_in_fp32=mm_in_fp32,
+        verbose=verbose,
     )
-
-    if verbose:
-        arguments_for_export.print_readable()
-
-    print("torch.exporting module ...")
-    exported_program = export(model, arguments_for_export)
-    with detailed_sym_node_str(), open(f"{model_name}_program.txt", "w") as f:
-        f.write(f"{exported_program}")
-
-    print("Lowering exported program into graph module ...")
-    graph_module = get_inlined_graph_module(
-        exported_program,
-        enforce_projections_transposed=transpose_weights,
-        enforce_projections_in_fp32=mm_in_fp32,
-    )
-
-    with detailed_sym_node_str():
-        with open(f"{model_name}-{engine_suffix}_graph_module.txt", "w") as f:
-            f.write(graph_module.print_readable(print_output=False))
-        with open(f"{model_name}-{engine_suffix}_graph.txt", "w") as f:
-            f.write(f"{graph_module.graph}")
-
-    if skip_engine_build:
-        print("Skipping TensorRT engine building")
-        return
-
-    print("Building TensorRT engine ...")
-    settings = CompilationSettings(
-        assume_dynamic_shape_support=True,
-        enabled_precisions={torch_trt.dtype.f16, torch_trt.dtype.f32},
-        debug=verbose,
-        optimization_level=3,
-        max_aux_streams=-1,
-    )
-    engine = build_engine(
-        graph_module,
-        (),
-        arguments_for_export.torch_trt_inputs,
-        settings=settings,
-        name=type(model).__name__,
-    )
-    for i in range(engine.num_io_tensors):
-        name = engine.get_tensor_name(i)
-        print(f"({i}) {name}: {engine.get_tensor_shape(name)}")
 
     engine_path = engine_path or (
         os.path.join(f"{os.path.abspath(model_id)}-{engine_suffix}-ditto", "rank0.engine")
@@ -180,6 +137,115 @@ def run(
     os.makedirs(os.path.dirname(engine_path), exist_ok=True)
     with open(engine_path, "wb") as engine_file:
         engine_file.write(engine.serialize())
+
+
+@app.command()
+@torch.no_grad()
+def debug(
+    model_id: str,
+    target: str = "mm_default",
+    prompt: str = "",
+    transpose_weights: bool = False,
+    mm_in_fp32: bool = False,
+    device: str = DEFAULT_DEVICE,
+    dtype: str = "float16",
+    trust_remote_code: bool = False,
+    verbose: bool = False,
+) -> None:
+    app.pretty_exceptions_show_locals = verbose
+    torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
+    print(f"device: {device} | dtype: {dtype}")
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=torch_dtype,
+        trust_remote_code=trust_remote_code,
+    ).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer.pad_token_id = model.config.pad_token_id or 0
+    tokenizer.padding_side = "left"
+
+    if not prompt:
+        print("Using default ", end="")
+        prompt = "Hey, are you conscious?"
+    print(f"prompt: {prompt}")
+    input_ids = torch.tensor(tokenizer.encode(prompt), dtype=torch.int32, device=device)
+
+    def graph_break(at: str) -> Callable[[GraphModule], GraphModule]:
+        def reset_output(gm: GraphModule) -> GraphModule:
+            nodes = {n.name: n for n in gm.graph.nodes}
+            for node in reversed(gm.graph.nodes):
+                if node.op == "output":
+                    break
+            else:
+                return gm
+            node.args = (nodes[at],)
+            gm.graph._codegen = CodeGen()
+            gm.graph.eliminate_dead_code()
+            gm.graph.lint()
+            gm.recompile()
+            return gm
+
+        return reset_output
+
+    def remove_unused_inputs(gm: GraphModule) -> GraphModule:
+        placeholders = [n for n in gm.graph.nodes if n.op == "placeholder"]
+        for placeholder in placeholders:
+            if placeholder.users:
+                continue
+            gm.graph.erase_node(placeholder)
+        gm.graph.eliminate_dead_code()
+        gm.graph.lint()
+        gm.recompile()
+        return gm
+
+    arguments_for_export = ArgumentsForExport.get_trtllm_inputs(
+        device=device,
+        use_cache=False,
+    )
+
+    graph_module = trtllm_export(
+        model,
+        arguments_for_export,
+        transpose_weights=transpose_weights,
+        mm_in_fp32=mm_in_fp32,
+        extra_passes=[graph_break(target), remove_unused_inputs],
+        verbose=verbose,
+    )
+
+    if verbose:
+        graph_module.print_readable()
+
+    print("Building TensorRT engine ...")
+    engine = build_engine(
+        graph_module,
+        (),
+        arguments_for_export.torch_trt_inputs,
+        name=type(model).__name__,
+    )
+
+    session = TensorRTInferenceSession(engine)
+    output = graph_module(input_ids)
+    session.allocate_outputs({"logits": output})
+    trt_output = session.run({"input_ids": input_ids})["logits"]
+    diff = (output - trt_output).abs()
+
+    def summary(t: torch.Tensor) -> str:
+        return "\n".join(
+            [
+                f"  * shape: {(*t.shape,)}",
+                f"  * dtype: {t.dtype}",
+                f"  * mean: {t.mean().item()}",
+                f"  * std: {t.std().item()}",
+            ]
+        )
+
+    for name, value in {
+        "native output": output,
+        "TRT output": trt_output,
+        "Absolute diff": diff,
+    }.items():
+        print(f"{name}: {value}\n{summary(value)}")
 
 
 def run_generation(
