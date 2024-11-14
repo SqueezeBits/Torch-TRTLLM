@@ -144,9 +144,10 @@ def get_inlined_graph_module(
             *ATEN_PRE_LOWERING_PASSES.passes,
         ]
     )
+    post_lowering_passes = [f for f in ATEN_POST_LOWERING_PASSES.passes if f.__name__ != "view_to_reshape"]
     post_inline_pass_manager = DynamoPassManager.build_from_passlist(
         [
-            *ATEN_POST_LOWERING_PASSES.passes,
+            *post_lowering_passes,
             get_optimization_transform(
                 skipped_optimizers,
                 enforce_projections_transposed=enforce_projections_transposed,

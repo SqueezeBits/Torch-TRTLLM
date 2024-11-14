@@ -74,7 +74,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 with graph.inserting_after(last_placeholder):
                     populate_tensor_metadata(graph.get_attr("rotary_inv_freq"), rotary_inv_freq)
                     populate_tensor_metadata(graph.get_attr("rotary_cos_sin"), rotary_cos_sin)
-                global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph)
+                global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph, global_rope_config.is_rope)
             if global_rope_config != query_rope_config:
                 logger.warning(
                     f"rope config for key mismatched in GPTAttentionPlugin pattern {layer_idx}:\n"

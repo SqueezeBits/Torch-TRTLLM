@@ -1,4 +1,3 @@
-import os
 from collections.abc import Callable
 
 import tensorrt as trt
@@ -11,8 +10,9 @@ from transformers import PreTrainedModel
 from ._compile import build_engine, get_inlined_graph_module
 from ._export import export
 from .arguments_for_export import ArgumentsForExport
-from .config import DEBUG_ARTIFACTS_DIR
+from .config import PassName
 from .pretty_print import detailed_sym_node_str
+from .utils import open_debug_artifact
 
 
 def trtllm_build(
@@ -69,6 +69,7 @@ def trtllm_export(
     *,
     transpose_weights: bool = False,
     mm_in_fp32: bool = False,
+    skipped_optimizers: list[PassName] | None = None,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
     verbose: bool = False,
 ) -> GraphModule:
@@ -90,24 +91,23 @@ def trtllm_export(
     logger.info("Lowering exported program into graph module ...")
     graph_module = get_inlined_graph_module(
         exported_program,
+        skipped_optimizers=skipped_optimizers,
         enforce_projections_transposed=transpose_weights,
         enforce_projections_in_fp32=mm_in_fp32,
         extra_passes=extra_passes,
     )
 
-    if DEBUG_ARTIFACTS_DIR is not None:
-        os.makedirs(DEBUG_ARTIFACTS_DIR, exist_ok=True)
-        with detailed_sym_node_str():
-            with open(os.path.join(DEBUG_ARTIFACTS_DIR, f"{model_name}.py"), "w") as f:
-                f.write(
-                    "\n".join(
-                        [
-                            "import torch\n",
-                            graph_module.print_readable(print_output=False),
-                        ]
-                    )
+    with detailed_sym_node_str():
+        with open_debug_artifact(f"{model_name}.py") as f:
+            f.write(
+                "\n".join(
+                    [
+                        "import torch\n",
+                        graph_module.print_readable(print_output=False),
+                    ]
                 )
-            with open(os.path.join(DEBUG_ARTIFACTS_DIR, f"{model_name}.txt"), "w") as f:
-                f.write(f"{graph_module.graph}")
+            )
+        with open_debug_artifact(f"{model_name}_graph.txt") as f:
+            f.write(f"{graph_module.graph}")
 
     return graph_module

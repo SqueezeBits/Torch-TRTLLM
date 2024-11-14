@@ -28,7 +28,7 @@ from . import (
     trtllm_build,
     trtllm_export,
 )
-from .config import DEFAULT_DEVICE
+from .config import DEFAULT_DEVICE, INPUT_IDS_UNSQUEEZE_DIM
 
 app = Typer()
 
@@ -143,7 +143,9 @@ def run(
 @torch.no_grad()
 def debug(
     model_id: str,
-    target: str = "mm_default",
+    skipped_optimizers: Annotated[list[str], Option(default_factory=list)],
+    layer: str = "",
+    target: str = "",
     prompt: str = "",
     transpose_weights: bool = False,
     mm_in_fp32: bool = False,
@@ -156,14 +158,21 @@ def debug(
     torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
     logger.info(f"device: {device} | dtype: {dtype}")
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        torch_dtype=torch_dtype,
-        trust_remote_code=trust_remote_code,
-    ).to(device)
+    model = (
+        AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch_dtype,
+            trust_remote_code=trust_remote_code,
+        )
+        .to(device)
+        .eval()
+    )
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token_id = model.config.pad_token_id or 0
     tokenizer.padding_side = "left"
+
+    if verbose:
+        print(model)
 
     if not prompt:
         logger.info("Using default prompt")
@@ -173,13 +182,20 @@ def debug(
 
     def graph_break(at: str) -> Callable[[GraphModule], GraphModule]:
         def reset_output(gm: GraphModule) -> GraphModule:
+            if not at:
+                return gm
             nodes = {n.name: n for n in gm.graph.nodes}
             for node in reversed(gm.graph.nodes):
                 if node.op == "output":
                     break
             else:
                 return gm
-            node.args = (nodes[at],)
+            try:
+                node.args = (nodes[at],)
+            except KeyError as e:
+                logger.error(f"No such node: {at}")
+                gm.print_readable()
+                raise e
             gm.graph._codegen = CodeGen()
             gm.graph.eliminate_dead_code()
             gm.graph.lint()
@@ -207,6 +223,7 @@ def debug(
     graph_module = trtllm_export(
         model,
         arguments_for_export,
+        skipped_optimizers=skipped_optimizers,
         transpose_weights=transpose_weights,
         mm_in_fp32=mm_in_fp32,
         extra_passes=[graph_break(target), remove_unused_inputs],
@@ -224,10 +241,29 @@ def debug(
         name=type(model).__name__,
     )
 
+    if layer:
+        print(f"Hijacking the output from the layer {layer}")
+        assert isinstance(model, torch.nn.Module)
+        layer_outputs: tuple[torch.Tensor, ...] = ()
+
+        def hook(module: torch.nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any], output: Any) -> None:
+            nonlocal layer_outputs
+            layer_outputs = output
+
+        handle = model.get_submodule(layer).register_forward_hook(hook, with_kwargs=True)
+
+        _ = model(input_ids.unsqueeze(INPUT_IDS_UNSQUEEZE_DIM))
+        assert len(layer_outputs) > 0
+        output = layer_outputs[0]
+        handle.remove()
+    else:
+        print(f"Evaluating graph module output at node {target}")
+        output = graph_module(input_ids)
+
     session = TensorRTInferenceSession(engine)
-    output = graph_module(input_ids)
-    session.allocate_outputs({"logits": output})
-    trt_output = session.run({"input_ids": input_ids})["logits"]
+    output_name = session.output_tensor_names[0]
+    session.allocate_outputs({output_name: output})
+    trt_output = session.run({"input_ids": input_ids})[output_name]
     diff = (output - trt_output).abs()
 
     def summary(t: torch.Tensor) -> str:

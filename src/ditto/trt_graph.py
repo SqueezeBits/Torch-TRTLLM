@@ -279,6 +279,8 @@ def run_fake_constant_folding(graph_module: GraphModule) -> None:
         for input_node in node.all_input_nodes:
             if input_node in constant_nodes and input_node.op != "get_attr":
                 assert isinstance(tensor_meta := input_node.meta["tensor_meta"], TensorMetadata)
+                if -1 in tensor_meta.shape:
+                    continue
                 graph_module.register_parameter(
                     target := make_folded_constant_name(input_node),
                     torch.nn.Parameter(

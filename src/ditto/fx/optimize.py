@@ -5,7 +5,7 @@ from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_manager import PassManager
 from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
 
-from ..config import FX_TRANSFORM_MAXIMUM_ITERATION, PassName
+from ..config import AUTO_DETECT_ROPE_SUBGRAPH, FX_TRANSFORM_MAXIMUM_ITERATION, PassName
 from .passes import (
     CastFP16MMToFP32,
     ConstantSharing,
@@ -17,6 +17,7 @@ from .passes import (
     EliminateNopSlice,
     EliminateUnsqueezeSqueeze,
     EliminateUnusedWeights,
+    FixSliceRanges,
     FuseConsecutivePermutes,
     FuseConsecutiveReshapes,
     FuseConsecutiveSliceConcat,
@@ -28,6 +29,8 @@ from .passes import (
     InsertGatherLastTokenIds,
     MakeWeightsContiguous,
     ReplaceSDPAByFakeGPTAttentionPlugin,
+    ReplaceSDPAByFakeGPTAttentionPluginV2,
+    ReplaceViewByReshape,
     RewriteMMAsTransposedMM,
     RewriteReshapeAsUnsqueeze,
     WrapRoPESubgraphs,
@@ -76,10 +79,18 @@ def compose(*transforms: Callable[[GraphModule], GraphModule]) -> Callable[[Grap
 
 # conversions required for TRT-LLM engine
 TRTLLM_CONVERSION_PASSES: tuple[type[GraphOptimizationPass], ...] = (
-    InsertGatherLastTokenIds,
-    WrapRoPESubgraphs,
-    ReplaceSDPAByFakeGPTAttentionPlugin,
-    FuseMMConstSiblings,
+    (
+        InsertGatherLastTokenIds,
+        WrapRoPESubgraphs,
+        ReplaceSDPAByFakeGPTAttentionPlugin,
+        FuseMMConstSiblings,
+    )
+    if AUTO_DETECT_ROPE_SUBGRAPH
+    else (
+        InsertGatherLastTokenIds,
+        ReplaceSDPAByFakeGPTAttentionPluginV2,
+        FuseMMConstSiblings,
+    )
 )
 
 # passes required before the TRT-LLM conversion passes
@@ -88,6 +99,7 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateNopCatOrStack,
     EliminateCopy,
     EliminateNopSlice,
+    FixSliceRanges,
     FuseConsecutiveReshapes,
     FuseConsecutivePermutes,
     FuseConsecutiveToCopys,
@@ -97,6 +109,7 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateUnsqueezeSqueeze,
     EliminateUnusedWeights,
     MakeWeightsContiguous,
+    ReplaceViewByReshape,
 )
 
 # passes required after the TRT-LLM conversion passes

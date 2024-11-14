@@ -4,7 +4,6 @@ from collections.abc import Sequence
 
 import numpy as np
 import tensorrt as trt
-from loguru import logger
 from tensorrt_llm.functional import PluginInfo, set_plugin_info
 from tensorrt_llm.plugin import TRT_LLM_PLUGIN_NAMESPACE
 from torch.fx.node import Argument, Target
@@ -18,6 +17,7 @@ from torch_tensorrt.dynamo.conversion.converter_utils import (
 )
 
 from ..fake_targets import FakeGPTAttentionPlugin, fake_transposed_mm
+from ..utils import open_debug_artifact
 
 
 @dynamo_tensorrt_converter(
@@ -44,15 +44,22 @@ def convert_fake_gpt_attention_plugin(
         for key, x in args_kwargs.items()
         if isinstance(x, trt.ITensor | np.ndarray)
     ]
+
     if target.layer_idx == 0:
-        logger.debug("plugin field collection:")
-        logger.debug(
-            "\n".join(f"{f.name} ({f.type}): {f.data} (dtype={f.data.dtype}, shape={f.data.shape})" for f in pfc)
-        )
-        logger.debug(
-            "plugin inputs:\n"
-            + "\n".join(f"Tensor(name={t.name}, dtype={t.dtype.name}, shape={t.shape})" for t in plugin_inputs)
-        )
+        with open_debug_artifact("plugin.txt") as f:
+            f.writelines(
+                (
+                    "plugin field collection:\n",
+                    "\n".join(
+                        f"{field.name} ({field.type}): {field.data} "
+                        f"(dtype={field.data.dtype}, shape={field.data.shape})"
+                        for field in pfc
+                    ),
+                    "\nplugin inputs:\n",
+                    "\n".join(f"ITensor(name={t.name}, dtype={t.dtype.name}, shape={t.shape})" for t in plugin_inputs),
+                )
+            )
+
     layer = ctx.net.add_plugin_v2(plugin_inputs, attn_plugin)
     plugin_info = PluginInfo(plugin_creator, "causal_attn", pfc)
     set_plugin_info(ctx.net, layer.name, plugin_info)

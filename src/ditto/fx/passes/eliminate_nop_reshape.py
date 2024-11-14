@@ -13,8 +13,8 @@ class EliminateNopReshape(NodeWiseOptimizationPass):
         if not (
             (reshape := ReshapeNode.specialize_from(node))
             and (input_tensor := get_tensor_metadata(reshape.x))
-            and (target_shape := reshape.target_shape)
-            and target_shape == input_tensor.shape
+            and (output_tensor := get_tensor_metadata(reshape.node))
+            and input_tensor.shape == output_tensor.shape
         ):
             return {}
         return {node: reshape.x}

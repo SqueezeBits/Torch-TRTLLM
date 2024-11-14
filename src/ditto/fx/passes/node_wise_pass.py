@@ -24,7 +24,10 @@ class NodeWiseOptimizationPass(GraphOptimizationPass):
         for node in nodes:
             if replacement_map := self.rewrite(node):
                 is_replaced = [
-                    len(original_node.replace_all_uses_with(replacement_node)) > 0
+                    (
+                        original_node is replacement_node
+                        or len(original_node.replace_all_uses_with(replacement_node)) > 0
+                    )
                     for original_node, replacement_node in replacement_map.items()
                 ]
                 modified = modified or any(is_replaced)

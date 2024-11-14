@@ -1,7 +1,6 @@
 from typing import TypedDict
 
 import torch
-from loguru import logger
 from pydantic import Field
 from torch_tensorrt._Input import Input
 from typing_extensions import Self
@@ -31,20 +30,20 @@ class ArgumentsForExport(StrictlyTyped):
             return f"{dim.__name__}(min={min_}, max={max_})"
 
         with brief_tensor_repr():
-            logger.info("=============Tensor inputs for torch.export=============")
+            print("=============Tensor inputs for torch.export=============")
             for name, tensor in self.tensor_inputs.items():
-                logger.info(f"{name}: {tensor}")
-            logger.info("============Constant inputs for torch.export============")
+                print(f"{name}: {tensor}")
+            print("============Constant inputs for torch.export============")
             for name, constant in self.constant_inputs.items():
-                logger.info(f"{name}: {constant}")
-            logger.info("======================Constraints=======================")
+                print(f"{name}: {constant}")
+            print("======================Constraints=======================")
             for name, constraint in self.constraints.items():
                 if constraint is None:
-                    logger.info(f"{name}: None")
+                    print(f"{name}: None")
                     continue
                 dim_reprs = {axis: dim_repr(dim) for axis, dim in constraint.items()}
-                logger.info(f"{name}: {dim_reprs}")
-            logger.info("========================================================")
+                print(f"{name}: {dim_reprs}")
+            print("========================================================")
 
     @classmethod
     def get_trtllm_inputs(

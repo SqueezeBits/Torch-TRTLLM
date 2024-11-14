@@ -14,6 +14,7 @@ PassName = Literal[
     "EliminateNopSlice",
     "EliminateUnsqueezeSqueeze",
     "EliminateUnusedWeights",
+    "FixSliceRanges",
     "FuseConsecutivePermutes",
     "FuseConsecutiveReshapes",
     "FuseConsecutiveSliceConcat",
@@ -25,6 +26,8 @@ PassName = Literal[
     "InsertGatherLastTokenIds",
     "MakeWeightsContiguous",
     "ReplaceSDPAByFakeGPTAttentionPlugin",
+    "ReplaceSDPAByFakeGPTAttentionPluginV2",
+    "ReplaceViewByReshape",
     "RewriteMMAsTransposedMM",
     "RewriteReshapeAsUnsqueeze",
     "WrapRoPESubgraphs",
@@ -55,8 +58,11 @@ The default device for the PyTorch modules and tensors.
 GPT_ATTENTION_PLUGIN_DTYPE: torch.dtype = torch.float16
 """The precision for the GPT attention plugin"""
 
+AUTO_DETECT_ROPE_SUBGRAPH: bool = os.environ.get("AUTO_DETECT_ROPE_SUBGRAPH", "1") == "1"
+
 DEBUG_ARTIFACTS_DIR: str | None = os.environ.get("DEBUG_ARTIFACTS_DIR", None)
 """The directory to save the debug artifacts such as graph module code."""
 
+
 if "LOGURU_LEVEL" not in os.environ:
-    os.environ["LOGURU_LEVEL"] = "INFO"
+    os.environ["LOGURU_LEVEL"] = os.environ.get("DITTO_LOG_LEVEL", "INFO")

@@ -21,6 +21,7 @@ from typing_extensions import Self
 
 from ..config import GPT_ATTENTION_PLUGIN_DTYPE
 from ..types import StrictlyTyped
+from ..utils import open_debug_artifact
 
 
 class Llama3ScalingConfig(StrictlyTyped):
@@ -41,6 +42,10 @@ class ROPEConfig(StrictlyTyped):
     rotary_embedding_max_positions: int = 1024
     rotary_embedding_original_max_positions: int = 1024
     llama3_scaling_config: Llama3ScalingConfig = Field(default_factory=Llama3ScalingConfig, exclude=True)
+
+    @property
+    def is_rope(self) -> bool:
+        return self.position_embedding_type.is_rope() and self.rotary_embedding_dim != 0
 
     @classmethod
     def from_pretrained_config(
@@ -68,14 +73,6 @@ class ROPEConfig(StrictlyTyped):
 
     def compute_rope_constants(self) -> tuple[np.ndarray, np.ndarray]:
         # TODO: replace this by `Attention.create_attention_const_params`
-        logger.debug("=========ROPE constant inputs=========")
-        logger.debug(f"rotary_embedding_max_positions: {self.rotary_embedding_max_positions}")
-        logger.debug(f"rotary_embedding_dim: {self.rotary_embedding_dim}")
-        logger.debug(f"rotary_embedding_base: {self.rotary_embedding_base}")
-        logger.debug(f"rotary_embedding_scale: {self.rotary_embedding_scale}")
-        logger.debug(f"rotary_embedding_scale_type: {self.rotary_embedding_scale_type.name}")
-        logger.debug(f"llama3_scaling_config: {self.llama3_scaling_config}")
-        logger.debug("======================================")
         rotary_inv_freq, embed_positions = RopeEmbeddingUtils.create_sinusoidal_positions_for_attention_plugin(
             self.rotary_embedding_max_positions,
             self.rotary_embedding_dim,
@@ -84,6 +81,16 @@ class ROPEConfig(StrictlyTyped):
             self.rotary_embedding_scale_type,
             self.llama3_scaling_config.model_dump(),
         )
+        with open_debug_artifact("rope_inputs.pt", "wb") as f:
+            torch.save(
+                {
+                    "rotary_inv_freq": torch.from_numpy(rotary_inv_freq),
+                    "rotary_cos_sin": torch.from_numpy(embed_positions),
+                },
+                f,
+            )
+        with open_debug_artifact("rope_config.json") as f:
+            f.write(self.model_dump_json(indent=2))
         return rotary_inv_freq, embed_positions
 
 
@@ -190,19 +197,23 @@ class GPTAttentionPluginInputs(StrictlyTyped):
     kv_cache_block_offsets: Node
     host_kv_cache_block_offsets: Node
     host_kv_cache_pool_pointers: Node
-    rotary_inv_freq: Node
-    rotary_cos_sin: Node
+    rotary_inv_freq: Node | None = None
+    rotary_cos_sin: Node | None = None
     host_context_lengths: Node
     host_runtime_perf_knobs: Node
 
     @classmethod
-    def find_from(cls, graph: Graph) -> Self:
+    def find_from(cls, graph: Graph, is_rope: bool) -> Self:
         existing_placeholders = {p.name: p for p in graph.nodes if p.op == "placeholder"}
         get_attr_nodes = {n.name: n for n in graph.nodes if n.op == "get_attr"}
+        excluded = set() if is_rope else {"rotary_inv_freq", "rotary_cos_sin"}
         nodes = {
             name: node
             for name in reversed(cls.model_fields)
-            if isinstance(node := existing_placeholders.get(name, get_attr_nodes.get(name, None)), Node)
+            if (
+                name not in excluded
+                and isinstance(node := existing_placeholders.get(name, get_attr_nodes.get(name, None)), Node)
+            )
         }
         return cls(**nodes)
 

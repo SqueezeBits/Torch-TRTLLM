@@ -23,9 +23,9 @@ from torch_tensorrt.dynamo.conversion import (
 )
 from torch_tensorrt.dynamo.conversion.converter_utils import create_constant
 
-from .config import DEBUG_ARTIFACTS_DIR
 from .fake_targets import FakeGPTAttentionPlugin
 from .pretty_print import builder_config_as_dict, get_network_ir
+from .utils import get_debug_artifacts_dir, open_debug_artifact
 
 
 class TRTLLMInterpreter(TRTInterpreter):
@@ -57,17 +57,14 @@ class TRTLLMInterpreter(TRTInterpreter):
 
     def _construct_trt_network_def(self) -> None:
         super()._construct_trt_network_def()
-        if DEBUG_ARTIFACTS_DIR is not None:
-            os.makedirs(DEBUG_ARTIFACTS_DIR, exist_ok=True)
+        if debug_artifacts_dir := get_debug_artifacts_dir():
             code, model_proto = get_network_ir(self.ctx.net, self.optimization_profiles)
-            with open(code_path := os.path.join(DEBUG_ARTIFACTS_DIR, f"{self.ctx.net.name}.txt"), "w") as f:
+            with open_debug_artifact(f"{self.ctx.net.name}_trt.py") as f:
                 f.write(code)
-            self.logger.info(f"TensorRT Network saved at {code_path}")
-            with open(onnx_path := os.path.join(DEBUG_ARTIFACTS_DIR, f"{self.ctx.net.name}.onnx"), "wb") as f:
+            with open_debug_artifact(f"{self.ctx.net.name}_trt.onnx", "wb") as f:
                 weight_file = f"{self.ctx.net.name}.bin"
                 onnx.save(model_proto, f, save_as_external_data=True, location=weight_file)
-                os.remove(os.path.join(DEBUG_ARTIFACTS_DIR, weight_file))
-            self.logger.info(f"TensorRT Network ONNX saved at {onnx_path}")
+                os.remove(os.path.join(debug_artifacts_dir, weight_file))
 
     def _populate_trt_builder_config(
         self,
@@ -128,12 +125,8 @@ class TRTLLMInterpreter(TRTInterpreter):
         if weight_sparsity:
             builder_config.set_flag(trt.BuilderFlag.SPARSE_WEIGHTS)
 
-        if DEBUG_ARTIFACTS_DIR is not None:
-            os.makedirs(DEBUG_ARTIFACTS_DIR, exist_ok=True)
-            config_dict = builder_config_as_dict(builder_config)
-            with open(path := os.path.join(DEBUG_ARTIFACTS_DIR, f"{self.ctx.net.name}.json"), "w") as f:
-                json.dump(config_dict, f, indent=2, sort_keys=True)
-            self.logger.info(f"trt.IBuilderConfig saved at {path}")
+        with open_debug_artifact(f"{self.ctx.net.name}.json") as f:
+            json.dump(builder_config_as_dict(builder_config), f, indent=2, sort_keys=True)
         return builder_config
 
     def run_node(self, n: Node) -> Node:
