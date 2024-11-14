@@ -1,9 +1,11 @@
 import io
 import os
+from collections.abc import Iterable
 from functools import cache
 from typing import IO, Literal
 
 from loguru import logger
+from typing_extensions import Buffer
 
 from .config import DEBUG_ARTIFACTS_DIR
 
@@ -21,12 +23,13 @@ def make_axis_nonnegative(axis: int, *, dim_size: int) -> int:
 
 
 class DiscardBytesIO(io.BytesIO):
-    def write(self, b) -> int:
-        # Ignore the data, effectively discarding it
-        return len(b)
+    def write(self, _: Buffer | bytes) -> int:
+        return 0
+
+    def writelines(self, _: Iterable[Buffer]) -> None:
+        return
 
     def getvalue(self) -> Literal[b""]:
-        # Return an empty bytes object, since nothing is actually stored
         return b""
 
 
@@ -35,6 +38,7 @@ def get_debug_artifacts_dir() -> str | None:
     if DEBUG_ARTIFACTS_DIR is None:
         return None
     os.makedirs(DEBUG_ARTIFACTS_DIR, exist_ok=True)
+    logger.info(f"DEBUG_ARTIFACTS_DIR: {DEBUG_ARTIFACTS_DIR}")
     return DEBUG_ARTIFACTS_DIR
 
 
