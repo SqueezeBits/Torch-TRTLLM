@@ -47,7 +47,7 @@ repos:
         language: system
         types: [python]
         args: ["-rn", "-sn", "--rcfile=.pylintrc", "--fail-on=I"]
-        exclude: test(/\w*)|owlite/backend/patches.py
+        exclude: test(/\w*)|src/ditto/patches.py
       # We define an additional manual step to allow running pylint with a spelling
       # checker in CI.
       - id: pylint
@@ -57,7 +57,7 @@ repos:
         language: system
         types: [python]
         args: ["-rn", "-sn", "--rcfile=.pylintrc", "--fail-on=I", "--spelling-dict=en"]
-        exclude: test(/\w*)|owlite/backend/patches.py
+        exclude: test(/\w*)|src/ditto/patches.py
         stages: [manual]
       - id: check-newsfragments
         name: Check newsfragments
@@ -72,4 +72,4 @@ repos:
         language: system                                                                                                                                                                                           
         types: [python]
         args: [--config-file=.mypy.ini]
-        exclude: test(/\w*)|owlite/backend/patches.py
+        exclude: test(/\w*)|src/ditto/patches.py

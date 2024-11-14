@@ -99,20 +99,11 @@ def patched_create_sinusoidal_positions_for_attention_plugin(
     return rotary_inv_freq, embed_positions
 
 
-original_generation_session_handle_per_step = GenerationSession.handle_per_step
-
-
-def patched_handle_per_step(self, cache_indirections: list, step: int, *args, **kwargs):
-    output = original_generation_session_handle_per_step(self, cache_indirections, step, *args, **kwargs)
-    if self.debug_mode:
-        if debug_input_dir := os.getenv("DEBUG_INPUT_DIR", None):
-            os.makedirs(debug_input_dir, exist_ok=True)
-            torch.save(self.debug_buffer, os.path.join(debug_input_dir, f"step{step}.pt"))
-        else:
-            for name, value in self.debug_buffer.items():
-                print(f"{name}: {value}")
-            print("==============================================================================")
-    return output
+def patched_dump_debug_buffers(self: GenerationSession, step: int) -> None:
+    if debug_artifacts_dir := get_debug_artifacts_dir():
+        torch.save(self.debug_buffer, os.path.join(debug_artifacts_dir, f"step{step}.pt"))
+    for name, value in self.debug_buffer.items():
+        print(f"{name}: {value}")
 
 
 @gw.record_signature
@@ -763,7 +754,7 @@ RopeEmbeddingUtils.create_sinusoidal_positions_for_attention_plugin = (
     patched_create_sinusoidal_positions_for_attention_plugin
 )
 
-GenerationSession.handle_per_step = patched_handle_per_step
+GenerationSession.dump_debug_buffers = patched_dump_debug_buffers
 
 
 logger.info("ditto patches are applied!")
