@@ -21,6 +21,8 @@ ignore-init-module-imports = true
 [per-file-ignores]
 "__init__.py" = ["F401"]
 "src/ditto/patches.py" = ["ALL"]
+"scripts/utils.py" = ["ALL"]
+"scripts/run.py" = ["ALL"]
 
 [pydocstyle]
 convention = "google"
