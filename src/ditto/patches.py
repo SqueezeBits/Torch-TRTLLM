@@ -43,9 +43,9 @@ def patched_trtllm_network_to_dot(self: trtllm.Network, path: str | None) -> str
         code, model_proto = get_network_ir(self._trt_network)
         messages.append(code)
         network_ir = "\n".join(messages)
-        with open_debug_artifact(f"{name}_trt.py") as f:
+        with open_debug_artifact("trt_network_def.py") as f:
             f.write(network_ir)
-        with open_debug_artifact(f"{name}_trt.onnx", "wb") as f:
+        with open_debug_artifact("trt_network_def.onnx", "wb") as f:
             weight_file = f"{name}.bin"
             onnx.save(model_proto, f, save_as_external_data=True, location=weight_file)
             os.remove(os.path.join(debug_artifacts_dir, weight_file))
@@ -61,11 +61,36 @@ def patched_builder_build_engine(
     builder_config: trtllm.BuilderConfig,
     managed_weights: dict[str, Any] | None = None,
 ) -> trt.IHostMemory:
+    if layer_names_ := os.environ.get("TRTLLM_ADD_OUTPUT", None):
+        try:
+            layer_names: dict[str, str] = json.loads(layer_names_)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid json provided to TRTLLM_ADD_OUTPUT: {layer_names_}")
+            layer_names = {}
+        if layer_names:
+            net = network.trt_network
+            for layer_idx in range(net.num_layers):
+                layer = net.get_layer(layer_idx)
+                if layer.name not in layer_names:
+                    continue
+                layer_alias = layer_names.pop(layer.name)
+                for output_idx in range(layer.num_outputs):
+                    output = layer.get_output(output_idx)
+                    if layer.num_outputs > 1:
+                        layer_alias = f"{layer_alias}_{output_idx}"
+                    logger.info(f"Marking new output: {output.name} -> {layer_alias}")
+                    net.mark_output(output)
+                    output.name = layer_alias
+            if layer_names:
+                for layer_name in layer_names:
+                    logger.error(f"No such layer found: {layer_name}")
+                logger.info("The layer names are as follows:")
+                print("\n".join(net.get_layer(layer_idx).name for layer_idx in range(net.num_layers)))
     engine = original_builder_build_engine(self, network, builder_config, managed_weights)
     with open_debug_artifact("builder_config.json") as f:
         config_dict = builder_config_as_dict(builder_config.trt_builder_config)
         json.dump(config_dict, f, indent=2, sort_keys=True)
-    with open_debug_artifact("builder_config_trtllm.json", "w") as f:
+    with open_debug_artifact("trtllm_builder_config.json", "w") as f:
         config_dict = builder_config.to_dict()
         json.dump(config_dict, f, indent=2, sort_keys=True)
     return engine
@@ -100,10 +125,15 @@ def patched_create_sinusoidal_positions_for_attention_plugin(
 
 
 def patched_dump_debug_buffers(self: GenerationSession, step: int) -> None:
-    if debug_artifacts_dir := get_debug_artifacts_dir():
-        torch.save(self.debug_buffer, os.path.join(debug_artifacts_dir, f"step{step}.pt"))
-    for name, value in self.debug_buffer.items():
-        print(f"{name}: {value}")
+    debug_buffer = {**self.debug_buffer}
+    if "host_kv_cache_pool_pointers" in debug_buffer:
+        debug_buffer["kv_cache_pool"] = self.kv_cache_pool
+    with open_debug_artifact(f"step{step}.pt", "wb") as f:
+        torch.save(debug_buffer, f)
+    for name, value in debug_buffer.items():
+        print(
+            f"{name}: {value if (value.ndim < 3 or value.numel() < 100) else f'tensor with shape={(*value.shape,)}, dtype={value.dtype}'}"
+        )
 
 
 @gw.record_signature
@@ -696,10 +726,10 @@ def patched_gpt_attention(
 
     plug_inputs = [i.trt_tensor for i in plug_inputs]
     # ============================ patch start ============================
-    if layer_idx.data == 0:
-        import os
+    import os
 
-        with open(artifact_path := f"{os.environ.get('DEBUG_ARTIFACTS_DIR', '.')}/plugin.txt", "w") as f:
+    if layer_idx.data == 0 and (debug_artifacts_dir := os.environ.get("DEBUG_ARTIFACTS_DIR", None)) is not None:
+        with open(artifact_path := os.path.join(debug_artifacts_dir, "plugin.txt"), "w") as f:
             print(f"Writing debug artifact at {artifact_path}")
             f.writelines(
                 (

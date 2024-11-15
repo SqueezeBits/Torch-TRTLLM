@@ -10,7 +10,7 @@ from transformers import PreTrainedModel
 from ._compile import build_engine, get_inlined_graph_module
 from ._export import export
 from .arguments_for_export import ArgumentsForExport
-from .config import PassName
+from .config import DEFAULT_DEVICE, PassName
 from .pretty_print import detailed_sym_node_str
 from .utils import open_debug_artifact
 
@@ -23,9 +23,14 @@ def trtllm_build(
     transpose_weights: bool = False,
     mm_in_fp32: bool = False,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
+    output_names: list[str] | None = None,
     verbose: bool = False,
 ) -> trt.ICudaEngine:
-    device = next(iter(model.parameters())).device
+    try:
+        device = next(iter(model.parameters())).device
+    except StopIteration:
+        logger.warning(f"The model has no parameter. Will set the device as {DEFAULT_DEVICE}")
+        device = DEFAULT_DEVICE
     arguments_for_export = arguments or ArgumentsForExport.get_trtllm_inputs(
         device=device,
         use_cache=False,
@@ -44,12 +49,18 @@ def trtllm_build(
     )
 
     logger.info("Building TensorRT engine ...")
+    if isinstance(model, PreTrainedModel) and not output_names:
+        logger.info(
+            "TRTLLM requires the output name to be 'logits'. Will try to rename the first output name as 'logits'"
+        )
+        output_names = ["logits"]
     return build_engine(
         graph_module,
         (),
         arguments_for_export.torch_trt_inputs,
         settings=compilation_settings or get_default_compilation_settings(verbose=verbose),
         name=type(model).__name__,
+        output_names=output_names,
     )
 
 
@@ -98,7 +109,7 @@ def trtllm_export(
     )
 
     with detailed_sym_node_str():
-        with open_debug_artifact(f"{model_name}.py") as f:
+        with open_debug_artifact("graph_module.py") as f:
             f.write(
                 "\n".join(
                     [
@@ -107,7 +118,7 @@ def trtllm_export(
                     ]
                 )
             )
-        with open_debug_artifact(f"{model_name}_graph.txt") as f:
+        with open_debug_artifact("graph.txt") as f:
             f.write(f"{graph_module.graph}")
 
     return graph_module

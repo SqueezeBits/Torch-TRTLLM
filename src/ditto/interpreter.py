@@ -59,9 +59,9 @@ class TRTLLMInterpreter(TRTInterpreter):
         super()._construct_trt_network_def()
         if debug_artifacts_dir := get_debug_artifacts_dir():
             code, model_proto = get_network_ir(self.ctx.net, self.optimization_profiles)
-            with open_debug_artifact(f"{self.ctx.net.name}_trt.py") as f:
+            with open_debug_artifact("trt_network_def.py") as f:
                 f.write(code)
-            with open_debug_artifact(f"{self.ctx.net.name}_trt.onnx", "wb") as f:
+            with open_debug_artifact("trt_network_def.onnx", "wb") as f:
                 weight_file = f"{self.ctx.net.name}.bin"
                 onnx.save(model_proto, f, save_as_external_data=True, location=weight_file)
                 os.remove(os.path.join(debug_artifacts_dir, weight_file))
@@ -125,7 +125,7 @@ class TRTLLMInterpreter(TRTInterpreter):
         if weight_sparsity:
             builder_config.set_flag(trt.BuilderFlag.SPARSE_WEIGHTS)
 
-        with open_debug_artifact(f"{self.ctx.net.name}.json") as f:
+        with open_debug_artifact("builder_config.json") as f:
             json.dump(builder_config_as_dict(builder_config), f, indent=2, sort_keys=True)
         return builder_config
 
@@ -171,8 +171,14 @@ class TRTLLMInterpreter(TRTInterpreter):
                     )
                     break
                 if isinstance(outputs[i], trt.ITensor):
+                    self.logger.info(f"The {i}-th output will be renamed: {outputs[i].name} -> {output_name}")
                     outputs[i].name = output_name
                     self._output_names[i] = output_name
+                else:
+                    self.logger.warning(
+                        f"The {i}-th output is not a ITensor object: {outputs[i]}. "
+                        f"The given output name {output_name} will be discarded"
+                    )
         return outputs
 
 

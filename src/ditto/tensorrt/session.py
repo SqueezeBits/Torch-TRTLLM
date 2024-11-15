@@ -55,6 +55,7 @@ class TensorRTInferenceSession:
         return cuda.Stream()
 
     def load_engine(self, engine_path: str) -> ICudaEngine:
+        logger.info(f"Loading engine file {engine_path}")
         with open(engine_path, "rb") as f:
             engine = self.runtime.deserialize_cuda_engine(f.read())
         return engine

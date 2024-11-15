@@ -47,6 +47,7 @@ def build_engine(
     settings: CompilationSettings | None = None,
     engine_cache: BaseEngineCache | None = None,
     name: str | None = None,
+    output_names: list[str] | None = None,
 ) -> trt.ICudaEngine:
     """Convert an graph module to a TensorRT engine."""
     if settings is None:
@@ -71,7 +72,7 @@ def build_engine(
             compilation_settings=settings,
             engine_cache=engine_cache,
             network_name=name,
-            output_names=["logits"],
+            output_names=output_names,
         )
         result = interpreter.run()
         with trt.Runtime(TRT_LOGGER) as runtime:
