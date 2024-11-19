@@ -61,7 +61,7 @@ try:
             "LAYER_NAMES_ONLY": trt.ProfilingVerbosity.LAYER_NAMES_ONLY,
             "NONE": trt.ProfilingVerbosity.NONE,
         }
-    )[os.getenv("DEFAULT_TRT_PROFILING_VERBOSITY", "LAYER_NAMES_ONLY")]
+    )[os.getenv("DEFAULT_TRT_PROFILING_VERBOSITY", "LAYER_NAMES_ONLY" if DEBUG_ARTIFACTS_DIR is None else "DETAILED")]
 except KeyError as e:
     # pylint: disable-next=used-before-assignment
     raise ValueError(f"DEFAULT_TRT_PROFILING_VERBOSITY must be one of {', '.join(PROFILING_VERBOSITIES.keys())}") from e
