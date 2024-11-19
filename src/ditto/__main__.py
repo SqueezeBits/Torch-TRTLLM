@@ -197,36 +197,84 @@ def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
 def compare(
     x: str,
     y: str,
+    transpose: Annotated[list[str], Option(default_factory=list)],
+    show_only: Annotated[list[str], Option(default_factory=list)],
+    floating_point_only: bool = False,
+    device: str = DEFAULT_DEVICE,
 ) -> None:
-    tensors_x: dict[str, torch.Tensor] = torch.load(x, weights_only=True)
-    tensors_y: dict[str, torch.Tensor] = torch.load(y, weights_only=True)
+    logger.info(f"Map location: {device}")
+    tensors_x: dict[str, torch.Tensor] = torch.load(x, weights_only=True, map_location=device)
+    tensors_y: dict[str, torch.Tensor] = torch.load(y, weights_only=True, map_location=device)
 
-    def summary(t: torch.Tensor) -> str:
+    def summary(t: torch.Tensor, *, precision: str = ".16e") -> str:
+        float_value = t.float()
         return "\n".join(
             [
                 f"  * shape: {(*t.shape,)}",
                 f"  * dtype: {t.dtype}",
-                f"  * mean: {t.float().mean().item()}",
-                f"  * std: {t.float().std().item()}",
-                f"  * min: {t.min().item()}",
-                f"  * median: {t.median().item()}",
-                f"  * max: {t.max().item()}",
+                f"  * min: {format(float_value.min().item(), precision)}",
+                f"  * mean: {format(float_value.mean().item(), precision)}",
+                f"  * median: {format(float_value.median().item(), precision)}",
+                f"  * max: {format(float_value.max().item(), precision)}",
+                f"  * std: {float_value.std().item():.16e}",
+                f"  * #nans: {float_value.isnan().sum().item()}",
+                f"  * #infs: {float_value.isinf().sum().item()}",
             ]
         )
 
-    if (keys_x := set(tensors_x)) != (keys_y := set(tensors_y)):
+    keys_x = set(tensors_x)
+    keys_y = set(tensors_y)
+    if show_only:
+        keys_x = keys_x.intersection(show_only)
+        keys_y = keys_y.intersection(show_only)
+    if keys_x != keys_y:
         logger.warning(f"Keys are different!\nOnly in {x}: {keys_x - keys_y}\nOnly in {y}: {keys_y - keys_x}\n")
     keys = keys_x & keys_y
     for name in keys:
-        logger.info(f"Comparing {name}")
         tx = tensors_x[name]
         ty = tensors_y[name]
-        print(f"{x}\n{summary(tx)}")
-        print(f"{y}\n{summary(ty)}")
-        if tx.shape == ty.shape:
-            print(f"absdiff\n{summary((tx - ty).abs())}")
+        if floating_point_only and not (torch.is_floating_point(tx) and torch.is_floating_point(ty)):
+            continue
+        logger.info(f"======================Comparing {name}======================")
+        if name in transpose:
+            logger.info(f"Transposing {name} in {x}")
+            tx = tx.t()
+        has_same_shape = tx.shape == ty.shape
+        has_same_dtype = tx.dtype == ty.dtype
+        if has_same_shape:
+            if not has_same_dtype:
+                dtype = torch.promote_types(tx.dtype, ty.dtype)
+                logger.warning(
+                    f"The tensors have different dtypes: {tx.dtype}, {ty.dtype}. Will promote dtypes to {dtype}"
+                )
+                tx = tx.to(dtype)
+                ty = ty.to(dtype)
+            rtol = 1e-03 if tx.dtype == torch.float16 else 1e-05
+            atol = 1e-03 if tx.dtype == torch.float16 else 1e-08
+            allclose = torch.allclose(tx, ty, rtol=rtol, atol=atol)
+            allsame = torch.all(tx == ty).item()
+            (logger.info if allclose else logger.warning)(
+                f"torch.allclose - {'pass' if allclose else 'fail'} (rtol: {rtol:.1e}, atol: {atol:.1e})"
+            )
+            (logger.info if allsame else logger.warning)(f"torch.all - {'pass' if allsame else 'fail'}")
+            logger.info(f"absolute_difference\n{summary((tx - ty).abs())}")
+            logger.info(f"percentage_error\n{summary((tx - ty).abs() / (ty.abs() + 1e-6), precision='.3%')}")
+            logger.info(f"{x}\n{summary(tx)}")
+            logger.info(f"{y}\n{summary(ty)}")
         else:
             logger.warning("Cannot compare tensors with different shapes")
+
+    if keys_only_x := keys_x - keys_y:
+        logger.info(f"Tensors only found in {x}")
+        for name in keys_only_x:
+            t = tensors_x[name]
+            logger.info(f"{name}\n{summary(t)}")
+
+    if keys_only_y := keys_y - keys_x:
+        logger.info(f"Tensors only found in {y}")
+        for name in keys_only_y:
+            t = tensors_y[name]
+            logger.info(f"{name}\n{summary(t)}")
 
 
 if __name__ == "__main__":
