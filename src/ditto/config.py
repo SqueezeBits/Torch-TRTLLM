@@ -2,8 +2,10 @@
 import os
 from typing import Literal
 
+import numpy as np
 import tensorrt as trt
 import torch
+import torch_tensorrt as torch_trt
 
 PassName = Literal[
     "CastFP16MMToFP32",
@@ -69,7 +71,10 @@ except KeyError as e:
 FX_TRANSFORM_MAXIMUM_ITERATION = int(os.getenv("FX_TRANSFORM_MAXIMUM_ITERATION", "100"))
 """Maximum iteration limit for FX graph transformations."""
 
-GPT_ATTENTION_PLUGIN_DTYPE: torch.dtype = torch.float16
+# pylint: disable-next=protected-access
+GPT_ATTENTION_PLUGIN_DTYPE: torch.dtype = torch_trt.dtype._from(
+    np.dtype(os.getenv("GPT_ATTENTION_PLUGIN_DTYPE", "float16"))
+).to(torch.dtype)
 """The precision for the GPT attention plugin"""
 
 INPUT_IDS: str = os.getenv("INPUT_IDS", "input_ids")
