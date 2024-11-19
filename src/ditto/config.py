@@ -52,6 +52,11 @@ DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 The default device for the PyTorch modules and tensors.
 """
 
+DEFAULT_ONNX_PROTO_SIZE_THRESHOLD: int = int(os.getenv("DEFAULT_ONNX_PROTO_SIZE_THRESHOLD", "1024"))
+"""
+The default size threshold (bytes) for write weights in ONNX as an external data.
+"""
+
 DEFAULT_TRT_PROFILING_VERBOSITY: trt.ProfilingVerbosity
 """
 The default profiling verbosity for TRT engines.

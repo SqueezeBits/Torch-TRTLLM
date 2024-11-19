@@ -8,7 +8,7 @@ import onnx
 from loguru import logger
 from onnx.external_data_helper import _get_all_tensors, uses_external_data
 
-from ..config import DEBUG_ARTIFACTS_DIR
+from ..config import DEBUG_ARTIFACTS_DIR, DEFAULT_ONNX_PROTO_SIZE_THRESHOLD
 
 
 @contextmanager
@@ -51,7 +51,7 @@ def save_onnx_without_weights(
     proto: onnx.ModelProto,
     f: IO[bytes],
     *,
-    size_threshold: int = 1024,
+    size_threshold: int = DEFAULT_ONNX_PROTO_SIZE_THRESHOLD,
     convert_attribute: bool = False,
 ) -> None:
     onnx.convert_model_to_external_data(
