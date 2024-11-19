@@ -27,12 +27,18 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
             tuple(-1 if isinstance(s, torch.SymInt) else s for s in meta.shape),
         )
 
-    def create_constant(node: Node, name: str | None = None) -> gs.Constant:
-        assert (meta := get_tensor_metadata(node))
-        return gs.Constant(
-            name or node.name,
-            torch.zeros(meta.shape, dtype=meta.dtype).numpy(),
-        )
+    def create_constant(
+        node: Node,
+        name: str | None = None,
+        *,
+        param: torch.nn.Parameter | None = None,
+    ) -> gs.Constant:
+        if param is None:
+            assert (meta := get_tensor_metadata(node))
+            values = torch.zeros(meta.shape, dtype=meta.dtype).numpy()
+        else:
+            values = param.numpy(force=True)
+        return gs.Constant(name or node.name, values)
 
     def convert_argument_as_constant(a: Argument) -> gs.Constant:
         if isinstance(a, int | float | bool):
@@ -69,8 +75,8 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
             inputs[node.name] = tensor
         elif node.op == "output":
             outputs = [tensors[x.name] for x in node.all_input_nodes]
-        elif node.op == "get_attr":
-            tensor = create_constant(node)
+        elif node.op == "get_attr" and isinstance(target := node.target, str):
+            tensor = create_constant(node, target, param=graph_module.get_parameter(target))
             tensors[node.name] = tensor
         elif node.op == "call_function" and callable(target := node.target):
             if is_multi_output_getitem(node):
@@ -99,6 +105,8 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
                 outputs=output_tensors,
                 attrs={k: v for k, v in node.meta.items() if isinstance(v, int | float | bool | str | dict)},
             )
+        else:
+            raise NotImplementedError(f"The following node could not be converted: {node.format_node}")
 
     graph = gs.Graph(
         nodes=list(nodes.values()),
