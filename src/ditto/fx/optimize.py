@@ -8,7 +8,6 @@ from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_afte
 from ..config import AUTO_DETECT_ROPE_SUBGRAPH, FX_TRANSFORM_MAXIMUM_ITERATION, PassName
 from .passes import (
     CastFP16MMToFP32,
-    ConstantSharing,
     DeferUnsqueeze,
     EliminateCopy,
     EliminateNopCatOrStack,
@@ -16,7 +15,6 @@ from .passes import (
     EliminateNopReshape,
     EliminateNopSlice,
     EliminateUnsqueezeSqueeze,
-    EliminateUnusedWeights,
     FixSliceRanges,
     FuseConsecutivePermutes,
     FuseConsecutiveReshapes,
@@ -27,7 +25,6 @@ from .passes import (
     FuseMMConstSiblings,
     FuseReciprocalMul,
     InsertGatherLastTokenIds,
-    MakeWeightsContiguous,
     ReplaceSDPAByFakeGPTAttentionPlugin,
     ReplaceSDPAByFakeGPTAttentionPluginV2,
     ReplaceViewByReshape,
@@ -89,13 +86,15 @@ TRTLLM_CONVERSION_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     else (
         InsertGatherLastTokenIds,
         ReplaceSDPAByFakeGPTAttentionPluginV2,
+        # TODO: improve memory management of the pass `FuseMMConstSiblings`
         FuseMMConstSiblings,
     )
 )
 
 # passes required before the TRT-LLM conversion passes
 LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
-    ConstantSharing,
+    # TODO: improve memory management of the pass `ConstantSharing`
+    # ConstantSharing,
     EliminateNopCatOrStack,
     EliminateCopy,
     EliminateNopSlice,
@@ -107,8 +106,10 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateNopReshape,
     EliminateNopPermute,
     EliminateUnsqueezeSqueeze,
-    EliminateUnusedWeights,
-    MakeWeightsContiguous,
+    # TODO: improve memory management of the pass `EliminateUnusedWeights`
+    # EliminateUnusedWeights,
+    # TODO: improve memory management of the pass `MakeWeightsContiguous`
+    # MakeWeightsContiguous,
     ReplaceViewByReshape,
 )
 
