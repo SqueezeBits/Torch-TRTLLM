@@ -1,0 +1,78 @@
+from typing import Any, Literal
+
+import tensorrt as trt
+
+BuiltinConst = bool | float | int | str | None
+
+
+def builder_config_as_dict(builder_config: trt.IBuilderConfig) -> dict[str, Any]:
+    """Save all attributes of a TensorRT IBuilderConfig object as a JSON file.
+
+    Args:
+        builder_config (trt.IBuilderConfig): The TensorRT builder configuration to save.
+        file_path (str): The path to the JSON file where the configuration will be saved.
+    """
+    # Dictionary to store attribute values
+    config_data: dict[str, Any] = {}
+
+    def normalize(value: Any) -> BuiltinConst | list[Any] | tuple[Any, ...] | dict[str, Any]:
+        value = getattr(value, "name", value)
+        if isinstance(value, list):
+            return [normalize(x) for x in value]
+        if isinstance(value, tuple):
+            return tuple(normalize(x) for x in value)
+        if isinstance(value, dict):
+            return {f"{k}": normalize(v) for k, v in value.items()}
+        if not isinstance(value, BuiltinConst):
+            return f"{value}"
+        return value
+
+    def bitmask_to_bool_list(bitmask: int) -> list[bool]:
+        # Ensure the bitmask is within the int32 range
+        if bitmask < 0 or bitmask > 0xFFFFFFFF:
+            raise ValueError("Bitmask should be a 32-bit integer")
+
+        # Convert the bitmask to a list of booleans
+        return [(bitmask & (1 << i)) != 0 for i in range(32)]
+
+    # Loop through attributes in IBuilderConfig and retrieve their values
+    for attr in dir(builder_config):
+        # Filter out private attributes, methods, and unsupported types
+        if not attr.startswith("_") and not callable(getattr(builder_config, attr)):
+            try:
+                # Retrieve attribute value
+                value = getattr(builder_config, attr)
+                if attr == "flags" and isinstance(value, int):
+                    value = {
+                        f"{enum_value.value:02d}:{name}": flag
+                        for (name, enum_value), flag in zip(
+                            trt.BuilderFlag.__members__.items(), bitmask_to_bool_list(value)
+                        )
+                    }
+                config_data[attr] = normalize(value)
+            except Exception as e:
+                # Handle any errors in retrieving attribute value
+                config_data[attr] = f"Error retrieving: {str(e)}"
+
+    return config_data
+
+
+ShapeRanges = dict[str, dict[Literal["min", "opt", "max"], tuple[int, ...]]]
+
+
+def get_dynamic_input_ranges(
+    network: trt.INetworkDefinition,
+    optimization_profiles: list[trt.IOptimizationProfile],
+) -> list[ShapeRanges]:
+    return [
+        {
+            (name := network.get_input(i).name): dict(
+                zip(
+                    ("min", "opt", "max"),
+                    ((*dims,) for dims in profile.get_shape(name)),
+                )
+            )
+            for i in range(network.num_inputs)
+        }
+        for profile in optimization_profiles
+    ]

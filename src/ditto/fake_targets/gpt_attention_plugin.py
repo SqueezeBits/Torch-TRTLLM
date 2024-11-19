@@ -20,8 +20,8 @@ from transformers import PretrainedConfig
 from typing_extensions import Self
 
 from ..config import GPT_ATTENTION_PLUGIN_DTYPE
+from ..debug import open_debug_artifact
 from ..types import StrictlyTyped
-from ..utils import open_debug_artifact
 
 
 class Llama3ScalingConfig(StrictlyTyped):
@@ -82,15 +82,17 @@ class ROPEConfig(StrictlyTyped):
             self.llama3_scaling_config.model_dump(),
         )
         with open_debug_artifact("rope_inputs.pt", "wb") as f:
-            torch.save(
-                {
-                    "rotary_inv_freq": torch.from_numpy(rotary_inv_freq),
-                    "rotary_cos_sin": torch.from_numpy(embed_positions),
-                },
-                f,
-            )
+            if f:
+                torch.save(
+                    {
+                        "rotary_inv_freq": torch.from_numpy(rotary_inv_freq),
+                        "rotary_cos_sin": torch.from_numpy(embed_positions),
+                    },
+                    f,
+                )
         with open_debug_artifact("rope_config.json") as f:
-            f.write(self.model_dump_json(indent=2))
+            if f:
+                f.write(self.model_dump_json(indent=2))
         return rotary_inv_freq, embed_positions
 
 

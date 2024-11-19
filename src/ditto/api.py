@@ -11,8 +11,12 @@ from ._compile import build_engine, get_inlined_graph_module
 from ._export import export
 from .arguments_for_export import ArgumentsForExport
 from .config import DEFAULT_DEVICE, PassName
+from .debug import (
+    build_onnx_from_fx,
+    open_debug_artifact,
+    save_onnx_without_weights,
+)
 from .pretty_print import detailed_sym_node_str
-from .utils import open_debug_artifact
 
 
 def trtllm_build(
@@ -110,15 +114,20 @@ def trtllm_export(
 
     with detailed_sym_node_str():
         with open_debug_artifact("graph_module.py") as f:
-            f.write(
-                "\n".join(
-                    [
-                        "import torch\n",
-                        graph_module.print_readable(print_output=False),
-                    ]
+            if f:
+                f.write(
+                    "\n".join(
+                        [
+                            "import torch\n",
+                            graph_module.print_readable(print_output=False),
+                        ]
+                    )
                 )
-            )
         with open_debug_artifact("graph.txt") as f:
-            f.write(f"{graph_module.graph}")
+            if f:
+                f.write(f"{graph_module.graph}")
+        with open_debug_artifact("graph_module.onnx", "wb") as f:
+            if f:
+                save_onnx_without_weights(build_onnx_from_fx(graph_module), f)
 
     return graph_module

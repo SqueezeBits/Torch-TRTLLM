@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-import onnx
 import tensorrt as trt
 import tensorrt_llm as trtllm
 import torch
@@ -23,9 +22,15 @@ from torch_tensorrt.dynamo.conversion import (
 )
 from torch_tensorrt.dynamo.conversion.converter_utils import create_constant
 
+from .config import DEFAULT_TRT_PROFILING_VERBOSITY
+from .debug import (
+    EngineInfo,
+    builder_config_as_dict,
+    get_dynamic_input_ranges,
+    open_debug_artifact,
+    save_onnx_without_weights,
+)
 from .fake_targets import FakeGPTAttentionPlugin
-from .pretty_print import builder_config_as_dict, get_network_ir
-from .utils import get_debug_artifacts_dir, open_debug_artifact
 
 
 class TRTLLMInterpreter(TRTInterpreter):
@@ -57,14 +62,14 @@ class TRTLLMInterpreter(TRTInterpreter):
 
     def _construct_trt_network_def(self) -> None:
         super()._construct_trt_network_def()
-        if debug_artifacts_dir := get_debug_artifacts_dir():
-            code, model_proto = get_network_ir(self.ctx.net, self.optimization_profiles)
-            with open_debug_artifact("trt_network_def.py") as f:
-                f.write(code)
-            with open_debug_artifact("trt_network_def.onnx", "wb") as f:
-                weight_file = f"{self.ctx.net.name}.bin"
-                onnx.save(model_proto, f, save_as_external_data=True, location=weight_file)
-                os.remove(os.path.join(debug_artifacts_dir, weight_file))
+        with open_debug_artifact("trt_network_def.onnx", "wb") as f:
+            if f:
+                shape_ranges = (
+                    get_dynamic_input_ranges(self.ctx.net, profiles)
+                    if (profiles := self.optimization_profiles)
+                    else None
+                )
+                save_onnx_without_weights(EngineInfo.from_network_definition(self.ctx.net).as_onnx(shape_ranges), f)
 
     def _populate_trt_builder_config(
         self,
@@ -73,7 +78,7 @@ class TRTLLMInterpreter(TRTInterpreter):
         tactic_sources: int | None = None,
         timing_cache: str | Path | trt.ITimingCache | None = None,
         use_refit: bool = False,
-        profiling_verbosity: trt.ProfilingVerbosity = trt.ProfilingVerbosity.LAYER_NAMES_ONLY,
+        profiling_verbosity: trt.ProfilingVerbosity = DEFAULT_TRT_PROFILING_VERBOSITY,
         use_strip_plan: bool = False,
         weight_streaming: bool = False,
         weight_sparsity: bool = False,
@@ -126,7 +131,8 @@ class TRTLLMInterpreter(TRTInterpreter):
             builder_config.set_flag(trt.BuilderFlag.SPARSE_WEIGHTS)
 
         with open_debug_artifact("builder_config.json") as f:
-            json.dump(builder_config_as_dict(builder_config), f, indent=2, sort_keys=True)
+            if f:
+                json.dump(builder_config_as_dict(builder_config), f, indent=2, sort_keys=True)
         return builder_config
 
     def run_node(self, n: Node) -> Node:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 from collections.abc import Callable, Generator
 
@@ -33,6 +34,11 @@ from torch_tensorrt.dynamo.lowering.passes import (
 from torch_tensorrt.logging import TRT_LOGGER
 
 from .config import PassName
+from .debug import (
+    EngineInfo,
+    open_debug_artifact,
+    save_onnx_without_weights,
+)
 from .fx.optimize import get_optimization_transform
 from .interpreter import TRTLLMInterpreter
 
@@ -78,6 +84,15 @@ def build_engine(
         with trt.Runtime(TRT_LOGGER) as runtime:
             engine: trt.ICudaEngine = runtime.deserialize_cuda_engine(result.serialized_engine)
 
+        with (
+            open_debug_artifact("trt_engine.onnx", "wb") as f,
+            open_debug_artifact("trt_engine.json") as g,
+        ):
+            if f and g:
+                inspector = engine.create_engine_inspector()
+                engine_info = json.loads(inspector.get_engine_information(trt.LayerInformationFormat.JSON))
+                json.dump(engine_info, g, indent=2, sort_keys=True)
+                save_onnx_without_weights(EngineInfo.model_validate(engine_info).as_onnx(), f)
         return engine
     except UnsupportedOperatorException as e:
         logger.error(

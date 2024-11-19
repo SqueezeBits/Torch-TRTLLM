@@ -16,8 +16,8 @@ from torch_tensorrt.dynamo.conversion.converter_utils import (
     set_layer_name,
 )
 
+from ..debug import open_debug_artifact
 from ..fake_targets import FakeGPTAttentionPlugin, fake_transposed_mm
-from ..utils import open_debug_artifact
 
 
 @dynamo_tensorrt_converter(
@@ -47,18 +47,21 @@ def convert_fake_gpt_attention_plugin(
 
     if target.layer_idx == 0:
         with open_debug_artifact("plugin.txt") as f:
-            f.writelines(
-                (
-                    "plugin field collection:\n",
-                    "\n".join(
-                        f"{field.name} ({field.type}): {field.data} "
-                        f"(dtype={field.data.dtype}, shape={field.data.shape})"
-                        for field in pfc
-                    ),
-                    "\nplugin inputs:\n",
-                    "\n".join(f"ITensor(name={t.name}, dtype={t.dtype.name}, shape={t.shape})" for t in plugin_inputs),
+            if f:
+                f.writelines(
+                    (
+                        "plugin field collection:\n",
+                        "\n".join(
+                            f"{field.name} ({field.type}): {field.data} "
+                            f"(dtype={field.data.dtype}, shape={field.data.shape})"
+                            for field in pfc
+                        ),
+                        "\nplugin inputs:\n",
+                        "\n".join(
+                            f"ITensor(name={t.name}, dtype={t.dtype.name}, shape={t.shape})" for t in plugin_inputs
+                        ),
+                    )
                 )
-            )
 
     layer = ctx.net.add_plugin_v2(plugin_inputs, attn_plugin)
     plugin_info = PluginInfo(plugin_creator, "causal_attn", pfc)

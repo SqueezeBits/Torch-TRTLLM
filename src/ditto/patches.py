@@ -2,8 +2,8 @@ import json
 import os
 from typing import Any
 
+from .debug.network import builder_config_as_dict
 import numpy as np
-import onnx
 import tensorrt as trt
 import tensorrt_llm as trtllm
 import tensorrt_llm.graph_rewriting as gw
@@ -20,35 +20,19 @@ from tensorrt_llm.functional import (
     _create_tensor,
 )
 from tensorrt_llm.runtime.generation import GenerationSession
+from torch_tensorrt.logging import TRT_LOGGER
 
-from .pretty_print import builder_config_as_dict, get_network_ir
-from .utils import get_debug_artifacts_dir, open_debug_artifact
+from .debug import (
+    EngineInfo,
+    open_debug_artifact,
+    save_onnx_without_weights,
+)
 
 
 def patched_trtllm_network_to_dot(self: trtllm.Network, path: str | None) -> str | None:
-    messages: list[str] = []
-    if input_tensors := self._inputs:
-        num_profiles = len(list(input_tensors.values())[0].profiles)
-        for i in range(num_profiles):
-            for input_name, input_tensor in input_tensors.items():
-                if len(input_tensor.profiles) == 0:
-                    continue
-                shape_profile = input_tensor.profiles[i]
-                messages.append(f"# Profile {i} for '{input_name}':")
-                messages.append(f"#   Min shape: {(*shape_profile.min,)}")
-                messages.append(f"#   Opt shape: {(*shape_profile.opt,)}")
-                messages.append(f"#   Max shape: {(*shape_profile.max,)}")
-    if debug_artifacts_dir := get_debug_artifacts_dir():
-        name = self._trt_network.name or "unnamed_network"
-        code, model_proto = get_network_ir(self._trt_network)
-        messages.append(code)
-        network_ir = "\n".join(messages)
-        with open_debug_artifact("trt_network_def.py") as f:
-            f.write(network_ir)
-        with open_debug_artifact("trt_network_def.onnx", "wb") as f:
-            weight_file = f"{name}.bin"
-            onnx.save(model_proto, f, save_as_external_data=True, location=weight_file)
-            os.remove(os.path.join(debug_artifacts_dir, weight_file))
+    with open_debug_artifact("trt_network_def.onnx", "wb") as f:
+        if f:
+            save_onnx_without_weights(EngineInfo.from_network_definition(self.trt_network).as_onnx(), f)
     return None
 
 
@@ -86,14 +70,27 @@ def patched_builder_build_engine(
                     logger.error(f"No such layer found: {layer_name}")
                 logger.info("The layer names are as follows:")
                 print("\n".join(net.get_layer(layer_idx).name for layer_idx in range(net.num_layers)))
-    engine = original_builder_build_engine(self, network, builder_config, managed_weights)
+    serialized_engine = original_builder_build_engine(self, network, builder_config, managed_weights)
     with open_debug_artifact("builder_config.json") as f:
-        config_dict = builder_config_as_dict(builder_config.trt_builder_config)
-        json.dump(config_dict, f, indent=2, sort_keys=True)
+        if f:
+            config_dict = builder_config_as_dict(builder_config.trt_builder_config)
+            json.dump(config_dict, f, indent=2, sort_keys=True)
     with open_debug_artifact("trtllm_builder_config.json", "w") as f:
-        config_dict = builder_config.to_dict()
-        json.dump(config_dict, f, indent=2, sort_keys=True)
-    return engine
+        if f:
+            config_dict = builder_config.to_dict()
+            json.dump(config_dict, f, indent=2, sort_keys=True)
+    with (
+        open_debug_artifact("trt_engine.onnx", "wb") as f,
+        open_debug_artifact("trt_engine.json") as g,
+    ):
+        if f and g:
+            with trt.Runtime(TRT_LOGGER) as runtime:
+                engine: trt.ICudaEngine = runtime.deserialize_cuda_engine(serialized_engine)
+            inspector = engine.create_engine_inspector()
+            engine_info = json.loads(inspector.get_engine_information(trt.LayerInformationFormat.JSON))
+            json.dump(engine_info, g, indent=2, sort_keys=True)
+            save_onnx_without_weights(EngineInfo.model_validate(engine_info).as_onnx(), f)
+    return serialized_engine
 
 
 original_rope_embedding_utils_create_sinusoidal_positions_for_attention_plugin = (
@@ -114,13 +111,14 @@ def patched_create_sinusoidal_positions_for_attention_plugin(
         num_pos, dim, theta, scale, scale_type, rope_scaling_config, dtype
     )
     with open_debug_artifact("rope_inputs.pt", "wb") as f:
-        torch.save(
-            {
-                "rotary_inv_freq": torch.from_numpy(rotary_inv_freq),
-                "rotary_cos_sin": torch.from_numpy(embed_positions),
-            },
-            f,
-        )
+        if f:
+            torch.save(
+                {
+                    "rotary_inv_freq": torch.from_numpy(rotary_inv_freq),
+                    "rotary_cos_sin": torch.from_numpy(embed_positions),
+                },
+                f,
+            )
     return rotary_inv_freq, embed_positions
 
 
@@ -129,7 +127,8 @@ def patched_dump_debug_buffers(self: GenerationSession, step: int) -> None:
     if "host_kv_cache_pool_pointers" in debug_buffer:
         debug_buffer["kv_cache_pool"] = self.kv_cache_pool
     with open_debug_artifact(f"step{step}.pt", "wb") as f:
-        torch.save(debug_buffer, f)
+        if f:
+            torch.save(debug_buffer, f)
     for name, value in debug_buffer.items():
         print(
             f"{name}: {value if (value.ndim < 3 or value.numel() < 100) else f'tensor with shape={(*value.shape,)}, dtype={value.dtype}'}"
