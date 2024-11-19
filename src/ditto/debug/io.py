@@ -6,6 +6,7 @@ from typing import IO, Any
 
 import onnx
 from loguru import logger
+from onnx.external_data_helper import _get_all_tensors, uses_external_data
 
 from ..config import DEBUG_ARTIFACTS_DIR
 
@@ -46,15 +47,22 @@ def open_debug_artifact(filename: str, mode: str = "w") -> IO[Any] | nullcontext
     return nullcontext(None)
 
 
-def save_onnx_without_weights(proto: onnx.ModelProto, f: IO[bytes] | str) -> None:
-    if isinstance(f, str):
-        path = f
-    else:
-        path = f.name
-    out_dir = os.path.dirname(path)
-    file = os.path.basename(path)
-    filename, _ = os.path.splitext(file)
-    weight_file = f"{filename}.bin"
-    onnx.save(proto, path, save_as_external_data=True, location=weight_file)
-    if os.path.isfile(weight_path := os.path.join(out_dir, weight_file)):
-        os.remove(weight_path)
+def save_onnx_without_weights(
+    proto: onnx.ModelProto,
+    f: IO[bytes],
+    *,
+    size_threshold: int = 1024,
+    convert_attribute: bool = False,
+) -> None:
+    onnx.convert_model_to_external_data(
+        proto,
+        location="null",
+        size_threshold=size_threshold,
+        convert_attribute=convert_attribute,
+    )
+    for tensor in _get_all_tensors(proto):
+        if uses_external_data(tensor) and tensor.HasField("raw_data"):
+            tensor.ClearField("raw_data")
+    # pylint: disable-next=protected-access
+    serialized_proto = onnx._get_serializer(None, f).serialize_proto(proto)
+    f.write(serialized_proto)
