@@ -1,6 +1,8 @@
+# pylint: disable=no-member
 import os
 from typing import Literal
 
+import tensorrt as trt
 import torch
 
 PassName = Literal[
@@ -34,38 +36,63 @@ PassName = Literal[
 ]
 """The possible names of FX optimization passes"""
 
-FX_TRANSFORM_MAXIMUM_ITERATION = int(os.environ.get("FX_TRANSFORM_MAXIMUM_ITERATION", 100))
-"""Maximum iteration limit for FX graph transformations."""
-
-INPUT_IDS: str = os.environ.get("INPUT_IDS", "input_ids")
+AUTO_DETECT_ROPE_SUBGRAPH: bool = os.getenv("AUTO_DETECT_ROPE_SUBGRAPH", "1") == "1"
 """
-The input token tensor in most of the decoder-only models from HF are named as "input_ids".
-If this is not the case for your model, you need to change the value of this constant accordingly.
+Whether to automatically detect RoPE subgraph and fuse them in GPTAttentionPlugin.
 """
 
-INPUT_IDS_UNSQUEEZE_DIM: Literal[0, 1] = 1 if os.environ.get("INPUT_IDS_UNSQUEEZE_DIM", "0") == "1" else 0
-"""
-In TRT-LLM, the `input_ids` is a 1-dimensional tensor, whereas in HF, it is 2-dimensional with shape (B, S).
-This constant determines in which dimension should the `input_ids` be expanded.
-"""
-
+# pylint: disable-next=invalid-envvar-default
+DEBUG_ARTIFACTS_DIR: str | None = os.getenv("DEBUG_ARTIFACTS_DIR", None)
+"""The directory to save the debug artifacts such as graph module code."""
 
 DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 """
 The default device for the PyTorch modules and tensors.
 """
 
+DEFAULT_TRT_PROFILING_VERBOSITY: trt.ProfilingVerbosity
+"""
+The default profiling verbosity for TRT engines.
+"""
+try:
+    DEFAULT_TRT_PROFILING_VERBOSITY = (
+        PROFILING_VERBOSITIES := {
+            "DETAILED": trt.ProfilingVerbosity.DETAILED,
+            "LAYER_NAMES_ONLY": trt.ProfilingVerbosity.LAYER_NAMES_ONLY,
+            "NONE": trt.ProfilingVerbosity.NONE,
+        }
+    )[os.getenv("DEFAULT_TRT_PROFILING_VERBOSITY", "LAYER_NAMES_ONLY")]
+except KeyError as e:
+    # pylint: disable-next=used-before-assignment
+    raise ValueError(f"DEFAULT_TRT_PROFILING_VERBOSITY must be one of {', '.join(PROFILING_VERBOSITIES.keys())}") from e
+
+FX_TRANSFORM_MAXIMUM_ITERATION = int(os.getenv("FX_TRANSFORM_MAXIMUM_ITERATION", "100"))
+"""Maximum iteration limit for FX graph transformations."""
+
 GPT_ATTENTION_PLUGIN_DTYPE: torch.dtype = torch.float16
 """The precision for the GPT attention plugin"""
 
-AUTO_DETECT_ROPE_SUBGRAPH: bool = os.environ.get("AUTO_DETECT_ROPE_SUBGRAPH", "1") == "1"
+INPUT_IDS: str = os.getenv("INPUT_IDS", "input_ids")
+"""
+The input token tensor in most of the decoder-only models from HF are named as "input_ids".
+If this is not the case for your model, you need to change the value of this constant accordingly.
+"""
 
-DEBUG_ARTIFACTS_DIR: str | None = os.environ.get("DEBUG_ARTIFACTS_DIR", None)
-"""The directory to save the debug artifacts such as graph module code."""
+INPUT_IDS_UNSQUEEZE_DIM: Literal[0, 1] = 1 if os.getenv("INPUT_IDS_UNSQUEEZE_DIM", "0") == "1" else 0
+"""
+In TRT-LLM, the `input_ids` is a 1-dimensional tensor, whereas in HF, it is 2-dimensional with shape (B, S).
+This constant determines in which dimension should the `input_ids` be expanded.
+"""
 
+MATMUL_FUSION_MAX_OUTPUT_SIZE: int = int(os.getenv("MATMUL_FUSION_MAX_OUTPUT_SIZE", "16384"))
+"""
+If there are fusible matmul siblings with the total output dimention size larger than this number,
+they will not be fused by the pass `FuseMMConstSiblings`.
+If this value is negative, all matmul siblings will be fused.
+"""
 
 if "LOGURU_LEVEL" not in os.environ:
-    os.environ["LOGURU_LEVEL"] = os.environ.get("DITTO_LOG_LEVEL", "INFO")
+    os.environ["LOGURU_LEVEL"] = os.getenv("DITTO_LOG_LEVEL", "INFO")
 
 
 # Temporary workaround for config compilation
