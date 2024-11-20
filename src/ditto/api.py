@@ -3,7 +3,6 @@ from collections.abc import Callable
 import tensorrt as trt
 from loguru import logger
 from torch.fx import GraphModule
-from torch_tensorrt import dtype
 from torch_tensorrt.dynamo._settings import CompilationSettings
 from transformers import PreTrainedModel
 
@@ -71,7 +70,6 @@ def trtllm_build(
 def get_default_compilation_settings(verbose: bool = False) -> CompilationSettings:
     return CompilationSettings(
         assume_dynamic_shape_support=True,
-        enabled_precisions={dtype.f16, dtype.f32},
         debug=verbose,
         optimization_level=3,
         max_aux_streams=-1,

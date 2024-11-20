@@ -27,14 +27,6 @@ def builder_config_as_dict(builder_config: trt.IBuilderConfig) -> dict[str, Any]
             return f"{value}"
         return value
 
-    def bitmask_to_bool_list(bitmask: int) -> list[bool]:
-        # Ensure the bitmask is within the int32 range
-        if bitmask < 0 or bitmask > 0xFFFFFFFF:
-            raise ValueError("Bitmask should be a 32-bit integer")
-
-        # Convert the bitmask to a list of booleans
-        return [(bitmask & (1 << i)) != 0 for i in range(32)]
-
     # Loop through attributes in IBuilderConfig and retrieve their values
     for attr in dir(builder_config):
         # Filter out private attributes, methods, and unsupported types
@@ -44,10 +36,8 @@ def builder_config_as_dict(builder_config: trt.IBuilderConfig) -> dict[str, Any]
                 value = getattr(builder_config, attr)
                 if attr == "flags" and isinstance(value, int):
                     value = {
-                        f"{enum_value.value:02d}:{name}": flag
-                        for (name, enum_value), flag in zip(
-                            trt.BuilderFlag.__members__.items(), bitmask_to_bool_list(value)
-                        )
+                        f"{flag.value:02d}:{name}": builder_config.get_flag(flag)
+                        for name, flag in trt.BuilderFlag.__members__.items()
                     }
                 config_data[attr] = normalize(value)
             except Exception as e:
@@ -76,3 +66,10 @@ def get_dynamic_input_ranges(
         }
         for profile in optimization_profiles
     ]
+
+
+def get_human_readable_flags(network: trt.INetworkDefinition) -> dict[str, bool]:
+    return {
+        f"{flag.value:02d}:{name}": network.get_flag(flag)
+        for name, flag in trt.NetworkDefinitionCreationFlag.__members__.items()
+    }

@@ -161,7 +161,11 @@ class EngineInfo(EngineComponent):
             layers=[ELayer.from_layer(network.get_layer(i)) for i in range(network.num_layers)],
         )
 
-    def as_onnx(self, input_ranges: list[ShapeRanges] | None = None) -> onnx.ModelProto:
+    def as_onnx(
+        self,
+        input_ranges: list[ShapeRanges] | None = None,
+        network_flags: dict[str, bool] | None = None,
+    ) -> onnx.ModelProto:
         nodes: dict[str, gs.Node] = {}
         degenerate_layers: dict[str, ELayer] = {}
         tensors: dict[str, gs.Constant | gs.Variable] = {}
@@ -246,6 +250,7 @@ class EngineInfo(EngineComponent):
         doc_string = "\n".join(
             f"{padstr(section)}\n{contents}"
             for section, contents in {
+                "Network Flags": json_dumps(network_flags),
                 "Input Ranges": json_dumps(input_ranges),
                 "Degenerate Layers": json_dumps(
                     {name: layer.model_dump() for name, layer in degenerate_layers.items()}
