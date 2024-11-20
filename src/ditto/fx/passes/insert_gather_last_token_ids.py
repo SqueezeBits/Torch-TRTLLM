@@ -3,9 +3,9 @@ from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 
 from ...config import INPUT_IDS_UNSQUEEZE_DIM
-from ..subgraphs import LinearSubgraph
 from ..utils import find_or_create_placeholder_sym_size, get_tensor_metadata, populate_tensor_metadata
 from .graph_pass import GraphOptimizationPass
+from .subgraphs import LinearSubgraph
 
 
 class InsertGatherLastTokenIds(GraphOptimizationPass):

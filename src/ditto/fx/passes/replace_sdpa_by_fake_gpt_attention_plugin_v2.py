@@ -10,10 +10,10 @@ from torch.fx.passes.infra.pass_base import PassResult
 
 from ...config import GPT_ATTENTION_PLUGIN_DTYPE
 from ...fake_targets import FakeGPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
-from ..subgraphs import LinearSubgraph
 from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata
 from .graph_pass import GraphOptimizationPass
 from .specialized_node import SDPANode
+from .subgraphs import LinearSubgraph
 
 
 class ReplaceSDPAByFakeGPTAttentionPluginV2(GraphOptimizationPass):
@@ -40,9 +40,9 @@ class ReplaceSDPAByFakeGPTAttentionPluginV2(GraphOptimizationPass):
             permutation = [*range(ndim - 3), ndim - 2, ndim - 3, ndim - 1]
             # See https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
             # pylint: disable-next=invalid-name
-            N, *others, Hq, L, E = query.shape
+            N, *others, Hq, L, E = query.shape  # noqa: N806
             # pylint: disable-next=invalid-name
-            H, S, Ev = value.shape[-3:]
+            H, S, Ev = value.shape[-3:]  # noqa: N806
             sdpa_out_shape = (N, *others, Hq, L, Ev)
             if not (E == Ev and H == Hq):
                 logger.error(
@@ -70,8 +70,8 @@ class ReplaceSDPAByFakeGPTAttentionPluginV2(GraphOptimizationPass):
                 **rope_config.model_dump(),
             )
 
-            def reformat_to_2d(x: Node) -> Node:
-                transpose = graph.call_function(torch.ops.aten.permute.default, (x, permutation))
+            def reformat_to_2d(x: Node, dims: list[int]) -> Node:
+                transpose = graph.call_function(torch.ops.aten.permute.default, (x, dims))
                 assert (t := get_tensor_metadata(x)) is not None
                 t = populate_tensor_metadata(transpose, t, shape=(*t.shape[:-3], t.shape[-2], t.shape[-3], t.shape[-1]))
                 symbolic_shape = (
@@ -84,7 +84,9 @@ class ReplaceSDPAByFakeGPTAttentionPluginV2(GraphOptimizationPass):
                 return y
 
             with graph.inserting_before(node):
-                query_2d, key_2d, value_2d = (reformat_to_2d(x) for x in (sdpa.query, sdpa.key, sdpa.value))
+                query_2d, key_2d, value_2d = (
+                    reformat_to_2d(x, permutation) for x in (sdpa.query, sdpa.key, sdpa.value)
+                )
                 assert (q := get_tensor_metadata(query_2d)) is not None
                 assert (k := get_tensor_metadata(key_2d)) is not None
                 assert (v := get_tensor_metadata(value_2d)) is not None

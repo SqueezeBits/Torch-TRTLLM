@@ -17,6 +17,7 @@ from torch_tensorrt.dynamo._settings import CompilationSettings
 from torch_tensorrt.dynamo.conversion import (
     DYNAMO_CONVERTERS,
     CallingConvention,
+    ConversionContext,
     TRTInterpreter,
     UnsupportedOperatorException,
 )
@@ -27,6 +28,7 @@ from .debug import (
     EngineInfo,
     builder_config_as_dict,
     get_dynamic_input_ranges,
+    get_human_readable_flags,
     open_debug_artifact,
     save_onnx_without_weights,
 )
@@ -44,6 +46,7 @@ class TRTLLMInterpreter(TRTInterpreter):
         engine_cache: BaseEngineCache | None = None,
         network_name: str | None = None,
         output_names: list[str] | None = None,
+        strongly_typed: bool = True,
     ) -> None:
         super().__init__(
             module,
@@ -53,6 +56,12 @@ class TRTLLMInterpreter(TRTInterpreter):
             compilation_settings=compilation_settings or CompilationSettings(),
             engine_cache=engine_cache,
         )
+
+        flags = 1 << trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH.value
+        if strongly_typed:
+            flags |= 1 << trt.NetworkDefinitionCreationFlag.STRONGLY_TYPED.value
+
+        self.ctx = ConversionContext(self.builder.create_network(flags), self.compilation_settings)
         self.logger = logger
         self.placeholder_names = [n.name for n in module.graph.nodes if n.op == "placeholder"]
         self.user_output_names = output_names
@@ -69,7 +78,9 @@ class TRTLLMInterpreter(TRTInterpreter):
                     if (profiles := self.optimization_profiles)
                     else None
                 )
-                save_onnx_without_weights(EngineInfo.from_network_definition(self.ctx.net).as_onnx(shape_ranges), f)
+                flags = get_human_readable_flags(self.ctx.net)
+                proto = EngineInfo.from_network_definition(self.ctx.net).as_onnx(shape_ranges, flags)
+                save_onnx_without_weights(proto, f)
 
     def _populate_trt_builder_config(
         self,
@@ -88,8 +99,14 @@ class TRTLLMInterpreter(TRTInterpreter):
         ), "timing cache and algorithm selector cannot be specified at the same time"
 
         builder_config = super()._populate_trt_builder_config(
-            strict_type_constraints, algorithm_selector, tactic_sources
+            # Workaround for the bug mentioned in https://github.com/pytorch/TensorRT/pull/3300
+            strict_type_constraints=False,
+            algorithm_selector=algorithm_selector,
+            tactic_sources=tactic_sources,
         )
+
+        if strict_type_constraints:
+            builder_config.set_flag(trt.BuilderFlag.OBEY_PRECISION_CONSTRAINTS)
 
         if weight_streaming:
             builder_config.set_flag(trt.BuilderFlag.WEIGHT_STREAMING)

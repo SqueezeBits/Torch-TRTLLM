@@ -6,10 +6,10 @@ from torch.fx.passes.shape_prop import TensorMetadata
 
 from ...config import GPT_ATTENTION_PLUGIN_DTYPE
 from ...fake_targets import FAKE_ROPE_TARGETS, FakeGPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
-from ..subgraphs import LinearSubgraph
 from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata, traceback_reformats
 from .graph_pass import GraphOptimizationPass
 from .specialized_node import SDPANode
+from .subgraphs import LinearSubgraph
 
 
 class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
