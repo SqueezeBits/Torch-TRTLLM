@@ -4,7 +4,7 @@ import torch
 from torch.fx import Node
 from typing_extensions import Self
 
-from ..types import StrictlyTyped
+from ...types import StrictlyTyped
 
 
 class Subgraph(StrictlyTyped, ABC):
@@ -30,20 +30,20 @@ class LinearSubgraph(Subgraph):
     output_reshape: Node
 
     @classmethod
-    def configure_from(cls, mm: Node) -> Self | None:
+    def configure_from(cls, node: Node) -> Self | None:
         if (
-            mm.op == "call_function"
-            and mm.target is torch.ops.aten.mm.default
-            and len(mm.all_input_nodes) == 2
-            and (input_reshape := mm.all_input_nodes[0]).op == "call_function"
+            node.op == "call_function"
+            and node.target is torch.ops.aten.mm.default
+            and len(node.all_input_nodes) == 2
+            and (input_reshape := node.all_input_nodes[0]).op == "call_function"
             and input_reshape.target is torch.ops.aten.reshape.default
-            and (weight := mm.all_input_nodes[1]).op == "get_attr"
-            and len(mm.users) == 1
-            and (output_reshape := [*mm.users][0]).op == "call_function"
+            and (weight := node.all_input_nodes[1]).op == "get_attr"
+            and len(node.users) == 1
+            and (output_reshape := [*node.users][0]).op == "call_function"
             and output_reshape.target is torch.ops.aten.reshape.default
         ):
             return cls(
-                mm=mm,
+                mm=node,
                 weight=weight,
                 input_reshape=input_reshape,
                 output_reshape=output_reshape,
