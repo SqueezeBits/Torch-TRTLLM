@@ -1,4 +1,3 @@
-# pylint: disable=no-member, protected-access
 from __future__ import annotations
 
 import contextlib
@@ -150,8 +149,7 @@ def get_inlined_graph_module(
     *,
     enable_experimental_decompositions: bool = _defaults.ENABLE_EXPERIMENTAL_DECOMPOSITIONS,
     skipped_optimizers: list[PassName] | None = None,
-    enforce_projections_transposed: bool = False,
-    enforce_projections_in_fp32: bool = False,
+    allow_matmul_in_fp16: bool = False,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
 ) -> GraphModule:
     pretrained_config = exported_program.graph_module.meta.get("pretrained_config", None)
@@ -166,8 +164,7 @@ def get_inlined_graph_module(
             *post_lowering_passes,
             get_optimization_transform(
                 skipped_optimizers,
-                enforce_projections_transposed=enforce_projections_transposed,
-                enforce_projections_in_fp32=enforce_projections_in_fp32,
+                allow_matmul_in_fp16=allow_matmul_in_fp16,
             ),
             *(extra_passes or []),
         ]

@@ -1,4 +1,3 @@
-# pylint: disable=no-member
 import json
 import os
 from pathlib import Path
@@ -159,7 +158,6 @@ class TRTLLMInterpreter(TRTInterpreter):
         return output
 
     def call_function(self, target: Target, args: Any, kwargs: Any) -> Any:
-        # TODO: Why is this stateful? We should be able to take in the inputs
         converter_packet = (
             DYNAMO_CONVERTERS.get_unvalidated(FakeGPTAttentionPlugin)
             if isinstance(target, FakeGPTAttentionPlugin)

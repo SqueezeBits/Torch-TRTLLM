@@ -1,4 +1,3 @@
-# pylint: disable=protected-access
 import operator
 from functools import reduce
 
@@ -42,7 +41,7 @@ class ReplaceSDPAByFakeGPTAttentionPluginV2(GraphOptimizationPass):
             # pylint: disable-next=invalid-name
             N, *others, Hq, L, E = query.shape  # noqa: N806
             # pylint: disable-next=invalid-name
-            H, S, Ev = value.shape[-3:]  # noqa: N806
+            H, _, Ev = value.shape[-3:]  # noqa: N806
             sdpa_out_shape = (N, *others, Hq, L, Ev)
             if not (E == Ev and H == Hq):
                 logger.error(

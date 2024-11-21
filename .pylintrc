@@ -83,7 +83,6 @@ disable=raw-checker-failed,
         locally-disabled,
         file-ignored,
         suppressed-message,
-        useless-suppression,
         deprecated-pragma,
         use-symbolic-message-instead,
         import-error,
@@ -92,6 +91,8 @@ disable=raw-checker-failed,
         fixme,
         unspecified-encoding,
         unsupported-binary-operation,
+        protected-access,
+        broad-exception-caught,
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
@@ -240,7 +241,7 @@ ignored-classes=optparse.Values,
 # (useful for modules/projects where namespaces are manipulated during runtime
 # and thus existing member attributes cannot be deduced by static analysis). It
 # supports qualified module names, as well as Unix pattern matching.
-ignored-modules=
+ignored-modules=tensorrt
 
 # Show a hint with possible names when a member name was not found. The aspect
 # of finding the hint is based on edit distance.

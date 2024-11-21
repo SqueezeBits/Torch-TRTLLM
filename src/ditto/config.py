@@ -1,4 +1,3 @@
-# pylint: disable=no-member
 import os
 from typing import Literal
 
@@ -32,7 +31,6 @@ PassName = Literal[
     "ReplaceSDPAByFakeGPTAttentionPlugin",
     "ReplaceSDPAByFakeGPTAttentionPluginV2",
     "ReplaceViewByReshape",
-    "RewriteMMAsTransposedMM",
     "RewriteReshapeAsUnsqueeze",
     "WrapRoPESubgraphs",
 ]
@@ -76,7 +74,6 @@ except KeyError as e:
 FX_TRANSFORM_MAXIMUM_ITERATION = int(os.getenv("FX_TRANSFORM_MAXIMUM_ITERATION", "100"))
 """Maximum iteration limit for FX graph transformations."""
 
-# pylint: disable-next=protected-access
 GPT_ATTENTION_PLUGIN_DTYPE: torch.dtype = torch_trt.dtype._from(
     np.dtype(os.getenv("GPT_ATTENTION_PLUGIN_DTYPE", "float16"))
 ).to(torch.dtype)

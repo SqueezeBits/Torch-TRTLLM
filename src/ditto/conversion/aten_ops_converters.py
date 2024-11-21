@@ -1,3 +1,4 @@
+# pylint: disable=unused-argument
 from collections.abc import Sequence
 
 import numpy as np
@@ -113,8 +114,9 @@ class ATenSliceTensorInputs(StrictlyTyped):
 
     @model_validator(mode="after")
     def ensure_slicing_dim_is_static(self) -> Self:
-        if not (-self.ndim <= self.dim < self.ndim and self.dim_size != -1):
-            raise ValueError("Slicing along dynamic dimension must be handled by TorchTRT converters")
+        assert (
+            -self.ndim <= self.dim < self.ndim and self.dim_size != -1
+        ), "Slicing along dynamic dimension must be handled by TorchTRT converters"
         return self
 
 
@@ -139,7 +141,7 @@ def aten_ops_slice(
         inputs = ATenSliceTensorInputs(
             **dict(zip(ATenSliceTensorInputs.model_fields.keys(), args))  # type: ignore[arg-type]
         )
-    except (ValidationError, ValueError) as e:
+    except (ValidationError, AssertionError) as e:
         logger.warning(f"{name} will fall back to default TorchTRT converter - {e}")
         return impl.slice.slice_op(
             ctx,

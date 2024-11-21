@@ -10,7 +10,6 @@ from pydantic_core import PydanticUndefined
 from torch.fx.node import Argument, Node, Target
 from typing_extensions import Self
 
-from ...fake_targets import fake_transposed_mm
 from ...types import StrictlyTyped
 from ...utils import make_axis_nonnegative, make_dim_nonnegative
 from ..utils import get_tensor_metadata
@@ -207,10 +206,9 @@ class BinaryElementwiseNode(ATenOpNode):
 
     @model_validator(mode="after")
     def check_if_one_of_the_inputs_is_node(self) -> Self:
-        if not (isinstance(self.x, Node) or isinstance(self.y, Node)):
-            raise ValidationError(
-                f"Expected one of the inputs of {self.node} to be a `torch.fx.Node` but got x={self.x}, y={self.y}"
-            )
+        assert isinstance(self.x, Node) or isinstance(
+            self.y, Node
+        ), f"Expected one of the inputs of {self.node} to be a `torch.fx.Node` but got x={self.x}, y={self.y}"
         return self
 
     @classmethod
@@ -394,16 +392,9 @@ class MMNode(ATenOpNode):
     lhs: Node
     rhs: Node
 
-    @property
-    def is_rhs_transposed(self) -> bool:
-        return self.target is fake_transposed_mm
-
     @classmethod
     def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
-        return (
-            torch.ops.aten.mm.default,
-            fake_transposed_mm,
-        )
+        return (torch.ops.aten.mm.default,)
 
 
 class MMConstNode(MMNode):

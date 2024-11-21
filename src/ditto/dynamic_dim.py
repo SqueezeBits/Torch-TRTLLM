@@ -4,7 +4,7 @@ from collections.abc import Callable
 from functools import cached_property
 
 from loguru import logger
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, model_validator
 from torch.export import Dim
 from typing_extensions import Self
 
@@ -115,19 +115,17 @@ class DynamicDimension(DynamicDimensionType):
 
     @model_validator(mode="after")
     def check_given_values(self) -> Self:
-        if not self.name.isidentifier():
-            raise ValidationError(f"name must be an identifier but got '{self.name}'")
-        if not 0 <= self.min <= self.max:
-            raise ValidationError(f"0 <= min < max must be satified, but got min={self.min}, max={self.max}")
-        if not self.min <= self.opt <= self.max:
-            raise ValidationError(
-                f"min <= opt <= max must be satisfied, but got min={self.min}, opt={self.opt}, max={self.max}"
-            )
-        if not self.min <= self.example <= self.max:
-            raise ValidationError(
-                "min <= example <= max must be satisfied, "
-                f"but got min={self.min}, opt={self.example}, max={self.max}"
-            )
+        assert self.name.isidentifier(), f"name must be an identifier but got '{self.name}'"
+        assert (
+            0 <= self.min <= self.max
+        ), f"0 <= min < max must be satified, but {self.name} got min={self.min}, max={self.max}"
+        assert (
+            self.min <= self.opt <= self.max
+        ), f"min <= opt <= max must be satisfied, but {self.name} got min={self.min}, opt={self.opt}, max={self.max}"
+        assert self.min <= self.example <= self.max, (
+            "min <= example <= max must be satisfied, "
+            f"but {self.name} got min={self.min}, opt={self.example}, max={self.max}"
+        )
         return self
 
 

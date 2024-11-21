@@ -63,6 +63,5 @@ def save_onnx_without_weights(
     for tensor in _get_all_tensors(proto):
         if uses_external_data(tensor) and tensor.HasField("raw_data"):
             tensor.ClearField("raw_data")
-    # pylint: disable-next=protected-access
     serialized_proto = onnx._get_serializer(None, f).serialize_proto(proto)
     f.write(serialized_proto)

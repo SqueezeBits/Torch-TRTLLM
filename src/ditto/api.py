@@ -3,6 +3,7 @@ from collections.abc import Callable
 import tensorrt as trt
 from loguru import logger
 from torch.fx import GraphModule
+from torch.fx.graph import CodeGen
 from torch_tensorrt.dynamo._settings import CompilationSettings
 from transformers import PreTrainedModel
 
@@ -23,10 +24,8 @@ def trtllm_build(
     arguments: ArgumentsForExport | None = None,
     *,
     compilation_settings: CompilationSettings | None = None,
-    transpose_weights: bool = False,
-    mm_in_fp32: bool = False,
-    extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
-    output_names: list[str] | None = None,
+    allow_matmul_in_fp16: bool = False,
+    extra_outputs: list[str] | None = None,
     verbose: bool = False,
 ) -> trt.ICudaEngine:
     try:
@@ -45,18 +44,16 @@ def trtllm_build(
     graph_module = trtllm_export(
         model,
         arguments,
-        transpose_weights=transpose_weights,
-        mm_in_fp32=mm_in_fp32,
-        extra_passes=extra_passes,
+        allow_matmul_in_fp16=allow_matmul_in_fp16,
+        extra_passes=[add_outputs(extra_outputs)] if extra_outputs else None,
         verbose=verbose,
     )
 
     logger.info("Building TensorRT engine ...")
-    if isinstance(model, PreTrainedModel) and not output_names:
-        logger.info(
-            "TRTLLM requires the output name to be 'logits'. Will try to rename the first output name as 'logits'"
-        )
-        output_names = ["logits"]
+    output_names = ["logits"]  # TRTLLM requires the first output name to be 'logits'
+    if extra_outputs:
+        output_names.extend(extra_outputs)
+
     return build_engine(
         graph_module,
         (),
@@ -76,12 +73,38 @@ def get_default_compilation_settings(verbose: bool = False) -> CompilationSettin
     )
 
 
+def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
+    def reset_output(gm: GraphModule) -> GraphModule:
+        nodes = {n.name: n for n in gm.graph.nodes}
+        for node in reversed(gm.graph.nodes):
+            if node.op == "output":
+                break
+        else:
+            gm.print_readable()
+            raise RuntimeError("No output node found in the graph module")
+
+        try:
+            outputs = node.args[0] + tuple(nodes[name] for name in names)
+        except KeyError as e:
+            gm.print_readable()
+            raise RuntimeError(f"Failed to find all of the extra output nodes: {', '.join(names)}") from e
+
+        logger.info(f"Adding new outputs to the graph: {', '.join(names)}")
+        node.args = (outputs,)
+        gm.graph._codegen = CodeGen()
+        gm.graph.eliminate_dead_code()
+        gm.graph.lint()
+        gm.recompile()
+        return gm
+
+    return reset_output
+
+
 def trtllm_export(
     model: PreTrainedModel,
     arguments: ArgumentsForExport | None = None,
     *,
-    transpose_weights: bool = False,
-    mm_in_fp32: bool = False,
+    allow_matmul_in_fp16: bool = False,
     skipped_optimizers: list[PassName] | None = None,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
     verbose: bool = False,
@@ -105,8 +128,7 @@ def trtllm_export(
     graph_module = get_inlined_graph_module(
         exported_program,
         skipped_optimizers=skipped_optimizers,
-        enforce_projections_transposed=transpose_weights,
-        enforce_projections_in_fp32=mm_in_fp32,
+        allow_matmul_in_fp16=allow_matmul_in_fp16,
         extra_passes=extra_passes,
     )
 

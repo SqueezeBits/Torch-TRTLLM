@@ -109,7 +109,6 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                     qkv_cat = graph.call_function(torch.ops.aten.squeeze.dim, (qkv_cat, 0))
                     prev_metadata = populate_tensor_metadata(qkv_cat, prev_metadata, shape=prev_metadata.shape[1:])
                 if prev_metadata and prev_metadata.dtype != GPT_ATTENTION_PLUGIN_DTYPE:
-                    # pylint: disable-next=protected-access
                     qkv_cat = graph.call_function(
                         torch.ops.aten._to_copy.default, (qkv_cat,), {"dtype": GPT_ATTENTION_PLUGIN_DTYPE}
                     )
@@ -122,7 +121,6 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                     prev_metadata = populate_tensor_metadata(plugin_node, q, dtype=GPT_ATTENTION_PLUGIN_DTYPE)
                 if out_dtype is not None:
                     plugin_node = graph.call_function(
-                        # pylint: disable-next=protected-access
                         torch.ops.aten._to_copy.default,
                         (plugin_node,),
                         {"dtype": out_dtype},

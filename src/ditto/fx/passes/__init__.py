@@ -22,6 +22,5 @@ from .make_weights_contiguous import MakeWeightsContiguous
 from .replace_sdpa_by_fake_gpt_attention_plugin import ReplaceSDPAByFakeGPTAttentionPlugin
 from .replace_sdpa_by_fake_gpt_attention_plugin_v2 import ReplaceSDPAByFakeGPTAttentionPluginV2
 from .replace_view_by_reshape import ReplaceViewByReshape
-from .rewrite_mm_as_transposed_mm import RewriteMMAsTransposedMM
 from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
 from .wrap_rope_subgraphs import WrapRoPESubgraphs

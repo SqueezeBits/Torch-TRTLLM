@@ -28,7 +28,6 @@ from .passes import (
     ReplaceSDPAByFakeGPTAttentionPlugin,
     ReplaceSDPAByFakeGPTAttentionPluginV2,
     ReplaceViewByReshape,
-    RewriteMMAsTransposedMM,
     RewriteReshapeAsUnsqueeze,
     WrapRoPESubgraphs,
 )
@@ -38,18 +37,15 @@ from .passes.graph_pass import GraphOptimizationPass
 def get_optimization_transform(
     skipped_optimizers: list[PassName] | None = None,
     *,
-    enforce_projections_transposed: bool = False,
-    enforce_projections_in_fp32: bool = False,
+    allow_matmul_in_fp16: bool = False,
 ) -> Callable[[GraphModule], GraphModule]:
     """Optimize the given graph module inplace.
 
     Args:
         skipped_optimizers (list[PassName] | None, optional): the names of optimization passes to skip.
             Defaults to None.
-        enforce_projections_transposed (bool, optional): whether to enforce nn.Linear layers' computation as transposed
-            matmul, storing weights as transposed. Defaults to False.
-        enforce_projections_in_fp32 (bool, optional): whether to enforce nn.Linear layers' computation in FP32, while
-            storing weights in FP16 precision. Defaults to False.
+        allow_matmul_in_fp16 (bool, optional): whether to allow matrix multiplication to be performed in FP16 precision.
+            Defaults to False.
 
     Returns:
         Callable[[GraphModule], GraphModule]: the function that applies FX optimization passes to the given graph module
@@ -58,8 +54,7 @@ def get_optimization_transform(
         get_level1_transform(skipped_optimizers),
         get_trtllm_conversion_transform(
             skipped_optimizers,
-            enforce_projections_transposed=enforce_projections_transposed,
-            enforce_projections_in_fp32=enforce_projections_in_fp32,
+            allow_matmul_in_fp16=allow_matmul_in_fp16,
         ),
         get_level2_transform(skipped_optimizers),
     )
@@ -126,13 +121,10 @@ LEVEL2_PASSES: tuple[type[GraphOptimizationPass], ...] = (
 def get_trtllm_conversion_transform(
     skipped_optimizers: list[PassName] | None = None,
     *,
-    enforce_projections_transposed: bool = False,
-    enforce_projections_in_fp32: bool = False,
+    allow_matmul_in_fp16: bool = False,
 ) -> Callable[[GraphModule], GraphModule]:
     passes = list(TRTLLM_CONVERSION_PASSES)
-    if enforce_projections_transposed:
-        passes.append(RewriteMMAsTransposedMM)
-    if enforce_projections_in_fp32:
+    if not allow_matmul_in_fp16:
         passes.append(CastFP16MMToFP32)
     return get_transform(
         *passes,
