@@ -1,9 +1,9 @@
 import torch
 from torch.fx import Node
 
+from ..nodes import ReshapeNode
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .node_wise_pass import NodeWiseOptimizationPass
-from .specialized_node import ReshapeNode
 
 
 class RewriteReshapeAsUnsqueeze(NodeWiseOptimizationPass):

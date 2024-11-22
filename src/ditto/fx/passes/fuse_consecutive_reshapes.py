@@ -1,8 +1,8 @@
 from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_base import PassResult
 
+from ..nodes import ReshapeNode, UnsqueezeNode
 from .graph_pass import GraphOptimizationPass
-from .specialized_node import ReshapeNode, UnsqueezeNode
 
 
 class FuseConsecutiveReshapes(GraphOptimizationPass):

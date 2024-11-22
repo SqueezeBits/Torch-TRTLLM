@@ -5,10 +5,10 @@ from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.shape_prop import TensorMetadata
 
 from ...config import GPT_ATTENTION_PLUGIN_DTYPE
-from ...fake_targets import FAKE_ROPE_TARGETS, FakeGPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
+from ..nodes import ScaledDotProductAttentionNode
+from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
 from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata, traceback_reformats
 from .graph_pass import GraphOptimizationPass
-from .specialized_node import SDPANode
 from .subgraphs import LinearSubgraph
 
 
@@ -24,7 +24,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
         modified = False
         for node in graph.nodes:
             if not (
-                (sdpa := SDPANode.specialize_from(node))
+                (sdpa := ScaledDotProductAttentionNode.specialize_from(node))
                 and sdpa.is_eligible_for_gpt_attention_plugin
                 and (query := get_tensor_metadata(sdpa.query))
                 and (key := get_tensor_metadata(sdpa.key))
@@ -90,7 +90,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                     "Will use the global rope config anyway."
                 )
 
-            fake_gpt_attention_plugin = FakeGPTAttentionPlugin(
+            fake_gpt_attention_plugin = GPTAttentionPlugin(
                 layer_idx=layer_idx,
                 num_heads=num_heads,
                 num_kv_heads=num_kv_heads,

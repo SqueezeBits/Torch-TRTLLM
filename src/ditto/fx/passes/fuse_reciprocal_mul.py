@@ -1,9 +1,10 @@
 import torch
 from torch.fx import Node
 
+from ...types import Number
+from ..nodes import DivNode, GetAttrNode, MulNode
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .node_wise_pass import NodeWiseOptimizationPass
-from .specialized_node import DivNode, GetAttrNode, MulNode, Number
 
 
 class FuseReciprocalMul(NodeWiseOptimizationPass):

@@ -1,7 +1,7 @@
 from torch.fx import Node
 
+from ..nodes import SqueezeDimNode, UnsqueezeNode
 from .node_wise_pass import NodeWiseOptimizationPass
-from .specialized_node import SqueezeDimNode, UnsqueezeNode
 
 
 class EliminateUnsqueezeSqueeze(NodeWiseOptimizationPass):

@@ -1,8 +1,8 @@
 from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_base import PassResult
 
+from ..nodes import ToCopyNode
 from .graph_pass import GraphOptimizationPass
-from .specialized_node import ToCopyNode
 
 
 class FuseConsecutiveToCopys(GraphOptimizationPass):

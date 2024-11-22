@@ -1,3 +1,5 @@
+# pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
+
 from inspect import isclass
 from types import UnionType
 from typing import Any, Generic, TypeVar, get_args
@@ -7,22 +9,22 @@ from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_manager import PassManager, PassResult
 
 from ...config import FX_TRANSFORM_MAXIMUM_ITERATION
-from ..utils import get_tensor_metadata, populate_tensor_metadata
-from .graph_pass import GraphOptimizationPass
-from .node_wise_pass import NodeWiseOptimizationPass
-from .specialized_node import (
-    ATenOpNode,
+from ...types import Number
+from ..nodes import (
     BinaryElementwiseNode,
-    BinaryElementwiseWithAlphaNode,
+    CallFunctionNode,
+    CloneNode,
     EmbeddingNode,
     IndexSelectNode,
-    Number,
     ReductionIntListNode,
     SpecializedNode,
     ToCopyNode,
     UnaryElementwiseNode,
     UnsqueezeNode,
 )
+from ..utils import get_tensor_metadata, populate_tensor_metadata
+from .graph_pass import GraphOptimizationPass
+from .node_wise_pass import NodeWiseOptimizationPass
 
 
 class DeferUnsqueeze(GraphOptimizationPass):
@@ -36,7 +38,6 @@ class DeferUnsqueeze(GraphOptimizationPass):
                 SwapUnsqueezeWithBinaryElementwiseNode(depth + 1),
                 SwapUnsqueezeWithIndexSelectNode(depth + 1),
                 SwapUnsqueezeWithReductionIntListNode(depth + 1),
-                SwapUnsqueezeWithToCopyNode(depth + 1),
                 SwapUnsqueezeWithUnaryElementwiseNode(depth + 1),
             ],
             steps=FX_TRANSFORM_MAXIMUM_ITERATION,
@@ -46,7 +47,7 @@ class DeferUnsqueeze(GraphOptimizationPass):
         return self.pass_manager(graph_module)
 
 
-SomeATenOpNode = TypeVar("SomeATenOpNode", bound=ATenOpNode)
+SomeATenOpNode = TypeVar("SomeATenOpNode", bound=CallFunctionNode)
 
 
 class EarlyExit(Exception):  # noqa: N818
@@ -273,7 +274,7 @@ class SwapUnsqueezeWithReductionIntListNode(SwapUnsqueezeWith[ReductionIntListNo
         return hotfix, unsqueeze_dim
 
 
-class SwapUnsqueezeWithBinaryElementwiseNode(SwapUnsqueezeWith[BinaryElementwiseNode | BinaryElementwiseWithAlphaNode]):
+class SwapUnsqueezeWithBinaryElementwiseNode(SwapUnsqueezeWith[BinaryElementwiseNode]):
     """Swap the unsqueeze followed by a binary elementwise node possibly with alpha."""
 
     @classmethod
@@ -281,7 +282,7 @@ class SwapUnsqueezeWithBinaryElementwiseNode(SwapUnsqueezeWith[BinaryElementwise
         return ("x", "y")
 
     @classmethod
-    def verify_parents(cls, child: BinaryElementwiseNode | BinaryElementwiseWithAlphaNode) -> dict[str, UnsqueezeNode]:
+    def verify_parents(cls, child: BinaryElementwiseNode) -> dict[str, UnsqueezeNode]:
         unsqueezes = super().verify_parents(child)
         # for a binary elementwise child, the pass should run only if the inputs must be one of the form:
         # i) (unsqueeze, unsqueeze_1)
@@ -322,12 +323,8 @@ class SwapUnsqueezeWithBinaryElementwiseNode(SwapUnsqueezeWith[BinaryElementwise
         return unsqueezes
 
 
-class SwapUnsqueezeWithUnaryElementwiseNode(SwapUnsqueezeWith[UnaryElementwiseNode]):
+class SwapUnsqueezeWithUnaryElementwiseNode(SwapUnsqueezeWith[UnaryElementwiseNode | ToCopyNode | CloneNode]):
     """Swap the unsqueeze followed by a unary elementwise node."""
-
-
-class SwapUnsqueezeWithToCopyNode(SwapUnsqueezeWith[ToCopyNode]):
-    """Swap the unsqueeze followed by _to_copy.default node."""
 
 
 def get_squeezed_shape(shape: torch.Size, dim: int) -> torch.Size:

@@ -16,11 +16,11 @@ from torch_tensorrt.dynamo.conversion.converter_utils import (
 )
 
 from ..debug import open_debug_artifact
-from ..fake_targets import FakeGPTAttentionPlugin
+from ..fx.targets import GPTAttentionPlugin
 
 
 @dynamo_tensorrt_converter(
-    FakeGPTAttentionPlugin,
+    GPTAttentionPlugin,
     supports_dynamic_shapes=True,
 )
 def convert_fake_gpt_attention_plugin(
@@ -30,7 +30,7 @@ def convert_fake_gpt_attention_plugin(
     kwargs: dict[str, Argument],
     name: str,
 ) -> trt.ITensor | Sequence[trt.ITensor]:
-    assert isinstance(target, FakeGPTAttentionPlugin)
+    assert isinstance(target, GPTAttentionPlugin)
     plugin_creator = trt.get_plugin_registry().get_plugin_creator("GPTAttention", "1", TRT_LLM_PLUGIN_NAMESPACE)
     plugin_fields = target.get_plugin_fields()
     pfc = trt.PluginFieldCollection(plugin_fields)

@@ -1,7 +1,7 @@
 from torch.fx import Node
 
+from ..nodes import SliceNode
 from .node_wise_pass import NodeWiseOptimizationPass
-from .specialized_node import SliceNode
 
 
 class EliminateNopSlice(NodeWiseOptimizationPass):

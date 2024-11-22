@@ -1,7 +1,7 @@
 from torch.fx import Node
 
+from ..nodes import CatNode, StackNode
 from .node_wise_pass import NodeWiseOptimizationPass
-from .specialized_node import CatNode, StackNode
 
 
 class EliminateNopCatOrStack(NodeWiseOptimizationPass):

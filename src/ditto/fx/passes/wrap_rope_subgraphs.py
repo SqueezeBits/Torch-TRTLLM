@@ -4,7 +4,7 @@ from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 from transformers import PretrainedConfig
 
-from ...fake_targets import (
+from ..targets import (
     FAKE_ROPE_TARGETS,
     ROPEConfig,
     get_llama2_rope_pattern_graph,
@@ -52,7 +52,7 @@ class WrapRoPESubgraphs(GraphOptimizationPass):
 
             rope_config = ROPEConfig.from_pretrained_config(
                 pretrained_config,
-                positional_embedding_type=FAKE_ROPE_TARGETS[rope_node.target],
+                positional_embedding_type=FAKE_ROPE_TARGETS[rope_node.target],  # type: ignore[index]
                 embedding_dim=embed_dim,
             )
             if output := replaced_pattern.nodes_map.get(replaced_pattern.anchor):
