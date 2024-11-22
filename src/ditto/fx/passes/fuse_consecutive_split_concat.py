@@ -2,7 +2,7 @@ import operator
 
 from torch.fx import Node
 
-from ..nodes import CatNode, SplitNode
+from ..nodes import Cat, Split
 from .node_wise_pass import NodeWiseOptimizationPass
 
 
@@ -12,7 +12,7 @@ class FuseConsecutiveSplitConcat(NodeWiseOptimizationPass):
     @classmethod
     def rewrite(cls, node: Node) -> dict[Node, Node]:
         if not (
-            (split := SplitNode.specialize_from(node))
+            (split := Split.specialize_from(node))
             and (
                 getitems := [
                     user for user in node.users if (user.op == "call_function" and user.target is operator.getitem)
@@ -28,6 +28,6 @@ class FuseConsecutiveSplitConcat(NodeWiseOptimizationPass):
             cat.node
             for getitem in getitems
             for user in getitem.users
-            if (cat := CatNode.specialize_from(user)) and cat.tensors == getitems and cat.dim == split.dim
+            if (cat := Cat.specialize_from(user)) and cat.tensors == getitems and cat.dim == split.dim
         }
-        return {cat_node: split.x for cat_node in cat_nodes}
+        return {cat_node: split.this for cat_node in cat_nodes}

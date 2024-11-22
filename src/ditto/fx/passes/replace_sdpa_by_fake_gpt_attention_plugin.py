@@ -5,7 +5,7 @@ from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.shape_prop import TensorMetadata
 
 from ...config import GPT_ATTENTION_PLUGIN_DTYPE
-from ..nodes import ScaledDotProductAttentionNode
+from ..nodes import ScaledDotProductAttention
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
 from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata, traceback_reformats
 from .graph_pass import GraphOptimizationPass
@@ -24,7 +24,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
         modified = False
         for node in graph.nodes:
             if not (
-                (sdpa := ScaledDotProductAttentionNode.specialize_from(node))
+                (sdpa := ScaledDotProductAttention.specialize_from(node))
                 and sdpa.is_eligible_for_gpt_attention_plugin
                 and (query := get_tensor_metadata(sdpa.query))
                 and (key := get_tensor_metadata(sdpa.key))

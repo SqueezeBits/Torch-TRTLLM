@@ -1,7 +1,7 @@
 from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_base import PassResult
 
-from ..nodes import ToCopyNode
+from ..nodes import ToCopy
 from .graph_pass import GraphOptimizationPass
 
 
@@ -13,17 +13,13 @@ class FuseConsecutiveToCopys(GraphOptimizationPass):
         modified = False
         for node in graph.nodes:
             if not (
-                (parent := ToCopyNode.specialize_from(node))
-                and (
-                    children := [
-                        child for child_node in node.users if (child := ToCopyNode.specialize_from(child_node))
-                    ]
-                )
+                (parent := ToCopy.specialize_from(node))
+                and (children := [child for child_node in node.users if (child := ToCopy.specialize_from(child_node))])
             ):
                 continue
             for child in children:
                 child_node = child.node
-                child_node.replace_input_with(node, parent.x)
+                child_node.replace_input_with(node, parent.this)
                 if stack_trace := child_node.stack_trace:
                     child_node.stack_trace = f"{stack_trace}, pass: fused with {node} by {__name__}"
         return PassResult(graph_module, modified)

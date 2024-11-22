@@ -1,6 +1,6 @@
 from torch.fx import Node
 
-from ..nodes import PermuteNode
+from ..nodes import Permute
 from .node_wise_pass import NodeWiseOptimizationPass
 
 
@@ -9,6 +9,6 @@ class EliminateNopPermute(NodeWiseOptimizationPass):
 
     @classmethod
     def rewrite(cls, node: Node) -> dict[Node, Node]:
-        if not ((permute := PermuteNode.specialize_from(node)) and permute.dims == [*range(permute.ndim)]):
+        if not ((permute := Permute.specialize_from(node)) and permute.dims == [*range(permute.ndim)]):
             return {}
-        return {node: permute.x}
+        return {node: permute.this}

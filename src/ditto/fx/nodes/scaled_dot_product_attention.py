@@ -5,10 +5,10 @@ import torch
 from loguru import logger
 from torch.fx import Node
 
-from .call_function_node import CallFunctionNode
+from .call_function import CallFunction
 
 
-class ScaledDotProductAttentionNode(CallFunctionNode):
+class ScaledDotProductAttention(CallFunction):
     query: Node
     key: Node
     value: Node

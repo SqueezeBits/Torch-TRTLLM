@@ -1,30 +1,21 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
-from collections.abc import Callable
-from typing import Any
 
 import torch
 from torch.fx.node import Node
 
-from ...types import SymInt
-from ...utils import make_dim_nonnegative
-from ..utils import get_tensor_metadata
-from .call_function_node import CallFunctionNode
+from ....types import SymInt
+from ...utils import get_tensor_metadata
+from .aten_op import ATenOp
+from .utils import make_dim_nonnegative
 
 
-class SingleDimensionReshape(CallFunctionNode):
-    x: Node
+class SingleDimensionReshape(ATenOp):
+    this: Node
     dim: int
-
-    @classmethod
-    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
-        return (
-            torch.ops.aten.squeeze.dim,
-            torch.ops.aten.unsqueeze.default,
-        )
 
     @property
     def input_ndim(self) -> int | None:
-        if t := get_tensor_metadata(self.x):
+        if t := get_tensor_metadata(self.this):
             return len(t.shape)
         return None
 
@@ -34,27 +25,25 @@ class SingleDimensionReshape(CallFunctionNode):
             return len(t.shape)
         return None
 
+    @property
+    def nonnegative_dim(self) -> int | None:
+        return None
 
-class PermuteNode(CallFunctionNode):
-    x: Node
+
+@ATenOp.final(torch.ops.aten.permute.default)
+class Permute(ATenOp):
+    this: Node
     dims: list[int]
-
-    @classmethod
-    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
-        return (torch.ops.aten.permute.default,)
 
     @property
     def ndim(self) -> int:
         return len(self.dims)
 
 
-class ReshapeNode(CallFunctionNode):
-    x: Node
+@ATenOp.final(torch.ops.aten.reshape.default)
+class Reshape(ATenOp):
+    this: Node
     shape: list[SymInt]
-
-    @classmethod
-    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
-        return (torch.ops.aten.reshape.default,)
 
     @property
     def target_shape(self) -> torch.Size | None:
@@ -69,11 +58,8 @@ class ReshapeNode(CallFunctionNode):
         return torch.Size(sym_ints)  # type: ignore[arg-type]
 
 
-class SqueezeDimNode(SingleDimensionReshape):
-    @classmethod
-    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
-        return (torch.ops.aten.squeeze.dim,)
-
+@SingleDimensionReshape.final(torch.ops.aten.squeeze.dim)
+class SqueezeDim(SingleDimensionReshape):
     @property
     def nonnegative_dim(self) -> int | None:
         if (ndim := self.input_ndim) is not None:
@@ -81,11 +67,8 @@ class SqueezeDimNode(SingleDimensionReshape):
         return None
 
 
-class UnsqueezeNode(SingleDimensionReshape):
-    @classmethod
-    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
-        return (torch.ops.aten.unsqueeze.default,)
-
+@SingleDimensionReshape.final(torch.ops.aten.unsqueeze.default)
+class Unsqueeze(SingleDimensionReshape):
     @property
     def nonnegative_dim(self) -> int | None:
         if (ndim := self.output_ndim) is not None:

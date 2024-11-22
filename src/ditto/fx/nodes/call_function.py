@@ -3,10 +3,10 @@ from abc import abstractmethod
 from collections.abc import Callable
 from typing import Any, Literal
 
-from .specialized_node import SpecializedNode
+from .node_specialization import NodeSpecialization
 
 
-class CallFunctionNode(SpecializedNode):
+class CallFunction(NodeSpecialization):
     @property
     def target(self) -> Callable[..., Any]:
         assert callable(op := super().target)

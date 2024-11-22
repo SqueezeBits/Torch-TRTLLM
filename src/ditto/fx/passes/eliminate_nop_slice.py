@@ -1,6 +1,6 @@
 from torch.fx import Node
 
-from ..nodes import SliceNode
+from ..nodes import Slice
 from .node_wise_pass import NodeWiseOptimizationPass
 
 
@@ -9,11 +9,6 @@ class EliminateNopSlice(NodeWiseOptimizationPass):
 
     @classmethod
     def rewrite(cls, node: Node) -> dict[Node, Node]:
-        if not (
-            (slice := SliceNode.specialize_from(node))
-            and slice.start == 0
-            and slice.end == ((1 << 63) - 1)
-            and slice.step == 1
-        ):
+        if not ((s := Slice.specialize_from(node)) and s.start == 0 and s.end == ((1 << 63) - 1) and s.step == 1):
             return {}
-        return {node: slice.x}
+        return {node: s.this}

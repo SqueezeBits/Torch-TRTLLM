@@ -1,19 +1,21 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 
+from typing import Literal
+
 import torch
 from torch.fx.node import Node
 
-from .specialized_node import SpecializedNode
+from .node_specialization import NodeSpecialization
 
 
-class GetAttrNode(SpecializedNode):
+class GetAttr(NodeSpecialization):
     @property
     def target(self) -> str:
         assert isinstance(name := super().target, str)
         return name
 
     @classmethod
-    def designated_op(cls) -> str:
+    def designated_op(cls) -> Literal["get_attr"]:
         return "get_attr"
 
     @classmethod

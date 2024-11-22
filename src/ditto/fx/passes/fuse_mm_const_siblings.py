@@ -6,7 +6,7 @@ from torch.fx import Node
 from torch.fx.graph_module import GraphModule
 
 from ...config import MATMUL_FUSION_MAX_OUTPUT_SIZE
-from ..nodes import MMConstNode
+from ..nodes import MMConst
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .node_wise_pass import NodeWiseOptimizationPass
 
@@ -19,7 +19,7 @@ class FuseMMConstSiblings(NodeWiseOptimizationPass):
     @classmethod
     def rewrite(cls, node: Node) -> dict[Node, Node]:
         graph = node.graph
-        children = [child_mm for user in node.users if (child_mm := MMConstNode.specialize_from(user))]
+        children = [child_mm for user in node.users if (child_mm := MMConst.specialize_from(user))]
         if len(children) <= 1:
             return {}
         first_weight, *other_weights = (child_mm.weight for child_mm in children)

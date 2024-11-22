@@ -1,6 +1,6 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 from abc import ABC, abstractmethod
-from typing import Any, TypeVar, overload
+from typing import Any, Literal, TypeVar, overload
 
 from loguru import logger
 from pydantic import Field, ValidationError
@@ -11,14 +11,16 @@ from typing_extensions import Self
 from ...types import StrictlyTyped
 
 
-class SpecializedNode(StrictlyTyped, ABC):
+class NodeSpecialization(StrictlyTyped, ABC):
     """Abstract base class for defining node whose arguments are specialized for a specific op and target(s)."""
 
     node: Node = Field(exclude=True, frozen=True)
 
     @classmethod
     @abstractmethod
-    def designated_op(cls) -> str:
+    def designated_op(
+        cls,
+    ) -> Literal["call_function", "call_method", "call_module", "get_attr", "placeholder", "output",]:
         ...
 
     @classmethod
@@ -79,6 +81,7 @@ class SpecializedNode(StrictlyTyped, ABC):
         Returns:
             Self | None: the specialized node if succeeded, `None` otherwise.
         """
+        assert len(cls.possible_targets()) > 0, f"{cls.__name__} does not have possible targets"
         if not cls.validate_node(node):
             return None
         try:
@@ -93,7 +96,7 @@ class SpecializedNode(StrictlyTyped, ABC):
                 if index > 0  # should skip the `node`
             }
             return cls.model_validate({"node": node, **arguments})
-        except ValidationError as e:
+        except (AssertionError, ValidationError) as e:
             logger.warning(f"Incorrect arguments given to the node {node.format_node()}: {arguments}. ({e})")
             return None
 
@@ -143,6 +146,3 @@ def get_argument(
         if name_as_kwarg in node.kwargs
         else (node.args[index_as_arg] if len(node.args) > index_as_arg else default)
     )
-
-
-Asterick = Field(default=None, exclude=True)

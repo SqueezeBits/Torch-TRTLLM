@@ -1,4 +1,5 @@
 # pylint: disable=unused-argument
+# mypy: disallow-untyped-decorators=False
 from collections.abc import Sequence
 
 import numpy as np
@@ -25,8 +26,8 @@ from torch_tensorrt.dynamo.conversion.converter_utils import (
 )
 from typing_extensions import Self
 
+from ..fx.nodes.aten.utils import make_axis_nonnegative
 from ..types import StrictlyTyped
-from ..utils import make_axis_nonnegative
 
 
 @dynamo_tensorrt_converter(torch.ops.aten.all.default, supports_dynamic_shapes=True)

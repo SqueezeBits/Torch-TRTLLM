@@ -1,23 +1,17 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
-from collections.abc import Callable
-from typing import Any
 
 import torch
+from torch._ops import OpOverload
 from torch.fx.node import Node
 
-from .call_function_node import CallFunctionNode
+from .aten import MM
 
 
-class MMNode(CallFunctionNode):
-    lhs: Node
-    rhs: Node
-
+class MMConst(MM):
     @classmethod
-    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
+    def possible_targets(cls) -> tuple[OpOverload, ...]:
         return (torch.ops.aten.mm.default,)
 
-
-class MMConstNode(MMNode):
     @classmethod
     def validate_node(cls, node: Node) -> bool:
         if (
@@ -35,10 +29,10 @@ class MMConstNode(MMNode):
 
     @property
     def weight_name(self) -> str:
-        assert isinstance(target := self.rhs.target, str)
+        assert isinstance(target := self.other.target, str)
         return target
 
     @property
     def weight(self) -> torch.nn.Parameter:
-        assert (graph_module := self.rhs.graph.owning_module)
+        assert (graph_module := self.other.graph.owning_module)
         return graph_module.get_parameter(self.weight_name)

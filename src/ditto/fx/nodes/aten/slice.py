@@ -1,36 +1,31 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
-from collections.abc import Callable
-from typing import Any
 
 import torch
 from torch.fx.node import Node
 
-from ...types import SymInt
-from ...utils import make_axis_nonnegative, make_dim_nonnegative
-from ..utils import get_tensor_metadata
-from .call_function_node import CallFunctionNode
+from ....types import SymInt
+from ...utils import get_tensor_metadata
+from .aten_op import ATenOp
+from .utils import make_axis_nonnegative, make_dim_nonnegative
 
 
-class SliceNode(CallFunctionNode):
-    x: Node
+@ATenOp.final(torch.ops.aten.slice.Tensor)
+class Slice(ATenOp):
+    this: Node
     dim: int = 0
     start: SymInt | None = None
     end: SymInt | None = None
     step: SymInt = 1
 
-    @classmethod
-    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
-        return (torch.ops.aten.slice.Tensor,)
-
     @property
     def dim_size(self) -> int | None:
-        if (t := get_tensor_metadata(self.x)) and isinstance(s := t.shape[self.dim], int):
+        if (t := get_tensor_metadata(self.this)) and isinstance(s := t.shape[self.dim], int):
             return s
         return None
 
     @property
     def ndim(self) -> int | None:
-        if t := get_tensor_metadata(self.x):
+        if t := get_tensor_metadata(self.this):
             return len(t.shape)
         return None
 
