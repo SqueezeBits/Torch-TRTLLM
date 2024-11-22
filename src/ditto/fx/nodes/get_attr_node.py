@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
+# pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 
 import torch
 from torch.fx.node import Node

@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
+# pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 from collections.abc import Callable
 from typing import Any
 

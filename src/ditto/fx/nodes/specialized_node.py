@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false
+# pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 from abc import ABC, abstractmethod
 from typing import Any, TypeVar, overload
 

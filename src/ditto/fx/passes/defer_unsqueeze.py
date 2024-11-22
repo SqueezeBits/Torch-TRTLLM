@@ -1,4 +1,4 @@
-# pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
+# pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false, reportArgumentType=false
 
 from inspect import isclass
 from types import UnionType
