@@ -23,11 +23,6 @@ class NodeSpecialization(StrictlyTyped, ABC):
     ) -> Literal["call_function", "call_method", "call_module", "get_attr", "placeholder", "output",]:
         ...
 
-    @classmethod
-    @abstractmethod
-    def possible_targets(cls) -> tuple[Target, ...]:
-        ...
-
     @property
     def op(self) -> str:
         return self.node.op
@@ -35,6 +30,10 @@ class NodeSpecialization(StrictlyTyped, ABC):
     @property
     def target(self) -> Target:
         return self.node.target
+
+    @property
+    def users(self) -> dict[Node, None]:
+        return self.node.users
 
     @property
     def name(self) -> str:
@@ -69,7 +68,7 @@ class NodeSpecialization(StrictlyTyped, ABC):
         Returns:
             bool: `True` if it is suitable, `False` otherwise.
         """
-        return node.op == cls.designated_op() and node.target in cls.possible_targets()
+        return node.op == cls.designated_op()
 
     @classmethod
     def specialize_from(cls, node: Node) -> Self | None:
@@ -81,7 +80,6 @@ class NodeSpecialization(StrictlyTyped, ABC):
         Returns:
             Self | None: the specialized node if succeeded, `None` otherwise.
         """
-        assert len(cls.possible_targets()) > 0, f"{cls.__name__} does not have possible targets"
         if not cls.validate_node(node):
             return None
         try:

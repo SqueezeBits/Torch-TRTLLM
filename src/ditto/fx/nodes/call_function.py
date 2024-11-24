@@ -3,6 +3,8 @@ from abc import abstractmethod
 from collections.abc import Callable
 from typing import Any, Literal
 
+from torch.fx.node import Node
+
 from .node_specialization import NodeSpecialization
 
 
@@ -20,3 +22,7 @@ class CallFunction(NodeSpecialization):
     @abstractmethod
     def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         ...
+
+    @classmethod
+    def validate_node(cls, node: Node) -> bool:
+        return super().validate_node(node) and node.target in cls.possible_targets()
