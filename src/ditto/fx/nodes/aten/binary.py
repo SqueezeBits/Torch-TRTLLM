@@ -1,5 +1,7 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 
+from abc import abstractmethod
+
 from pydantic import model_validator
 from torch.fx.node import Node
 from typing_extensions import Self
@@ -20,5 +22,6 @@ class Binary(ATenOp):
         return self
 
     @property
+    @abstractmethod
     def is_commutative(self) -> bool:
-        raise NotImplementedError(f"is_commutative for {type(self).__name__} is not implemented.")
+        ...
