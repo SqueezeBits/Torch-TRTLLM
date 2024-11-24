@@ -26,8 +26,14 @@ from .split import Split
 from .unary import Unary
 from .unary_elementwise import (
     Clone,
+    Elu,
+    Gelu,
+    HardSigmoid,
+    LeakyRelu,
+    Relu,
     Sigmoid,
     Sqrt,
+    Tanh,
     ToCopy,
     UnaryElementwise,
 )
