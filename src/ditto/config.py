@@ -27,6 +27,7 @@ PassName = Literal[
     "FuseMMConstSiblings",
     "FuseReciprocalMul",
     "InsertGatherLastTokenIds",
+    "HerdConstantsToTheRight",
     "MakeWeightsContiguous",
     "ReplaceSDPAByFakeGPTAttentionPlugin",
     "ReplaceSDPAByFakeGPTAttentionPluginV2",

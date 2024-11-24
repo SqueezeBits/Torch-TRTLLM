@@ -24,6 +24,7 @@ from .passes import (
     FuseEquivalentNodes,
     FuseMMConstSiblings,
     FuseReciprocalMul,
+    HerdConstantsToTheRight,
     InsertGatherLastTokenIds,
     ReplaceSDPAByFakeGPTAttentionPlugin,
     ReplaceSDPAByFakeGPTAttentionPluginV2,
@@ -101,6 +102,7 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateNopReshape,
     EliminateNopPermute,
     EliminateUnsqueezeSqueeze,
+    HerdConstantsToTheRight,
     # TODO: improve memory management of the pass `EliminateUnusedWeights`
     # EliminateUnusedWeights,
     # TODO: improve memory management of the pass `MakeWeightsContiguous`
