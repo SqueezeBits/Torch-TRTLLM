@@ -6,10 +6,10 @@ from torch.fx.passes.shape_prop import TensorMetadata
 
 from ...config import GPT_ATTENTION_PLUGIN_DTYPE
 from ..nodes import ScaledDotProductAttention
+from ..subgraphs import Linear
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
 from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata, traceback_reformats
 from .graph_pass import GraphOptimizationPass
-from .subgraphs import LinearSubgraph
 
 
 class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
@@ -148,12 +148,12 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
         return PassResult(graph_module, modified)
 
 
-def find_projection(x: Node) -> LinearSubgraph | None:
+def find_projection(x: Node) -> Linear | None:
     if not (
         ancester_linear_subgraphs := {
             subgraph: depth
             for node, depth in get_ancestors_with_depth(x).items()
-            if (subgraph := LinearSubgraph.configure_from(node))
+            if (subgraph := Linear.configure_from(node))
         }
     ):
         return None

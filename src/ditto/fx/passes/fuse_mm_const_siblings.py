@@ -6,7 +6,7 @@ from torch.fx import Node
 from torch.fx.graph_module import GraphModule
 
 from ...config import MATMUL_FUSION_MAX_OUTPUT_SIZE
-from ..nodes import MMConst
+from ..subgraphs import MMConst
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .node_wise_pass import NodeWiseOptimizationPass
 
@@ -19,10 +19,10 @@ class FuseMMConstSiblings(NodeWiseOptimizationPass):
     @classmethod
     def rewrite(cls, node: Node) -> dict[Node, Node]:
         graph = node.graph
-        children = [child_mm for user in node.users if (child_mm := MMConst.specialize_from(user))]
+        children = [child_mm for user in node.users if (child_mm := MMConst.configure_from(user))]
         if len(children) <= 1:
             return {}
-        first_weight, *other_weights = (child_mm.weight for child_mm in children)
+        first_weight, *other_weights = (child_mm.weight.parameter for child_mm in children)
         if not (
             first_weight.ndim == 2
             and all(
@@ -33,18 +33,18 @@ class FuseMMConstSiblings(NodeWiseOptimizationPass):
         ):
             return {}
 
-        output_sizes = [user.weight.shape[1] for user in children]
+        output_sizes = [user.weight.parameter.shape[1] for user in children]
         if 0 <= MATMUL_FUSION_MAX_OUTPUT_SIZE < sum(output_sizes):
             return {}
 
-        fused_weight = torch.cat([user.weight for user in children], dim=1).contiguous()
-        fused_weight_name = "".join(user.weight_name for user in children)
+        fused_weight = torch.cat([user.weight.parameter for user in children], dim=1).contiguous()
+        fused_weight_name = "".join(user.weight.target for user in children)
         slice_indices = cumulative_sums(output_sizes)
 
-        cls.weights_to_remove.extend(user.weight_name for user in children)
+        cls.weights_to_remove.extend(user.weight.target for user in children)
 
         graph_module.register_parameter(fused_weight_name, torch.nn.Parameter(fused_weight, requires_grad=False))
-        with graph.inserting_before(children[0].node):
+        with graph.inserting_before(children[0].mm.node):
             get_attr = graph.get_attr(fused_weight_name)
             populate_tensor_metadata(get_attr, fused_weight)
             fused_mm = graph.call_function(torch.ops.aten.mm.default, (node, get_attr))
@@ -56,9 +56,9 @@ class FuseMMConstSiblings(NodeWiseOptimizationPass):
             ]
         replacements: dict[Node, Node] = {}
         for user, s in zip(children, slices):
-            if user_meta := get_tensor_metadata(user.node):
+            if user_meta := get_tensor_metadata(user.mm.node):
                 populate_tensor_metadata(s, user_meta)
-            replacements[user.node] = s
+            replacements[user.mm.node] = s
         return replacements
 
     def ensures(self, graph_module: GraphModule) -> None:

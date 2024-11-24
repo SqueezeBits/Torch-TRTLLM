@@ -3,9 +3,9 @@ from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 
 from ...config import INPUT_IDS_UNSQUEEZE_DIM
+from ..subgraphs import Linear
 from ..utils import find_or_create_placeholder_sym_size, get_tensor_metadata, populate_tensor_metadata
 from .graph_pass import GraphOptimizationPass
-from .subgraphs import LinearSubgraph
 
 
 class InsertGatherLastTokenIds(GraphOptimizationPass):
@@ -23,17 +23,17 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
             and (input_ids_size_node := find_or_create_placeholder_sym_size(graph, "input_ids"))
             and (num_seq_node := find_or_create_placeholder_sym_size(graph, "last_token_ids"))
             and (lm_head := find_lm_head(graph))
-            and (input_tensor_meta := get_tensor_metadata(lm_head.input_tensor))
+            and (input_tensor_meta := get_tensor_metadata(lm_head.input_node))
             and isinstance(input_ids_size := input_tensor_meta.shape[input_ids_major_axis], torch.SymInt)
         ):
             return PassResult(graph_module, False)
 
-        with graph.inserting_before(lm_head.input_reshape):
+        with graph.inserting_before(lm_head.input_reshape.node):
             sub = graph.call_function(torch.ops.aten.sub.Scalar, (last_token_ids, 1))
             populate_tensor_metadata(sub, last_token_ids_meta)
             index_select = graph.call_function(
                 torch.ops.aten.index_select.default,
-                (lm_head.input_tensor, input_ids_major_axis, sub),
+                (lm_head.input_node, input_ids_major_axis, sub),
             )
             populate_tensor_metadata(
                 index_select,
@@ -44,10 +44,7 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
                     *input_tensor_meta.shape[input_ids_major_axis + 1 :],
                 ),
             )
-        lm_head.input_tensor.replace_all_uses_with(
-            index_select,
-            delete_user_cb=lambda node: node is not index_select,
-        )
+        lm_head.input_reshape.node.replace_input_with(lm_head.input_node, index_select)
         node_indices = {node: i for i, node in enumerate(graph.nodes)}
         input_ids_size_node.replace_all_uses_with(
             num_seq_node, delete_user_cb=lambda node: node_indices.get(node, -1) > node_indices[index_select]
@@ -69,9 +66,9 @@ def replace_size(node: Node, target: torch.SymInt, replacement: torch.SymInt) ->
         replace_size(user, target, replacement)
 
 
-def find_lm_head(graph: Graph) -> LinearSubgraph | None:
+def find_lm_head(graph: Graph) -> Linear | None:
     nodes = list(graph.nodes)
     for node in nodes[::-1]:
-        if subgraph := LinearSubgraph.configure_from(node):
+        if subgraph := Linear.configure_from(node):
             return subgraph
     return None

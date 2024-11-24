@@ -17,6 +17,7 @@ from .fuse_consecutive_to_copys import FuseConsecutiveToCopys
 from .fuse_equivalent_nodes import FuseEquivalentNodes
 from .fuse_mm_const_siblings import FuseMMConstSiblings
 from .fuse_reciprocal_mul import FuseReciprocalMul
+from .herd_constants_to_the_right import HerdConstantsToTheRight
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
 from .make_weights_contiguous import MakeWeightsContiguous
 from .replace_sdpa_by_fake_gpt_attention_plugin import ReplaceSDPAByFakeGPTAttentionPlugin
