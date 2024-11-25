@@ -15,6 +15,7 @@ from .passes import (
     EliminateNopReshape,
     EliminateNopSlice,
     EliminateUnsqueezeSqueeze,
+    FixActivationPrecision,
     FixSliceRanges,
     FuseConsecutivePermutes,
     FuseConsecutiveReshapes,
@@ -94,6 +95,8 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateNopCatOrStack,
     EliminateCopy,
     EliminateNopSlice,
+    # TODO: make the dtype of `FixActivationPrecision` configurable
+    FixActivationPrecision,
     FixSliceRanges,
     FuseConsecutiveReshapes,
     FuseConsecutivePermutes,

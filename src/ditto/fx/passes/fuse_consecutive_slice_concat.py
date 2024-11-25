@@ -7,8 +7,7 @@ from .node_wise_pass import NodeWiseOptimizationPass
 class FuseConsecutiveSliceConcat(NodeWiseOptimizationPass):
     """Fuse consecutive slices and concat that is identical to nop."""
 
-    @classmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         if not (
             (cat_node := Cat.specialize_from(node))
             and (slice_nodes := [s for x in cat_node.tensors if (s := Slice.specialize_from(x))])

@@ -9,8 +9,7 @@ from .node_wise_pass import NodeWiseOptimizationPass
 class CastFP16MMToFP32(NodeWiseOptimizationPass):
     """Prepend input FP32-castings and append output FP16-casting for a FP16 matmul node."""
 
-    @classmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         if not (
             (mm := MM.specialize_from(node))
             and (mm_output := get_tensor_metadata(mm.node))

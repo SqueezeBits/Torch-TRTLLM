@@ -18,6 +18,7 @@ PassName = Literal[
     "EliminateUnsqueezeSqueeze",
     "EliminateUnusedWeights",
     "FixSliceRanges",
+    "FixActivationPrecision",
     "FuseConsecutivePermutes",
     "FuseConsecutiveReshapes",
     "FuseConsecutiveSliceConcat",

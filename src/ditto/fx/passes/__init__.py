@@ -8,6 +8,7 @@ from .eliminate_nop_reshape import EliminateNopReshape
 from .eliminate_nop_slice import EliminateNopSlice
 from .eliminate_unsqueeze_squeeze import EliminateUnsqueezeSqueeze
 from .eliminate_unused_weights import EliminateUnusedWeights
+from .fix_activation_precision import FixActivationPrecision
 from .fix_slice_ranges import FixSliceRanges
 from .fuse_consecutive_permutes import FuseConsecutivePermutes
 from .fuse_consecutive_reshapes import FuseConsecutiveReshapes

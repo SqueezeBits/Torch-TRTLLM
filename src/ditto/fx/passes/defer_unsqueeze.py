@@ -28,15 +28,15 @@ from .node_wise_pass import NodeWiseOptimizationPass
 class DeferUnsqueeze(GraphOptimizationPass):
     """Defer the unsqueeze ops as much as possible."""
 
-    def __init__(self, depth: int = 0) -> None:
-        super().__init__(depth)
+    def __init__(self, *, depth: int = 0) -> None:
+        super().__init__(depth=depth)
         self.pass_manager = PassManager(
             passes=[
-                SwapUnsqueezeWithEmbeddingNode(depth + 1),
-                SwapUnsqueezeWithBinaryElementwiseNode(depth + 1),
-                SwapUnsqueezeWithIndexSelectNode(depth + 1),
-                SwapUnsqueezeWithReductionIntListNode(depth + 1),
-                SwapUnsqueezeWithUnaryElementwiseNode(depth + 1),
+                SwapUnsqueezeWithEmbeddingNode(depth=depth + 1),
+                SwapUnsqueezeWithBinaryElementwiseNode(depth=depth + 1),
+                SwapUnsqueezeWithIndexSelectNode(depth=depth + 1),
+                SwapUnsqueezeWithReductionIntListNode(depth=depth + 1),
+                SwapUnsqueezeWithUnaryElementwiseNode(depth=depth + 1),
             ],
             steps=FX_TRANSFORM_MAXIMUM_ITERATION,
         )
@@ -121,17 +121,16 @@ class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodeWiseOptimizationPass):
         first_unsqueeze = [*parents.values()][0]
         return hotfix, first_unsqueeze.dim
 
-    @classmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         if not (
-            (child := cls.verify_child(node))
-            and (unsqueezes := cls.verify_parents(child))
+            (child := self.verify_child(node))
+            and (unsqueezes := self.verify_parents(child))
             and callable(child_target := child.target)
         ):
             return {}
 
         try:
-            hotfix, unsqueeze_dim = cls.get_hotfix_and_unsqueeze_dim(unsqueezes, child)
+            hotfix, unsqueeze_dim = self.get_hotfix_and_unsqueeze_dim(unsqueezes, child)
         except EarlyExit as e:
             return e.replacements
         first_unsqueeze = [*unsqueezes.values()][0]

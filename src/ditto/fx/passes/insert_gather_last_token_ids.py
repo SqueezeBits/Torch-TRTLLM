@@ -60,8 +60,6 @@ def replace_size(node: Node, target: torch.SymInt, replacement: torch.SymInt) ->
             tensor_meta,
             shape=torch.Size(replacement if s == target else s for s in tensor_meta.shape),  # type: ignore
         )
-        if "val" in node.meta:
-            _ = node.meta.pop("val")
     for user in node.users:
         replace_size(user, target, replacement)
 

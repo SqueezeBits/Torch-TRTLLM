@@ -9,8 +9,7 @@ from .node_wise_pass import NodeWiseOptimizationPass
 class FuseConsecutiveSplitConcat(NodeWiseOptimizationPass):
     """Fuse consecutive split and concat that is identical to nop."""
 
-    @classmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         if not (
             (split := Split.specialize_from(node))
             and (

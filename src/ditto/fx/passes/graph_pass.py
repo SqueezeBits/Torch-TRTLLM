@@ -8,7 +8,7 @@ from ...config import DEFAULT_DEVICE
 
 
 class GraphOptimizationPass(PassBase):
-    def __init__(self, depth: int = 0) -> None:
+    def __init__(self, *, depth: int = 0) -> None:
         super().__init__()
         self.depth = depth
 

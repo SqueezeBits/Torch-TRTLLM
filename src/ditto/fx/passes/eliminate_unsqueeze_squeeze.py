@@ -7,8 +7,7 @@ from .node_wise_pass import NodeWiseOptimizationPass
 class EliminateUnsqueezeSqueeze(NodeWiseOptimizationPass):
     """Eliminate unsqueeze followed by a squeeze with the same dim."""
 
-    @classmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         if not (
             (squeeze := SqueezeDim.specialize_from(node))
             and (unsqueeze := Unsqueeze.specialize_from(squeeze.this))

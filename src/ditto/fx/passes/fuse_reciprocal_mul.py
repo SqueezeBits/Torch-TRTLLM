@@ -10,8 +10,7 @@ from .node_wise_pass import NodeWiseOptimizationPass
 class FuseReciprocalMul(NodeWiseOptimizationPass):
     """Rewrite `(1 / y) * x` or `x * (1 / y)` as `x / y`."""
 
-    @classmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         if not ((mul := Mul.specialize_from(node)) and (inputs := find_div_inputs_if_fusible_with(mul))):
             return {}
         graph = node.graph
@@ -46,6 +45,6 @@ def is_equivalent_to_reciprocal(div: Div) -> bool:
     lhs = div.this
     if isinstance(lhs, Number) and lhs == 1:
         return True
-    if isinstance(lhs, Node) and (getattr := GetAttr.specialize_from(lhs)):
-        return torch.all(getattr.parameter, 1).item()  # type: ignore[return-value]
+    if isinstance(lhs, Node) and (get_attr := GetAttr.specialize_from(lhs)):
+        return torch.all(get_attr.parameter, 1).item()  # type: ignore[return-value]
     return False

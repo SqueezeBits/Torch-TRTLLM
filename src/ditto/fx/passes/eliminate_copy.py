@@ -8,8 +8,7 @@ from .node_wise_pass import NodeWiseOptimizationPass
 class EliminateCopy(NodeWiseOptimizationPass):
     """Replace tensor copying ops if the original tensor is not used elsewhere."""
 
-    @classmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         if not is_equivalent_to_copy(node):
             return {}
         return {node: node.all_input_nodes[0]}

@@ -8,8 +8,7 @@ from .node_wise_pass import NodeWiseOptimizationPass
 class HerdConstantsToTheRight(NodeWiseOptimizationPass):
     """Herd constant inputs of binary nodes to the right hand side."""
 
-    @classmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         if not (
             (binary := Binary.specialize_from(node))
             and binary.is_commutative
