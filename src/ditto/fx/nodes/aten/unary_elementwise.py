@@ -16,48 +16,8 @@ class Clone(UnaryElementwise):
     memory_format: torch.memory_format | None = None
 
 
-@UnaryElementwise.final(torch.ops.aten.elu.default)
-class Elu(UnaryElementwise):
-    ...
-
-
-@UnaryElementwise.final(torch.ops.aten.gelu.default)
-class Gelu(UnaryElementwise):
-    ...
-
-
-@UnaryElementwise.final(torch.ops.aten.hardsigmoid.default)
-class HardSigmoid(UnaryElementwise):
-    ...
-
-
-@UnaryElementwise.final(torch.ops.aten.leaky_relu.default)
-class LeakyRelu(UnaryElementwise):
-    ...
-
-
-@UnaryElementwise.final(torch.ops.aten.relu.default)
-class Relu(UnaryElementwise):
-    ...
-
-
-@UnaryElementwise.final(torch.ops.aten.sigmoid.default)
-class Sigmoid(UnaryElementwise):
-    ...
-
-
-@UnaryElementwise.final(torch.ops.aten.softplus.default)
-class Softplus(UnaryElementwise):
-    ...
-
-
 @UnaryElementwise.final(torch.ops.aten.sqrt.default)
 class Sqrt(UnaryElementwise):
-    ...
-
-
-@UnaryElementwise.final(torch.ops.aten.tanh.default)
-class Tanh(UnaryElementwise):
     ...
 
 

@@ -1,3 +1,13 @@
+from .activations import (
+    Activation,
+    Elu,
+    Gelu,
+    HardSigmoid,
+    LeakyRelu,
+    Relu,
+    Sigmoid,
+    Tanh,
+)
 from .aten_op import ATenOp
 from .binary import Binary
 from .binary_elementwise import (
@@ -26,14 +36,7 @@ from .split import Split
 from .unary import Unary
 from .unary_elementwise import (
     Clone,
-    Elu,
-    Gelu,
-    HardSigmoid,
-    LeakyRelu,
-    Relu,
-    Sigmoid,
     Sqrt,
-    Tanh,
     ToCopy,
     UnaryElementwise,
 )
