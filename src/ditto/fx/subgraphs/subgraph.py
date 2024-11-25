@@ -13,13 +13,17 @@ class Subgraph(StrictlyTyped, ABC):
     def configure_from(cls, node: Node) -> Self | None:
         ...
 
+    @property
+    def nodes(self) -> list[Node]:
+        return [
+            attr.node
+            for name in self.model_dump().keys()
+            if isinstance((attr := getattr(self, name, None)), NodeSpecialization)
+        ]
+
     def __hash__(self) -> int:
         assert (
-            node_hashes := [
-                hash(attr.node)
-                for name in self.model_dump().keys()
-                if isinstance((attr := getattr(self, name, None)), NodeSpecialization)
-            ]
+            node_hashes := [hash(node) for node in self.nodes]
         ), f"{type(self).__name__} does not have specialized node attributes."
         return sum(node_hashes)
 
