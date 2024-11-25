@@ -9,7 +9,7 @@ from ...config import FX_TRANSFORM_MAXIMUM_ITERATION
 from ..nodes import Activation
 from ..subgraphs import ActivationSubgraph, Silu
 from ..utils import get_tensor_metadata, populate_tensor_metadata
-from .node_wise_pass import GraphOptimizationPass, NodeWiseOptimizationPass
+from .node_wise_pass import GraphOptimizationPass, ModifiedInsideThePass, NodewiseOptimizationPass, NodewisePassResult
 
 
 class FixActivationPrecision(GraphOptimizationPass):
@@ -29,7 +29,7 @@ class FixActivationPrecision(GraphOptimizationPass):
         return self.pass_manager(graph_module)
 
 
-class FixPrecision(NodeWiseOptimizationPass):
+class FixPrecision(NodewiseOptimizationPass):
     def __init__(self, *, to: torch.dtype = torch.float16, depth: int = 0) -> None:
         super().__init__(depth=depth)
         self.dtype = to
@@ -50,7 +50,7 @@ class FixSubgraphPrecision(Generic[SubgraphType], FixPrecision):
         ), f"Wrong specialization of {cls.__name__} with type parameter {type_arg}"
         return type_arg
 
-    def rewrite(self, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (subgraph := self.subgraph_class.configure_from(node))
             and (input_meta := get_tensor_metadata(subgraph.input))
@@ -65,7 +65,7 @@ class FixSubgraphPrecision(Generic[SubgraphType], FixPrecision):
             if not (meta := get_tensor_metadata(n)):
                 continue
             populate_tensor_metadata(n, meta, dtype=self.dtype)
-        return {subgraph.input: subgraph.input}
+        return {node: ModifiedInsideThePass()}
 
 
 class FixSiluPrecision(FixSubgraphPrecision[Silu]):
@@ -73,7 +73,7 @@ class FixSiluPrecision(FixSubgraphPrecision[Silu]):
 
 
 class FixNodePrecision(FixPrecision):
-    def rewrite(self, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (activation := Activation.specialize_from(node))
             and (input_meta := get_tensor_metadata(activation.this))
@@ -85,7 +85,7 @@ class FixNodePrecision(FixPrecision):
         insert_cast(activation.this, self.dtype)
         insert_cast(activation.node, self.dtype)
         populate_tensor_metadata(node, output_meta, dtype=self.dtype)
-        return {node: node}
+        return {node: ModifiedInsideThePass()}
 
 
 def insert_cast(x: Node, dtype: torch.dtype) -> None:

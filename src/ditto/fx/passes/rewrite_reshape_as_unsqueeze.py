@@ -3,13 +3,13 @@ from torch.fx import Node
 
 from ..nodes import Reshape
 from ..utils import get_tensor_metadata, populate_tensor_metadata
-from .node_wise_pass import NodeWiseOptimizationPass
+from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class RewriteReshapeAsUnsqueeze(NodeWiseOptimizationPass):
+class RewriteReshapeAsUnsqueeze(NodewiseOptimizationPass):
     """Rewrite reshape as unsqueeze if possible."""
 
-    def rewrite(self, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (reshape := Reshape.specialize_from(node))
             and (input_tensor := get_tensor_metadata(reshape.this))
@@ -24,7 +24,7 @@ class RewriteReshapeAsUnsqueeze(NodeWiseOptimizationPass):
                 unsqueeze.stack_trace = f"{node.stack_trace}, pass: rewritten by {__name__}"
             if t := get_tensor_metadata(node):
                 populate_tensor_metadata(unsqueeze, t)
-        return {node: unsqueeze}
+        return {node: ReplaceAllUses(by=unsqueeze)}
 
 
 def find_unsqueeze_dim(

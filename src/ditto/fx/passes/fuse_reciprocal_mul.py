@@ -4,13 +4,13 @@ from torch.fx import Node
 from ...types import Number
 from ..nodes import Div, GetAttr, Mul
 from ..utils import get_tensor_metadata, populate_tensor_metadata
-from .node_wise_pass import NodeWiseOptimizationPass
+from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class FuseReciprocalMul(NodeWiseOptimizationPass):
+class FuseReciprocalMul(NodewiseOptimizationPass):
     """Rewrite `(1 / y) * x` or `x * (1 / y)` as `x / y`."""
 
-    def rewrite(self, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not ((mul := Mul.specialize_from(node)) and (inputs := find_div_inputs_if_fusible_with(mul))):
             return {}
         graph = node.graph
@@ -23,7 +23,7 @@ class FuseReciprocalMul(NodeWiseOptimizationPass):
                 fused_div.stack_trace = (
                     f"{stack_trace}, pass: {node} and {div.node} fused by {FuseReciprocalMul.__name__}"
                 )
-        return {node: fused_div}
+        return {node: ReplaceAllUses(by=fused_div)}
 
 
 def find_div_inputs_if_fusible_with(mul: Mul) -> tuple[Node | Number, Div] | None:

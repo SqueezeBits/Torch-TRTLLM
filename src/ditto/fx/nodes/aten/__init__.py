@@ -20,6 +20,7 @@ from .binary_elementwise import (
     Sub,
 )
 from .combine import Cat, Combine, Stack
+from .copy_like import Clone, CopyLike, ToCopy
 from .embedding import Embedding
 from .index_select_node import IndexSelectNode
 from .mm import MM
@@ -35,8 +36,6 @@ from .slice import Slice
 from .split import Split
 from .unary import Unary
 from .unary_elementwise import (
-    Clone,
     Sqrt,
-    ToCopy,
     UnaryElementwise,
 )
