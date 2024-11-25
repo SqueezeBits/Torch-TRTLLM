@@ -1,13 +1,13 @@
 from torch.fx import Node
 
 from ..nodes import Cat, Slice
-from .node_wise_pass import NodeWiseOptimizationPass
+from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class FuseConsecutiveSliceConcat(NodeWiseOptimizationPass):
+class FuseConsecutiveSliceConcat(NodewiseOptimizationPass):
     """Fuse consecutive slices and concat that is identical to nop."""
 
-    def rewrite(self, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (cat_node := Cat.specialize_from(node))
             and (slice_nodes := [s for x in cat_node.tensors if (s := Slice.specialize_from(x))])
@@ -16,7 +16,7 @@ class FuseConsecutiveSliceConcat(NodeWiseOptimizationPass):
             and are_consecutive(slice_nodes)
         ):
             return {}
-        return {cat_node.node: slice_nodes[0].this}
+        return {cat_node.node: ReplaceAllUses(by=slice_nodes[0].this)}
 
 
 def are_consecutive(slice_nodes: list[Slice]) -> bool:

@@ -6,17 +6,17 @@ from torch.fx.graph_module import GraphModule
 from ...config import MATMUL_FUSION_MAX_OUTPUT_SIZE
 from ..subgraphs import MMConst
 from ..utils import get_tensor_metadata, populate_tensor_metadata
-from .node_wise_pass import NodeWiseOptimizationPass
+from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class FuseMMConstSiblings(NodeWiseOptimizationPass):
+class FuseMMConstSiblings(NodewiseOptimizationPass):
     """Fuse a group of constant matmul nodes sharing the same input tensor and reduction dimension size."""
 
     def __init__(self, *, depth: int = 0) -> None:
         super().__init__(depth=depth)
         self.weights_to_remove: list[str] = []
 
-    def rewrite(self, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         graph = node.graph
         children = [child_mm for user in node.users if (child_mm := MMConst.configure_from(user))]
         if len(children) <= 1:
@@ -53,12 +53,12 @@ class FuseMMConstSiblings(NodeWiseOptimizationPass):
                 graph.call_function(torch.ops.aten.slice.Tensor, (fused_mm, 1, slice_indices[i], slice_indices[i + 1]))
                 for i in range(len(slice_indices) - 1)
             ]
-        replacements: dict[Node, Node] = {}
+        results: dict[Node, NodewisePassResult] = {}
         for user, s in zip(children, slices):
             if user_meta := get_tensor_metadata(user.mm.node):
                 populate_tensor_metadata(s, user_meta)
-            replacements[user.mm.node] = s
-        return replacements
+            results[user.mm.node] = ReplaceAllUses(by=s)
+        return results
 
     def ensures(self, graph_module: GraphModule) -> None:
         # TODO: make sure that the weights are actually freed

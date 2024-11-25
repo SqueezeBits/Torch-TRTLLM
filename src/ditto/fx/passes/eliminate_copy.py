@@ -1,23 +1,13 @@
-import torch
 from torch.fx import Node
 
-from ..utils import get_tensor_metadata
-from .node_wise_pass import NodeWiseOptimizationPass
+from ..nodes import CopyLike
+from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class EliminateCopy(NodeWiseOptimizationPass):
+class EliminateCopy(NodewiseOptimizationPass):
     """Replace tensor copying ops if the original tensor is not used elsewhere."""
 
-    def rewrite(self, node: Node) -> dict[Node, Node]:
-        if not is_equivalent_to_copy(node):
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+        if not ((copy := CopyLike.specialize_from(node)) and copy.is_pure_copy):
             return {}
-        return {node: node.all_input_nodes[0]}
-
-
-def is_equivalent_to_copy(node: Node) -> bool:
-    return node.target is torch.ops.aten.clone.default or (
-        node.target is torch.ops.aten._to_copy.default
-        and (input_metadata := get_tensor_metadata(node.all_input_nodes[0])) is not None
-        and isinstance(target_dtype := node.kwargs.get("dtype", None), torch.dtype)
-        and target_dtype == input_metadata.dtype
-    )
+        return {node: ReplaceAllUses(by=copy.this)}

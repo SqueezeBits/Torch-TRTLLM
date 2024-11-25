@@ -22,7 +22,7 @@ from ..nodes import (
 )
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .graph_pass import GraphOptimizationPass
-from .node_wise_pass import NodeWiseOptimizationPass
+from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class DeferUnsqueeze(GraphOptimizationPass):
@@ -49,12 +49,12 @@ SomeATenOpNode = TypeVar("SomeATenOpNode", bound=CallFunction)
 
 
 class EarlyExit(Exception):  # noqa: N818
-    def __init__(self, replacements: dict[Node, Node], *args: object) -> None:
+    def __init__(self, replacements: dict[Node, NodewisePassResult], *args: object) -> None:
         super().__init__(*args)
         self.replacements = replacements
 
 
-class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodeWiseOptimizationPass):
+class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodewiseOptimizationPass):
     """Swap the unsqueeze followed by a child node."""
 
     @classmethod
@@ -121,7 +121,7 @@ class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodeWiseOptimizationPass):
         first_unsqueeze = [*parents.values()][0]
         return hotfix, first_unsqueeze.dim
 
-    def rewrite(self, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (child := self.verify_child(node))
             and (unsqueezes := self.verify_parents(child))
@@ -148,7 +148,7 @@ class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodeWiseOptimizationPass):
             append_stack_trace(new_unsqueeze, first_unsqueeze.node, DeferUnsqueeze.__name__)
             if original_output:
                 _ = populate_tensor_metadata(new_unsqueeze, original_output)
-        return {child.node: new_unsqueeze}
+        return {child.node: ReplaceAllUses(by=new_unsqueeze)}
 
 
 class SwapUnsqueezeWithEmbeddingNode(SwapUnsqueezeWith[Embedding]):
@@ -262,8 +262,8 @@ class SwapUnsqueezeWithReductionIntListNode(SwapUnsqueezeWith[Reduction]):
 
         if unsqueeze_dim == child_dim:
             if child.keepdim:
-                raise EarlyExit({child.node: first_unsqueeze.node})
-            raise EarlyExit({child.node: first_unsqueeze.this})
+                raise EarlyExit({child.node: ReplaceAllUses(by=first_unsqueeze.node)})
+            raise EarlyExit({child.node: ReplaceAllUses(by=first_unsqueeze.this)})
 
         if unsqueeze_dim < child_dim:
             child_dim -= 1

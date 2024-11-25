@@ -1,13 +1,13 @@
 from torch.fx import Node
 
 from ..nodes import SqueezeDim, Unsqueeze
-from .node_wise_pass import NodeWiseOptimizationPass
+from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class EliminateUnsqueezeSqueeze(NodeWiseOptimizationPass):
+class EliminateUnsqueezeSqueeze(NodewiseOptimizationPass):
     """Eliminate unsqueeze followed by a squeeze with the same dim."""
 
-    def rewrite(self, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (squeeze := SqueezeDim.specialize_from(node))
             and (unsqueeze := Unsqueeze.specialize_from(squeeze.this))
@@ -16,4 +16,4 @@ class EliminateUnsqueezeSqueeze(NodeWiseOptimizationPass):
             and squeeze_dim == unsqueeze_dim
         ):
             return {}
-        return {node: unsqueeze.this}
+        return {node: ReplaceAllUses(by=unsqueeze.this)}

@@ -3,13 +3,13 @@ from torch.fx import Node
 
 from ..nodes import MM
 from ..utils import get_tensor_metadata, populate_tensor_metadata
-from .node_wise_pass import NodeWiseOptimizationPass
+from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class CastFP16MMToFP32(NodeWiseOptimizationPass):
+class CastFP16MMToFP32(NodewiseOptimizationPass):
     """Prepend input FP32-castings and append output FP16-casting for a FP16 matmul node."""
 
-    def rewrite(self, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (mm := MM.specialize_from(node))
             and (mm_output := get_tensor_metadata(mm.node))
@@ -28,4 +28,4 @@ class CastFP16MMToFP32(NodeWiseOptimizationPass):
             populate_tensor_metadata(mm_fp32, mm_output, dtype=torch.float32)
             output_cast = graph.call_function(torch.ops.aten._to_copy.default, (mm_fp32,), {"dtype": torch.float16})
             populate_tensor_metadata(output_cast, mm_output)
-        return {node: output_cast}
+        return {node: ReplaceAllUses(by=output_cast)}

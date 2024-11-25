@@ -3,13 +3,13 @@ import operator
 from torch.fx import Node
 
 from ..nodes import Cat, Split
-from .node_wise_pass import NodeWiseOptimizationPass
+from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class FuseConsecutiveSplitConcat(NodeWiseOptimizationPass):
+class FuseConsecutiveSplitConcat(NodewiseOptimizationPass):
     """Fuse consecutive split and concat that is identical to nop."""
 
-    def rewrite(self, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (split := Split.specialize_from(node))
             and (
@@ -29,4 +29,4 @@ class FuseConsecutiveSplitConcat(NodeWiseOptimizationPass):
             for user in getitem.users
             if (cat := Cat.specialize_from(user)) and cat.tensors == getitems and cat.dim == split.dim
         }
-        return {cat_node: split.this for cat_node in cat_nodes}
+        return {cat_node: ReplaceAllUses(by=split.this) for cat_node in cat_nodes}

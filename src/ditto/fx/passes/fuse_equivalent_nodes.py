@@ -1,33 +1,41 @@
 from torch.fx import GraphModule, Node
-from torch.fx.passes.infra.pass_base import PassResult
 
-from .graph_pass import GraphOptimizationPass
+from ditto.fx.passes.node_wise_pass import NodewisePassResult
+
+from .node_wise_pass import NodewiseOptimizationPass, ReplaceAllUses
 
 
-class FuseEquivalentNodes(GraphOptimizationPass):
+class FuseEquivalentNodes(NodewiseOptimizationPass):
     """Fuse nodes performing identical operations for the same input node."""
 
-    def call(self, graph_module: GraphModule) -> PassResult:
-        graph = graph_module.graph
-        nodes = {n: i for i, n in enumerate(graph.nodes)}
+    def __init__(self, *, depth: int = 0) -> None:
+        super().__init__(depth=depth)
+        self.nodes: dict[Node, int] | None = None
 
-        def get_closest_input_node(n: Node) -> Node:
-            return max(n.all_input_nodes, key=lambda x: nodes.get(x, -1))
+    def requires(self, graph_module: GraphModule) -> None:
+        self.nodes = {n: i for i, n in enumerate(graph_module.graph.nodes)}
 
-        modified = False
-        for node in nodes:
-            if not (
-                groups := [
-                    group for group in group_users(node) if len(group) > 1 and get_closest_input_node(group[0]) == node
-                ]
-            ):
-                continue
-            for group in groups:
-                rep = group[0]
-                rep.stack_trace = f"{rep.stack_trace}, pass: fused by {__name__}"
-                is_replaced = [len(user.replace_all_uses_with(rep)) > 0 for user in group[1:]]
-                modified = modified or any(is_replaced)
-        return PassResult(graph_module, modified)
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+        if not (
+            groups := [
+                group for group in group_users(node) if len(group) > 1 and self.get_closest_input_node(group[0]) == node
+            ]
+        ):
+            return {}
+
+        results: dict[Node, NodewisePassResult] = {}
+        for group in groups:
+            rep = group[0]
+            rep.stack_trace = f"{rep.stack_trace}, pass: fused by {__name__}"
+            results.update({user: ReplaceAllUses(by=rep) for user in group[1:]})
+        return results
+
+    def ensures(self, graph_module: GraphModule) -> None:
+        self.nodes = None
+
+    def get_closest_input_node(self, n: Node) -> Node:
+        assert (nodes := self.nodes) is not None
+        return max(n.all_input_nodes, key=lambda x: nodes.get(x, -1))
 
 
 def group_users(node: Node) -> list[list[Node]]:
