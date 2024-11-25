@@ -1,8 +1,8 @@
 from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_base import PassResult
 
+from ..nodes import Reshape, Unsqueeze
 from .graph_pass import GraphOptimizationPass
-from .specialized_node import ReshapeNode, UnsqueezeNode
 
 
 class FuseConsecutiveReshapes(GraphOptimizationPass):
@@ -13,12 +13,12 @@ class FuseConsecutiveReshapes(GraphOptimizationPass):
         modified = False
         for node in graph.nodes:
             if not (
-                (_ := ReshapeNode.specialize_from(node) or UnsqueezeNode.specialize_from(node))
+                (_ := Reshape.specialize_from(node) or Unsqueeze.specialize_from(node))
                 and (
                     children := [
                         child_reshape
                         for child_node in node.users
-                        if (child_reshape := ReshapeNode.specialize_from(child_node))
+                        if (child_reshape := Reshape.specialize_from(child_node))
                     ]
                 )
             ):

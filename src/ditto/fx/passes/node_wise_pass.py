@@ -34,9 +34,8 @@ class NodeWiseOptimizationPass(GraphOptimizationPass):
 
         return PassResult(graph_module, modified)
 
-    @classmethod
     @abstractmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         """Rewrite the given node.
 
         Args:

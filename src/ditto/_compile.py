@@ -39,6 +39,7 @@ from .debug import (
     save_onnx_without_weights,
 )
 from .fx.optimize import get_optimization_transform
+from .fx.utils import populate_tensor_metadata
 from .interpreter import TRTLLMInterpreter
 
 CURRENT_DEVICE = Device._current_device()
@@ -162,6 +163,7 @@ def get_inlined_graph_module(
     post_inline_pass_manager = DynamoPassManager.build_from_passlist(
         [
             *post_lowering_passes,
+            remove_val_from_node_metadata,
             get_optimization_transform(
                 skipped_optimizers,
                 allow_matmul_in_fp16=allow_matmul_in_fp16,
@@ -188,3 +190,13 @@ def ignore_symbolic_shapes_warning() -> Generator[None, None, None]:
         yield None
     finally:
         log.setLevel(log_level)
+
+
+def remove_val_from_node_metadata(graph_module: GraphModule) -> GraphModule:
+    for node in graph_module.graph.nodes:
+        val: torch.Tensor | None = None
+        if isinstance(node.meta.get("val"), torch.Tensor):
+            val = node.meta.pop("val")
+        if not isinstance(node.meta.get("tensor_meta"), TensorMetadata) and val is not None:
+            populate_tensor_metadata(node, val)
+    return graph_module

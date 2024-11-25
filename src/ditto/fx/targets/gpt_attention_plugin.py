@@ -19,9 +19,9 @@ from torch_tensorrt._enums import dtype as torch_trt_dtype
 from transformers import PretrainedConfig
 from typing_extensions import Self
 
-from ..config import GPT_ATTENTION_PLUGIN_DTYPE
-from ..debug import open_debug_artifact
-from ..types import StrictlyTyped
+from ...config import GPT_ATTENTION_PLUGIN_DTYPE
+from ...debug import open_debug_artifact
+from ...types import StrictlyTyped
 
 
 class Llama3ScalingConfig(StrictlyTyped):
@@ -220,16 +220,16 @@ class GPTAttentionPluginInputs(StrictlyTyped):
         return cls(**nodes)
 
 
-class FakeGPTAttentionPlugin(GPTAttentionPluginFields):
+class GPTAttentionPlugin(GPTAttentionPluginFields):
     @property
     def __name__(self) -> str:
-        return "fake_gpt_attention_plugin"
+        return "gpt_attention_plugin"
 
     def __hash__(self) -> int:
-        return hash(f"fake_gpt_attention_plugin_{self.layer_idx}")
+        return hash(f"gpt_attention_plugin_{self.layer_idx}")
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, FakeGPTAttentionPlugin):
+        if isinstance(other, GPTAttentionPlugin):
             return self is other
         return False
 

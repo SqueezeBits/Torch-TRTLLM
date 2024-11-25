@@ -20,7 +20,7 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
     const_args: dict[str, gs.Constant] = {}
 
     def create_variable(node: Node, name: str | None = None) -> gs.Variable:
-        assert (meta := get_tensor_metadata(node))
+        assert (meta := get_tensor_metadata(node)), f"{node.format_node()} does not have tensor metadata"
         return gs.Variable(
             name or node.name,
             dtype._from(meta.dtype).to(np.dtype),
@@ -34,7 +34,7 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
         param: torch.nn.Parameter | None = None,
     ) -> gs.Constant:
         if param is None:
-            assert (meta := get_tensor_metadata(node))
+            assert (meta := get_tensor_metadata(node)), f"{node.format_node()} does not have tensor metadata"
             values = torch.zeros(meta.shape, dtype=meta.dtype).numpy()
         else:
             values = param.numpy(force=True)

@@ -1,3 +1,5 @@
+# pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false, reportArgumentType=false
+
 from inspect import isclass
 from types import UnionType
 from typing import Any, Generic, TypeVar, get_args
@@ -7,37 +9,34 @@ from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_manager import PassManager, PassResult
 
 from ...config import FX_TRANSFORM_MAXIMUM_ITERATION
+from ...types import Number
+from ..nodes import (
+    BinaryElementwise,
+    CallFunction,
+    Embedding,
+    IndexSelectNode,
+    NodeSpecialization,
+    Reduction,
+    UnaryElementwise,
+    Unsqueeze,
+)
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .graph_pass import GraphOptimizationPass
 from .node_wise_pass import NodeWiseOptimizationPass
-from .specialized_node import (
-    ATenOpNode,
-    BinaryElementwiseNode,
-    BinaryElementwiseWithAlphaNode,
-    EmbeddingNode,
-    IndexSelectNode,
-    Number,
-    ReductionIntListNode,
-    SpecializedNode,
-    ToCopyNode,
-    UnaryElementwiseNode,
-    UnsqueezeNode,
-)
 
 
 class DeferUnsqueeze(GraphOptimizationPass):
     """Defer the unsqueeze ops as much as possible."""
 
-    def __init__(self, depth: int = 0) -> None:
-        super().__init__(depth)
+    def __init__(self, *, depth: int = 0) -> None:
+        super().__init__(depth=depth)
         self.pass_manager = PassManager(
             passes=[
-                SwapUnsqueezeWithEmbeddingNode(depth + 1),
-                SwapUnsqueezeWithBinaryElementwiseNode(depth + 1),
-                SwapUnsqueezeWithIndexSelectNode(depth + 1),
-                SwapUnsqueezeWithReductionIntListNode(depth + 1),
-                SwapUnsqueezeWithToCopyNode(depth + 1),
-                SwapUnsqueezeWithUnaryElementwiseNode(depth + 1),
+                SwapUnsqueezeWithEmbeddingNode(depth=depth + 1),
+                SwapUnsqueezeWithBinaryElementwiseNode(depth=depth + 1),
+                SwapUnsqueezeWithIndexSelectNode(depth=depth + 1),
+                SwapUnsqueezeWithReductionIntListNode(depth=depth + 1),
+                SwapUnsqueezeWithUnaryElementwiseNode(depth=depth + 1),
             ],
             steps=FX_TRANSFORM_MAXIMUM_ITERATION,
         )
@@ -46,7 +45,7 @@ class DeferUnsqueeze(GraphOptimizationPass):
         return self.pass_manager(graph_module)
 
 
-SomeATenOpNode = TypeVar("SomeATenOpNode", bound=ATenOpNode)
+SomeATenOpNode = TypeVar("SomeATenOpNode", bound=CallFunction)
 
 
 class EarlyExit(Exception):  # noqa: N818
@@ -60,10 +59,11 @@ class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodeWiseOptimizationPass):
 
     @classmethod
     def parent_keys(cls) -> tuple[str, ...]:
-        return ("x",)
+        return ("this",)
 
     @classmethod
     def verify_child(cls, node: Node) -> SomeATenOpNode | None:
+        # pylint: disable-next=no-member
         type_arg = get_args(cls.__orig_bases__[0])[0]  # type: ignore[attr-defined]  # noqa: N806
         if isinstance(type_arg, UnionType):
             type_args = get_args(type_arg)
@@ -71,23 +71,23 @@ class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodeWiseOptimizationPass):
             type_args = (type_arg,)
         for type_arg in type_args:
             assert isclass(type_arg) and issubclass(
-                type_arg, SpecializedNode
+                type_arg, NodeSpecialization
             ), f"Wrong specialization of {cls.__name__} with type parameter {type_arg}"
             if n := type_arg.specialize_from(node):
                 return n  # type: ignore[return-value]
         return None
 
     @classmethod
-    def verify_parents(cls, child: SomeATenOpNode) -> dict[str, UnsqueezeNode]:
-        parents: dict[str, UnsqueezeNode] = {}
+    def verify_parents(cls, child: SomeATenOpNode) -> dict[str, Unsqueeze]:
+        parents: dict[str, Unsqueeze] = {}
         for input_name in cls.parent_keys():
             assert hasattr(child, input_name), (
-                f"No such attribute found in class {type(child).__name__}. "
+                f"No such attribute found in class {type(child).__name__}: {input_name}. "
                 f"Fix the implementation of the method {cls.__name__}.parent_keys"
             )
             if not (
                 isinstance(the_input := getattr(child, input_name), Node)
-                and (unsqueeze := UnsqueezeNode.specialize_from(the_input))
+                and (unsqueeze := Unsqueeze.specialize_from(the_input))
             ):
                 continue
             parents[input_name] = unsqueeze
@@ -96,7 +96,8 @@ class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodeWiseOptimizationPass):
     @classmethod
     def get_hotfix_and_unsqueeze_dim(
         cls,
-        parents: dict[str, UnsqueezeNode],
+        parents: dict[str, Unsqueeze],
+        # pylint: disable-next=unused-argument
         child: SomeATenOpNode,
     ) -> tuple[dict[str, Any], int]:
         """Get the hotfix for the new child node and the unsqueeze dimension for the new unsqueeze node.
@@ -116,21 +117,20 @@ class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodeWiseOptimizationPass):
         """
         if not parents:
             raise EarlyExit({})
-        hotfix: dict[str, Any] = {name: parents[name].x for name in cls.parent_keys() if name in parents}
+        hotfix: dict[str, Any] = {name: parents[name].this for name in cls.parent_keys() if name in parents}
         first_unsqueeze = [*parents.values()][0]
         return hotfix, first_unsqueeze.dim
 
-    @classmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         if not (
-            (child := cls.verify_child(node))
-            and (unsqueezes := cls.verify_parents(child))
+            (child := self.verify_child(node))
+            and (unsqueezes := self.verify_parents(child))
             and callable(child_target := child.target)
         ):
             return {}
 
         try:
-            hotfix, unsqueeze_dim = cls.get_hotfix_and_unsqueeze_dim(unsqueezes, child)
+            hotfix, unsqueeze_dim = self.get_hotfix_and_unsqueeze_dim(unsqueezes, child)
         except EarlyExit as e:
             return e.replacements
         first_unsqueeze = [*unsqueezes.values()][0]
@@ -151,7 +151,7 @@ class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodeWiseOptimizationPass):
         return {child.node: new_unsqueeze}
 
 
-class SwapUnsqueezeWithEmbeddingNode(SwapUnsqueezeWith[EmbeddingNode]):
+class SwapUnsqueezeWithEmbeddingNode(SwapUnsqueezeWith[Embedding]):
     """Swap the unsqueeze followed by embedding.default node."""
 
     @classmethod
@@ -165,7 +165,7 @@ class SwapUnsqueezeWithIndexSelectNode(SwapUnsqueezeWith[IndexSelectNode]):
     @classmethod
     def get_hotfix_and_unsqueeze_dim(
         cls,
-        parents: dict[str, UnsqueezeNode],
+        parents: dict[str, Unsqueeze],
         child: IndexSelectNode,
     ) -> tuple[dict[str, Any], int]:
         """Further handle axes while swapping an unsqueeze and an index_select node.
@@ -214,14 +214,14 @@ class SwapUnsqueezeWithIndexSelectNode(SwapUnsqueezeWith[IndexSelectNode]):
         return hotfix, unsqueeze_dim
 
 
-class SwapUnsqueezeWithReductionIntListNode(SwapUnsqueezeWith[ReductionIntListNode]):
+class SwapUnsqueezeWithReductionIntListNode(SwapUnsqueezeWith[Reduction]):
     """Swap the unsqueeze followed by a reduction node with dim param."""
 
     @classmethod
     def get_hotfix_and_unsqueeze_dim(
         cls,
-        parents: dict[str, UnsqueezeNode],
-        child: ReductionIntListNode,
+        parents: dict[str, Unsqueeze],
+        child: Reduction,
     ) -> tuple[dict[str, Any], int]:
         """Further handle axes while swapping an unsqueeze and a reduction node.
 
@@ -263,7 +263,7 @@ class SwapUnsqueezeWithReductionIntListNode(SwapUnsqueezeWith[ReductionIntListNo
         if unsqueeze_dim == child_dim:
             if child.keepdim:
                 raise EarlyExit({child.node: first_unsqueeze.node})
-            raise EarlyExit({child.node: first_unsqueeze.x})
+            raise EarlyExit({child.node: first_unsqueeze.this})
 
         if unsqueeze_dim < child_dim:
             child_dim -= 1
@@ -273,15 +273,15 @@ class SwapUnsqueezeWithReductionIntListNode(SwapUnsqueezeWith[ReductionIntListNo
         return hotfix, unsqueeze_dim
 
 
-class SwapUnsqueezeWithBinaryElementwiseNode(SwapUnsqueezeWith[BinaryElementwiseNode | BinaryElementwiseWithAlphaNode]):
+class SwapUnsqueezeWithBinaryElementwiseNode(SwapUnsqueezeWith[BinaryElementwise]):
     """Swap the unsqueeze followed by a binary elementwise node possibly with alpha."""
 
     @classmethod
     def parent_keys(cls) -> tuple[str, ...]:
-        return ("x", "y")
+        return ("this", "other")
 
     @classmethod
-    def verify_parents(cls, child: BinaryElementwiseNode | BinaryElementwiseWithAlphaNode) -> dict[str, UnsqueezeNode]:
+    def verify_parents(cls, child: BinaryElementwise) -> dict[str, Unsqueeze]:
         unsqueezes = super().verify_parents(child)
         # for a binary elementwise child, the pass should run only if the inputs must be one of the form:
         # i) (unsqueeze, unsqueeze_1)
@@ -300,7 +300,7 @@ class SwapUnsqueezeWithBinaryElementwiseNode(SwapUnsqueezeWith[BinaryElementwise
                 return {}
         elif len(unsqueezes) == 1:
             # The case ii)
-            if isinstance(the_other_input := getattr(child, "x" if "y" in unsqueezes else "y"), Number):
+            if isinstance(the_other_input := getattr(child, "this" if "other" in unsqueezes else "other"), Number):
                 return unsqueezes
             if not (
                 isinstance(the_other_input, Node)
@@ -322,12 +322,8 @@ class SwapUnsqueezeWithBinaryElementwiseNode(SwapUnsqueezeWith[BinaryElementwise
         return unsqueezes
 
 
-class SwapUnsqueezeWithUnaryElementwiseNode(SwapUnsqueezeWith[UnaryElementwiseNode]):
+class SwapUnsqueezeWithUnaryElementwiseNode(SwapUnsqueezeWith[UnaryElementwise]):
     """Swap the unsqueeze followed by a unary elementwise node."""
-
-
-class SwapUnsqueezeWithToCopyNode(SwapUnsqueezeWith[ToCopyNode]):
-    """Swap the unsqueeze followed by _to_copy.default node."""
 
 
 def get_squeezed_shape(shape: torch.Size, dim: int) -> torch.Size:

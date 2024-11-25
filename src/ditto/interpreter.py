@@ -31,7 +31,7 @@ from .debug import (
     open_debug_artifact,
     save_onnx_without_weights,
 )
-from .fake_targets import FakeGPTAttentionPlugin
+from .fx.targets import GPTAttentionPlugin
 
 
 class TRTLLMInterpreter(TRTInterpreter):
@@ -159,8 +159,8 @@ class TRTLLMInterpreter(TRTInterpreter):
 
     def call_function(self, target: Target, args: Any, kwargs: Any) -> Any:
         converter_packet = (
-            DYNAMO_CONVERTERS.get_unvalidated(FakeGPTAttentionPlugin)
-            if isinstance(target, FakeGPTAttentionPlugin)
+            DYNAMO_CONVERTERS.get_unvalidated(GPTAttentionPlugin)
+            if isinstance(target, GPTAttentionPlugin)
             else DYNAMO_CONVERTERS.get(self._cur_node)
         )
         if converter_packet is None:

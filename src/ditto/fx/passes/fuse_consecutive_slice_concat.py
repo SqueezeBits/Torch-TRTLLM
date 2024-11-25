@@ -1,28 +1,27 @@
 from torch.fx import Node
 
+from ..nodes import Cat, Slice
 from .node_wise_pass import NodeWiseOptimizationPass
-from .specialized_node import CatNode, SliceNode
 
 
 class FuseConsecutiveSliceConcat(NodeWiseOptimizationPass):
     """Fuse consecutive slices and concat that is identical to nop."""
 
-    @classmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         if not (
-            (cat_node := CatNode.specialize_from(node))
-            and (slice_nodes := [s for x in cat_node.tensors if (s := SliceNode.specialize_from(x))])
+            (cat_node := Cat.specialize_from(node))
+            and (slice_nodes := [s for x in cat_node.tensors if (s := Slice.specialize_from(x))])
             and len(slice_nodes) == len(cat_node.tensors)
             and has_same_values(slice_nodes[0].nonnegative_dim, cat_node.nonnegative_dim)
             and are_consecutive(slice_nodes)
         ):
             return {}
-        return {cat_node.node: slice_nodes[0].x}
+        return {cat_node.node: slice_nodes[0].this}
 
 
-def are_consecutive(slice_nodes: list[SliceNode]) -> bool:
+def are_consecutive(slice_nodes: list[Slice]) -> bool:
     return (
-        len({s.x for s in slice_nodes}) == 1
+        len({s.this for s in slice_nodes}) == 1
         and len(dim_sizes := {s.dim_size for s in slice_nodes}) == 1
         and None not in dim_sizes
         and all(s.step == 1 for s in slice_nodes)

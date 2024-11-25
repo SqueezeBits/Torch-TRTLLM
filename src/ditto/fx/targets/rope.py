@@ -31,7 +31,7 @@ def get_llama2_rope_replacment_graph() -> Graph:
     x = graph.placeholder("x")
     cos = graph.placeholder("cos")
     sin = graph.placeholder("sin")
-    output = graph.call_function(fake_llama2_rope, (x, cos, sin))
+    output = graph.call_function(llama2_rope, (x, cos, sin))
     _ = graph.output((output,))
     return graph
 
@@ -49,7 +49,7 @@ def register_rope_target(t: PositionEmbeddingType) -> Callable[[RopeImplType], R
 
 
 @register_rope_target(PositionEmbeddingType.rope_gpt_neox)
-def fake_llama2_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+def llama2_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
     return (x * cos) + (rotate_half(x) * sin)
 
 

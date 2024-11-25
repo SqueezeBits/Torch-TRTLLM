@@ -8,11 +8,10 @@ from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 
 from ...config import GPT_ATTENTION_PLUGIN_DTYPE
-from ...fake_targets import FakeGPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
-from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata
+from ..nodes import ScaledDotProductAttention
+from ..targets import GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
+from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .graph_pass import GraphOptimizationPass
-from .specialized_node import SDPANode
-from .subgraphs import LinearSubgraph
 
 
 class ReplaceSDPAByFakeGPTAttentionPluginV2(GraphOptimizationPass):
@@ -26,7 +25,7 @@ class ReplaceSDPAByFakeGPTAttentionPluginV2(GraphOptimizationPass):
         modified = False
         for node in graph.nodes:
             if not (
-                (sdpa := SDPANode.specialize_from(node))
+                (sdpa := ScaledDotProductAttention.specialize_from(node))
                 and sdpa.is_eligible_for_gpt_attention_plugin
                 and (query := get_tensor_metadata(sdpa.query))
                 and (key := get_tensor_metadata(sdpa.key))
@@ -61,7 +60,7 @@ class ReplaceSDPAByFakeGPTAttentionPluginV2(GraphOptimizationPass):
                 )
                 global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph, is_rope=rope_config.is_rope)
 
-            fake_gpt_attention_plugin = FakeGPTAttentionPlugin(
+            fake_gpt_attention_plugin = GPTAttentionPlugin(
                 layer_idx=layer_idx,
                 num_heads=Hq,
                 num_kv_heads=H,
@@ -128,15 +127,3 @@ class ReplaceSDPAByFakeGPTAttentionPluginV2(GraphOptimizationPass):
             node.replace_all_uses_with(output)
             modified = True
         return PassResult(graph_module, modified)
-
-
-def find_projection(x: Node) -> LinearSubgraph | None:
-    if not (
-        ancester_linear_subgraphs := {
-            subgraph: depth
-            for node, depth in get_ancestors_with_depth(x).items()
-            if (subgraph := LinearSubgraph.configure_from(node))
-        }
-    ):
-        return None
-    return min(ancester_linear_subgraphs, key=lambda subgraph: ancester_linear_subgraphs[subgraph])

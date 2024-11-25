@@ -1,26 +1,25 @@
 import torch
 from torch.fx import Node
 
+from ..nodes import Reshape
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .node_wise_pass import NodeWiseOptimizationPass
-from .specialized_node import ReshapeNode
 
 
 class RewriteReshapeAsUnsqueeze(NodeWiseOptimizationPass):
     """Rewrite reshape as unsqueeze if possible."""
 
-    @classmethod
-    def rewrite(cls, node: Node) -> dict[Node, Node]:
+    def rewrite(self, node: Node) -> dict[Node, Node]:
         if not (
-            (reshape := ReshapeNode.specialize_from(node))
-            and (input_tensor := get_tensor_metadata(reshape.x))
+            (reshape := Reshape.specialize_from(node))
+            and (input_tensor := get_tensor_metadata(reshape.this))
             and (target_shape := reshape.target_shape) is not None
             and (dim := find_unsqueeze_dim(input_tensor.shape, target_shape)) is not None
         ):
             return {}
         graph = node.graph
         with graph.inserting_before(node):
-            unsqueeze = graph.call_function(torch.ops.aten.unsqueeze.default, (reshape.x, dim))
+            unsqueeze = graph.call_function(torch.ops.aten.unsqueeze.default, (reshape.this, dim))
             if node.stack_trace:
                 unsqueeze.stack_trace = f"{node.stack_trace}, pass: rewritten by {__name__}"
             if t := get_tensor_metadata(node):

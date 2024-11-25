@@ -15,6 +15,7 @@ from .passes import (
     EliminateNopReshape,
     EliminateNopSlice,
     EliminateUnsqueezeSqueeze,
+    FixActivationPrecision,
     FixSliceRanges,
     FuseConsecutivePermutes,
     FuseConsecutiveReshapes,
@@ -24,6 +25,7 @@ from .passes import (
     FuseEquivalentNodes,
     FuseMMConstSiblings,
     FuseReciprocalMul,
+    HerdConstantsToTheRight,
     InsertGatherLastTokenIds,
     ReplaceSDPAByFakeGPTAttentionPlugin,
     ReplaceSDPAByFakeGPTAttentionPluginV2,
@@ -93,6 +95,8 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateNopCatOrStack,
     EliminateCopy,
     EliminateNopSlice,
+    # TODO: make the dtype of `FixActivationPrecision` configurable
+    FixActivationPrecision,
     FixSliceRanges,
     FuseConsecutiveReshapes,
     FuseConsecutivePermutes,
@@ -101,6 +105,7 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateNopReshape,
     EliminateNopPermute,
     EliminateUnsqueezeSqueeze,
+    HerdConstantsToTheRight,
     # TODO: improve memory management of the pass `EliminateUnusedWeights`
     # EliminateUnusedWeights,
     # TODO: improve memory management of the pass `MakeWeightsContiguous`
