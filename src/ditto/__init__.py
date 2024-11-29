@@ -1,4 +1,5 @@
-from . import constants  # noqa: I001
+# Note: logging must be imported first to set up the loguru logging.
+from . import logging, constants  # noqa: I001
 from ._convert import convert
 from ._export import export
 from ._inline import inline
