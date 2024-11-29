@@ -10,20 +10,20 @@ from loguru import logger  # noqa: E402
 logger.add(
     sys.stdout,
     filter=lambda record: record["level"].name in ("INFO", "SUCCESS"),
-    format="ditto:{elapsed} [{level}] <lvl>{message}</lvl>",
+    format="<m>ditto:{elapsed}</m> [{level}] <lvl>{message}</lvl>",
     colorize=True,
 )
 
 logger.add(
     sys.stdout,
     filter=lambda record: record["level"].name in ("TRACE", "DEBUG"),
-    format="ditto:{elapsed} [{level}] [{name} - {function}:{line}] <lvl>{message}</lvl>",
+    format="<m>ditto:{elapsed}</m> [{level}] [{name} - {function}:{line}] <lvl>{message}</lvl>",
     colorize=True,
 )
 
 logger.add(
     sys.stderr,
     filter=lambda record: record["level"].name in ("WARNING", "ERROR", "CRITICAL"),
-    format="ditto:{elapsed} [{level}] [{name} - {function}:{line}] <lvl>{message}</lvl>",
+    format="<m>ditto:{elapsed}</m> [{level}] [{name} - {function}:{line}] <lvl>{message}</lvl>",
     colorize=True,
 )
