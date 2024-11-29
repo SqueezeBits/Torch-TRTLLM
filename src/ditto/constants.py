@@ -6,7 +6,11 @@ import tensorrt as trt
 import torch
 import torch_tensorrt as torch_trt
 
+from loguru import logger
+
+
 PassName = Literal[
+    "AddTRTLLMInputs",
     "CastFP16MMToFP32",
     "ConstantSharing",
     "DeferUnsqueeze",
@@ -62,16 +66,19 @@ DEFAULT_TRT_PROFILING_VERBOSITY: trt.ProfilingVerbosity
 The default profiling verbosity for TRT engines.
 """
 try:
-    DEFAULT_TRT_PROFILING_VERBOSITY = (
-        PROFILING_VERBOSITIES := {
-            "DETAILED": trt.ProfilingVerbosity.DETAILED,
-            "LAYER_NAMES_ONLY": trt.ProfilingVerbosity.LAYER_NAMES_ONLY,
-            "NONE": trt.ProfilingVerbosity.NONE,
-        }
-    )[os.getenv("DEFAULT_TRT_PROFILING_VERBOSITY", "LAYER_NAMES_ONLY" if DEBUG_ARTIFACTS_DIR is None else "DETAILED")]
+    if (_verbosity := os.getenv("DEFAULT_TRT_PROFILING_VERBOSITY")) is not None:
+        DEFAULT_TRT_PROFILING_VERBOSITY = trt.ProfilingVerbosity.__members__[_verbosity]
+    else:
+        DEFAULT_TRT_PROFILING_VERBOSITY = trt.ProfilingVerbosity.LAYER_NAMES_ONLY
+        if DEBUG_ARTIFACTS_DIR is not None:
+            DEFAULT_TRT_PROFILING_VERBOSITY = trt.ProfilingVerbosity.DETAILED
+            logger.info(
+                "Automatically setting 'DEFAULT_TRT_PROFILING_VERBOSITY' to 'DETAILED' as 'DEBUG_ARTIFACT_DIR' is set."
+            )
 except KeyError as e:
-    # pylint: disable-next=used-before-assignment
-    raise ValueError(f"DEFAULT_TRT_PROFILING_VERBOSITY must be one of {', '.join(PROFILING_VERBOSITIES.keys())}") from e
+    raise ValueError(
+        f"DEFAULT_TRT_PROFILING_VERBOSITY must be one of {', '.join(trt.ProfilingVerbosity.__members__.keys())}"
+    ) from e
 
 FX_TRANSFORM_MAXIMUM_ITERATION = int(os.getenv("FX_TRANSFORM_MAXIMUM_ITERATION", "100"))
 """Maximum iteration limit for FX graph transformations."""
@@ -99,9 +106,6 @@ If there are fusible matmul siblings with the total output dimention size larger
 they will not be fused by the pass `FuseMMConstSiblings`.
 If this value is negative, all matmul siblings will be fused.
 """
-
-if "LOGURU_LEVEL" not in os.environ:
-    os.environ["LOGURU_LEVEL"] = os.getenv("DITTO_LOG_LEVEL", "INFO")
 
 
 # Temporary workaround for config compilation
