@@ -1,6 +1,5 @@
 import torch
-from loguru import logger
-from torch.fx import Graph, Node
+from torch.fx import Node
 from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
 
 
@@ -46,27 +45,21 @@ def get_ancestors_with_depth(node: Node) -> dict[Node, int]:
     return ancestors
 
 
-def find_or_create_placeholder_sym_size(graph: Graph, name: str, dim: int = 0) -> Node | None:
-    if name not in (placeholders := {node.name: node for node in graph.nodes if node.op == "placeholder"}):
-        logger.warning(f"No such placholder: {name}")
-        return None
-    placeholder = placeholders[name]
-    for user in placeholder.users:
-        if user.target is torch.ops.aten.sym_size.int and len(user.args) == 2 and user.args[1] == dim:
-            return user
-    last_placeholder = [*placeholders.values()][-1]
-    with graph.inserting_after(last_placeholder):
-        node = graph.call_function(torch.ops.aten.sym_size.int, (placeholder, dim))
-        if (metadata := get_tensor_metadata(placeholder)) and isinstance(s := metadata.shape[dim], torch.SymInt):
-            node.meta["val"] = s
-        return node
-
-
 def get_tensor_metadata(node: Node) -> TensorMetadata | None:
     if isinstance(tensor_meta := node.meta.get("tensor_meta"), TensorMetadata):
         return tensor_meta
     if isinstance(val := node.meta.get("val"), torch.Tensor):
         return _extract_tensor_metadata(val)
+    if isinstance(val, torch.SymInt) or node.target is torch.ops.aten.sym_size.int:
+        return TensorMetadata(
+            shape=torch.Size(()),
+            dtype=torch.int64,
+            requires_grad=False,
+            stride=(),
+            memory_format=None,
+            is_quantized=False,
+            qparams={},
+        )
     return None
 
 
@@ -74,7 +67,7 @@ def populate_tensor_metadata(
     node: Node,
     tensor_metadata: TensorMetadata | torch.Tensor,
     *,
-    shape: torch.Size | tuple[int, ...] | None = None,
+    shape: torch.Size | tuple[int | torch.SymInt, ...] | None = None,
     dtype: torch.dtype | None = None,
 ) -> TensorMetadata:
     if isinstance(tensor_metadata, torch.Tensor):
@@ -82,7 +75,7 @@ def populate_tensor_metadata(
     tensor_meta_as_dict = tensor_metadata._asdict()
     if shape is not None:
         if not isinstance(shape, torch.Size):
-            shape = torch.Size(shape)
+            shape = torch.Size(shape)  # type: ignore[arg-type]
         tensor_meta_as_dict["shape"] = shape
     if dtype is not None:
         tensor_meta_as_dict["dtype"] = dtype
