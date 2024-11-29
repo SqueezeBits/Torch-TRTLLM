@@ -5,7 +5,7 @@ from pydantic import TypeAdapter
 from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 
-from ...arguments import DynamicDimensionType, TRTLLMArgumentHint
+from ...arguments import TRTLLMArgumentHint
 from ...constants import INPUT_IDS, INPUT_IDS_UNSQUEEZE_DIM
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .graph_pass import GraphOptimizationPass
@@ -46,10 +46,7 @@ class AddTRTLLMInputs(GraphOptimizationPass):
                 continue
             with graph.inserting_after(last_placeholder):
                 placeholder = graph.placeholder(name)
-                shape = tuple(s.sym_int if isinstance(s, DynamicDimensionType) else s for s in hint.shape)
-                populate_tensor_metadata(
-                    placeholder, torch.zeros((), dtype=hint.dtype), shape=shape  # type: ignore[arg-type]
-                )
+                populate_tensor_metadata(placeholder, shape=hint.symbolic_shape, dtype=hint.dtype)
                 modified = True
 
         if (
