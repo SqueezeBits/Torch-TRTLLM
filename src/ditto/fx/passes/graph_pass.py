@@ -37,10 +37,10 @@ def log_memory_footprint(graph_module: GraphModule) -> None:
     except StopIteration:
         device = torch.device(DEFAULT_DEVICE)
 
-    logger.opt(lazy=True).debug(
+    logger.opt(lazy=True).trace(
         "Allocated Memory: {x:.2f} MB", x=lambda: torch.cuda.memory_allocated(device) / 1024**2
     )
-    logger.opt(lazy=True).debug(
+    logger.opt(lazy=True).trace(
         "Max Allocated Memory: {x:.2f} MB", x=lambda: torch.cuda.max_memory_allocated(device) / 1024**2
     )
-    logger.opt(lazy=True).debug("Cached Memory: {x:.2f} MB", x=lambda: torch.cuda.memory_reserved(device) / 1024**2)
+    logger.opt(lazy=True).trace("Cached Memory: {x:.2f} MB", x=lambda: torch.cuda.memory_reserved(device) / 1024**2)

@@ -36,7 +36,7 @@ class DynamicDimensionType(BaseModel, ABC):
                     f"allowed. Existing one was {repr(cached_self)} but tried to declare another one with the same "
                     f"name: {repr(self)}"
                 )
-            logger.debug(f"Using cached dynamic dimension {self.name}")
+            logger.trace(f"Using cached dynamic dimension {self.name}")
             return cached_self
         self.CACHE[self.name] = self
         return self

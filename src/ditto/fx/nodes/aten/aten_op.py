@@ -50,13 +50,13 @@ class ATenOp(CallFunction):
     @classmethod
     def _register(cls, subclass: type[ATenOpSubclass], *targets: OpOverload) -> None:
         assert issubclass(subclass, cls)
-        logger.debug(f"Registering {subclass.__name__} at {cls.__name__}")
+        logger.trace(f"Registering {subclass.__name__} at {cls.__name__}")
         for target in targets:
             assert not (
                 target in cls._REGISTRY and cls._REGISTRY[target] is not subclass
             ), f"{target} is already registered as {cls._REGISTRY[target]} in {cls.__name__}"
             cls._REGISTRY[target] = subclass  # type: ignore[assignment]
-            logger.debug(f"  * {target}")
+            logger.trace(f"  * {target}")
         if (superclass := cls.__base__) and issubclass(superclass, ATenOp):
             # pylint: disable-next=no-member
             superclass._register(subclass, *targets)

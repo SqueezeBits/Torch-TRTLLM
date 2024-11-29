@@ -205,7 +205,7 @@ class EngineInfo(EngineComponent):
         def add_as_constant(t: ETensor) -> None:
             if t.name in tensors:
                 redefinition_counts[t.name] = count = redefinition_counts.get(t.name, 0) + 1
-                logger.debug(f"Redefined {count} times: {t}")
+                logger.trace(f"Redefined {count} times: {t}")
             name = get_tensor_key(t)
             tensors[name] = gs.Constant(
                 name=name,
@@ -240,7 +240,7 @@ class EngineInfo(EngineComponent):
             )
 
         for layer in self.layers:
-            logger.debug(f"Adding {layer} as a node")
+            logger.trace(f"Adding {layer} as a node")
             add_as_node(layer)
 
         def json_dumps(obj: Any) -> str:
