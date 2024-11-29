@@ -8,7 +8,7 @@ from torch.fx.graph import CodeGen
 from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from transformers import PreTrainedModel
 
-from ._compile import compile
+from ._convert import convert
 from ._export import export
 from ._inline import inline
 from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
@@ -51,7 +51,7 @@ def trtllm_build(
     if debug_node_names:
         output_names.extend(debug_node_names)
 
-    return compile(
+    return convert(
         graph_module,
         argument_hint,
         trt_config,

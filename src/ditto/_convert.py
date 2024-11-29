@@ -19,7 +19,7 @@ CURRENT_DEVICE = Device._current_device()
 
 
 @_is_building  # type: ignore
-def compile(
+def convert(
     graph_module: GraphModule,
     argument_hint: TRTLLMArgumentHint,
     trt_config: TensorRTConfig,
