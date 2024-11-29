@@ -27,7 +27,7 @@ class TensorRTBuilderConfig(StrictlyTyped):
     engine_capability: trt.EngineCapability = trt.EngineCapability.STANDARD
     flags: TensorRTBuilderFlags = Field(default_factory=TensorRTBuilderFlags)
     hardware_compatibility_level: trt.HardwareCompatibilityLevel = trt.HardwareCompatibilityLevel.NONE
-    int8_calibrator: trt.IInt8Calibrator | None = None
+    int8_calibrator: trt.IInt8Calibrator | None = Field(default=None, deprecated=True)
     max_aux_streams: int = -1
     plugins_to_serialize: list[str] = Field(default_factory=list)
     profile_stream: int = 0
@@ -40,8 +40,12 @@ class TensorRTBuilderConfig(StrictlyTyped):
 
     def copy_to(self, native_config: trt.IBuilderConfig) -> None:
         for name, value in self.model_dump().items():
+            # Skip deprecated option `int8_calibrator` if its value is None
+            # Otherwise, the TensorRT will let the user know the option is deprecated
+            if name == "int8_calibrator" and value is None:
+                continue
             if hasattr(native_config, name) and getattr(native_config, name) != value:
-                logger.debug(f"Setting '{name}' of trt.IBuilderConfig to {value}")
+                logger.debug(f"Setting attribute '{name}' of trt.IBuilderConfig to {value}")
                 setattr(native_config, name, value)
         for pool, pool_size in self.memory_pool_limits.items():
             logger.debug(f"Setting memory limit of '{pool}' to {pool_size}")
@@ -83,7 +87,7 @@ class TensorRTBuilderConfig(StrictlyTyped):
     def adjust_progress_monitor(self) -> Self:
         if self.profiling_verbosity == trt.ProfilingVerbosity.DETAILED and self.progress_monitor is None:
             logger.info(
-                f"Automatically setting progress monitor to {BuildMonitor.__name__} "
+                f"Automatically setting progress monitor to {BuildMonitor.__name__.removeprefix('_')} "
                 "as the profiling verbosity is 'DETAILED'"
             )
             self.progress_monitor = BuildMonitor()

@@ -43,8 +43,7 @@ def convert(
             output_names=output_names,
         )
         result = interpreter.run()
-        with trt.Runtime(TRT_LOGGER) as runtime:
-            engine: trt.ICudaEngine = runtime.deserialize_cuda_engine(result.serialized_engine)
+        engine = trt.Runtime(TRT_LOGGER).deserialize_cuda_engine(result.serialized_engine)
         save_for_debug("trt_engine", engine)
         return engine
     except UnsupportedOperatorException as e:

@@ -1,3 +1,4 @@
+import io
 import json
 import os
 from contextlib import nullcontext
@@ -104,8 +105,9 @@ def save_engine_for_debug(
     with open_debug_artifact(f"{name}.json") as f:
         if f:
             if isinstance(engine, trt.IHostMemory):
-                with trt.Runtime(TRT_LOGGER) as runtime:
-                    engine = runtime.deserialize_cuda_engine(engine)
+                with io.BytesIO() as engine_bytes:
+                    engine_bytes.write(engine)
+                    engine = trt.Runtime(TRT_LOGGER).deserialize_cuda_engine(engine_bytes.getvalue())
             inspector = engine.create_engine_inspector()
             engine_info_dict = json.loads(inspector.get_engine_information(trt.LayerInformationFormat.JSON))
             json.dump(engine_info_dict, f, indent=2, sort_keys=True)

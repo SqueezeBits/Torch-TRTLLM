@@ -311,7 +311,7 @@ def get_shape_ranges(
     optimization_profiles: list[trt.IOptimizationProfile],
 ) -> list[ShapeRanges]:
     logger.info(
-        "You can ignore the following error messages starting with 'IOptimizationProfile::getDimensions: Error Code 4: "
+        "You can ignore the following error messages 'IOptimizationProfile::getDimensions: Error Code 4: "
         "API Usage Error (...)', which are caused by inputs and outputs without optimization profiles."
     )
     return [
