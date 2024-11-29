@@ -4,7 +4,7 @@ from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.shape_prop import TensorMetadata
 
-from ...config import GPT_ATTENTION_PLUGIN_DTYPE
+from ...constants import GPT_ATTENTION_PLUGIN_DTYPE
 from ..nodes import ScaledDotProductAttention
 from ..subgraphs import Linear
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
@@ -70,7 +70,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 )
                 graph_module.register_parameter("rotary_inv_freq", rotary_inv_freq)
                 graph_module.register_parameter("rotary_cos_sin", rotary_cos_sin)
-                last_placeholder = [n for n in graph.nodes if n.op == "placeholder"][-1]
+                last_placeholder = graph.find_nodes(op="placeholder")[-1]
                 with graph.inserting_after(last_placeholder):
                     populate_tensor_metadata(graph.get_attr("rotary_inv_freq"), rotary_inv_freq)
                     populate_tensor_metadata(graph.get_attr("rotary_cos_sin"), rotary_cos_sin)

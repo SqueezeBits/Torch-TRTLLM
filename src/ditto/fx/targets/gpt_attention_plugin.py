@@ -19,7 +19,7 @@ from torch_tensorrt._enums import dtype as torch_trt_dtype
 from transformers import PretrainedConfig
 from typing_extensions import Self
 
-from ...config import GPT_ATTENTION_PLUGIN_DTYPE
+from ...constants import GPT_ATTENTION_PLUGIN_DTYPE
 from ...debug import open_debug_artifact
 from ...types import StrictlyTyped
 
@@ -206,7 +206,7 @@ class GPTAttentionPluginInputs(StrictlyTyped):
 
     @classmethod
     def find_from(cls, graph: Graph, is_rope: bool) -> Self:
-        existing_placeholders = {p.name: p for p in graph.nodes if p.op == "placeholder"}
+        existing_placeholders = {p.name: p for p in graph.find_nodes(op="placeholder")}
         get_attr_nodes = {n.name: n for n in graph.nodes if n.op == "get_attr"}
         excluded = set() if is_rope else {"rotary_inv_freq", "rotary_cos_sin"}
         nodes = {

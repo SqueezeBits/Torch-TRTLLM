@@ -4,7 +4,7 @@ from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
 
-from ...config import DEFAULT_DEVICE
+from ...constants import DEFAULT_DEVICE
 
 
 class GraphOptimizationPass(PassBase):

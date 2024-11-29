@@ -5,7 +5,7 @@ import torch
 from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_manager import PassManager, PassResult
 
-from ...config import FX_TRANSFORM_MAXIMUM_ITERATION
+from ...constants import FX_TRANSFORM_MAXIMUM_ITERATION
 from ..nodes import Activation
 from ..subgraphs import ActivationSubgraph, Silu
 from ..utils import get_tensor_metadata, populate_tensor_metadata

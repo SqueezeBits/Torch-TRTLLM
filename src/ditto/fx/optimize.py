@@ -5,8 +5,10 @@ from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_manager import PassManager
 from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
 
-from ..config import AUTO_DETECT_ROPE_SUBGRAPH, FX_TRANSFORM_MAXIMUM_ITERATION, PassName
+from ..arguments import TRTLLMArgumentHint
+from ..constants import AUTO_DETECT_ROPE_SUBGRAPH, FX_TRANSFORM_MAXIMUM_ITERATION, PassName
 from .passes import (
+    AddTRTLLMInputs,
     CastFP16MMToFP32,
     DeferUnsqueeze,
     EliminateCopy,
@@ -33,21 +35,27 @@ from .passes import (
     RewriteReshapeAsUnsqueeze,
     WrapRoPESubgraphs,
 )
+from .passes.defer_unsqueeze import SwapUnsqueezeWithSymSizeInt
 from .passes.graph_pass import GraphOptimizationPass
 
 
 def get_optimization_transform(
-    skipped_optimizers: list[PassName] | None = None,
+    argument_hint: TRTLLMArgumentHint,
     *,
+    skipped_optimizers: list[PassName] | None = None,
     allow_matmul_in_fp16: bool = False,
+    allow_activation_in_fp16: bool = True,
 ) -> Callable[[GraphModule], GraphModule]:
     """Optimize the given graph module inplace.
 
     Args:
+        argument_hint (TRTLLMArgumentHint): the type hints for TRTLLM inputs
         skipped_optimizers (list[PassName] | None, optional): the names of optimization passes to skip.
             Defaults to None.
         allow_matmul_in_fp16 (bool, optional): whether to allow matrix multiplication to be performed in FP16 precision.
             Defaults to False.
+        allow_activation_in_fp16 (bool, optional): whether to allow activations (a.k.a. non-linearities) to be
+            performed in FP16 precision. Defaults to True.
 
     Returns:
         Callable[[GraphModule], GraphModule]: the function that applies FX optimization passes to the given graph module
@@ -55,8 +63,10 @@ def get_optimization_transform(
     return compose(
         get_level1_transform(skipped_optimizers),
         get_trtllm_conversion_transform(
-            skipped_optimizers,
+            argument_hint,
+            skipped_optimizers=skipped_optimizers,
             allow_matmul_in_fp16=allow_matmul_in_fp16,
+            allow_activation_in_fp16=allow_activation_in_fp16,
         ),
         get_level2_transform(skipped_optimizers),
     )
@@ -95,8 +105,6 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateNopCatOrStack,
     EliminateCopy,
     EliminateNopSlice,
-    # TODO: make the dtype of `FixActivationPrecision` configurable
-    FixActivationPrecision,
     FixSliceRanges,
     FuseConsecutiveReshapes,
     FuseConsecutivePermutes,
@@ -124,13 +132,21 @@ LEVEL2_PASSES: tuple[type[GraphOptimizationPass], ...] = (
 
 
 def get_trtllm_conversion_transform(
-    skipped_optimizers: list[PassName] | None = None,
+    argument_hint: TRTLLMArgumentHint,
     *,
+    skipped_optimizers: list[PassName] | None = None,
     allow_matmul_in_fp16: bool = False,
+    allow_activation_in_fp16: bool = True,
 ) -> Callable[[GraphModule], GraphModule]:
-    passes = list(TRTLLM_CONVERSION_PASSES)
+    passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
+        AddTRTLLMInputs(argument_hint=argument_hint),
+        SwapUnsqueezeWithSymSizeInt,  # required for `InsertGatherLastTokenIds`
+    ]
+    passes.extend(TRTLLM_CONVERSION_PASSES)
     if not allow_matmul_in_fp16:
         passes.append(CastFP16MMToFP32)
+    if allow_activation_in_fp16:
+        passes.append(FixActivationPrecision)
     return get_transform(
         *passes,
         skipped_optimizers=skipped_optimizers,
@@ -158,7 +174,7 @@ def get_level2_transform(
 
 
 def get_transform(
-    *fx_passes: type[GraphOptimizationPass],
+    *fx_passes: type[GraphOptimizationPass] | GraphOptimizationPass,
     skipped_optimizers: list[PassName] | None = None,
     steps: int = FX_TRANSFORM_MAXIMUM_ITERATION,
 ) -> Callable[[GraphModule], GraphModule]:
@@ -178,10 +194,16 @@ def get_transform(
 
     skipped_optimizers = skipped_optimizers or []
     for fx_pass in fx_passes:
-        if (pass_name := fx_pass.__name__) in skipped_optimizers:
+        if (
+            pass_name := type(fx_pass).__name__ if isinstance(fx_pass, GraphOptimizationPass) else fx_pass.__name__
+        ) in skipped_optimizers:
             logger.info(f"Skipping FX optimization pass {pass_name}")
+            _ = skipped_optimizers.pop(skipped_optimizers.index(pass_name))  # type: ignore[arg-type]
             continue
-        pass_manager.add_pass(fx_pass())
+        pass_manager.add_pass(fx_pass if isinstance(fx_pass, GraphOptimizationPass) else fx_pass())
+
+    if skipped_optimizers:
+        logger.warning(f"Unrecognized skipped optmizer names: {skipped_optimizers}")
 
     def optimize(graph_module: GraphModule) -> GraphModule:
         result = pass_manager(graph_module)
