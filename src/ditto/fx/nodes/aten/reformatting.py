@@ -3,7 +3,7 @@
 import torch
 from torch.fx.node import Node
 
-from ....types import SymInt
+from ....types import SymbolicInteger
 from ...utils import get_tensor_metadata
 from .aten_op import ATenOp
 from .utils import make_dim_nonnegative
@@ -43,13 +43,13 @@ class Permute(ATenOp):
 @ATenOp.final(torch.ops.aten.reshape.default)
 class Reshape(ATenOp):
     this: Node
-    shape: list[SymInt | Node]
+    shape: list[SymbolicInteger | Node]
 
     @property
     def target_shape(self) -> torch.Size | None:
-        sym_ints: list[SymInt] = []
+        sym_ints: list[SymbolicInteger] = []
         for s in self.shape:
-            if isinstance(s, SymInt):
+            if isinstance(s, SymbolicInteger):
                 sym_ints.append(s)
                 continue
             if not isinstance(val := s.meta.get("val"), torch.SymInt):

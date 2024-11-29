@@ -9,8 +9,8 @@ from torch.export.dynamic_shapes import _Dim as ExportDim  # noqa: F401
 BuiltInConstant = int | float | bool | None
 DeviceLikeType = str | torch.device | int
 Number = int | float | bool
-SymInt = int | torch.SymInt
-SymbolicShape = tuple[SymInt, ...]
+SymbolicInteger = int | torch.SymInt
+SymbolicShape = tuple[SymbolicInteger, ...]
 
 
 class StrictlyTyped(BaseModel):
