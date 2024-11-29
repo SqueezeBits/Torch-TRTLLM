@@ -29,6 +29,7 @@ from .passes import (
     FuseReciprocalMul,
     HerdConstantsToTheRight,
     InsertGatherLastTokenIds,
+    ReplaceMMByFakeGemmPlugin,
     ReplaceSDPAByFakeGPTAttentionPlugin,
     ReplaceSDPAByFakeGPTAttentionPluginV2,
     ReplaceViewByReshape,
@@ -88,6 +89,7 @@ TRTLLM_CONVERSION_PASSES: tuple[type[GraphOptimizationPass], ...] = (
         WrapRoPESubgraphs,
         ReplaceSDPAByFakeGPTAttentionPlugin,
         FuseMMConstSiblings,
+        ReplaceMMByFakeGemmPlugin,
     )
     if AUTO_DETECT_ROPE_SUBGRAPH
     else (
@@ -95,6 +97,7 @@ TRTLLM_CONVERSION_PASSES: tuple[type[GraphOptimizationPass], ...] = (
         ReplaceSDPAByFakeGPTAttentionPluginV2,
         # TODO: improve memory management of the pass `FuseMMConstSiblings`
         FuseMMConstSiblings,
+        ReplaceMMByFakeGemmPlugin,
     )
 )
 

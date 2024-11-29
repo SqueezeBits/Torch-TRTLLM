@@ -1,3 +1,6 @@
+from .gemm_plugin import (
+    GemmPlugin,
+)
 from .gpt_attention_plugin import (
     GPTAttentionPlugin,
     GPTAttentionPluginInputs,

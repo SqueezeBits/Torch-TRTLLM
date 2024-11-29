@@ -16,8 +16,38 @@ from torch_tensorrt.dynamo.conversion.converter_utils import (
 )
 
 from ..debug import open_debug_artifact
-from ..fx.targets import GPTAttentionPlugin
+from ..fx.targets import GemmPlugin, GPTAttentionPlugin
 
+@dynamo_tensorrt_converter(
+    GemmPlugin,
+    supports_dynamic_shapes=True,
+)
+def convert_fake_gemm_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    assert isinstance(target, GemmPlugin)
+    plugin_creator = trt.get_plugin_registry().get_plugin_creator("Gemm", "1", TRT_LLM_PLUGIN_NAMESPACE)
+    plugin_fields = target.get_plugin_fields()
+    pfc = trt.PluginFieldCollection(plugin_fields)
+    gemm_plugin = plugin_creator.create_plugin("gemm", pfc)
+    assert gemm_plugin is not None
+    args_kwargs = {f"arg_{i}": arg for i, arg in enumerate(args)}
+    args_kwargs.update(kwargs)
+    plugin_inputs: list[trt.ITensor] = [
+        x if isinstance(x, trt.ITensor) else get_trt_tensor(ctx, x, f"{name}_{key}")
+        for key, x in args_kwargs.items()
+        if isinstance(x, trt.ITensor | np.ndarray)
+    ]
+
+    layer = ctx.net.add_plugin_v2(plugin_inputs, gemm_plugin)
+    plugin_info = PluginInfo(plugin_creator, "gemm", pfc)
+    set_plugin_info(ctx.net, layer.name, plugin_info)
+    set_layer_name(layer, target, name, SourceIR.UNKNOWN)
+    return layer.get_output(0)
 
 @dynamo_tensorrt_converter(
     GPTAttentionPlugin,
