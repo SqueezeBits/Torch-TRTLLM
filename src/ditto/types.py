@@ -5,12 +5,12 @@ import torch
 from pydantic import BaseModel, ConfigDict
 from torch._C import _SDPBackend as SDPBackend  # noqa: F401
 from torch.export.dynamic_shapes import _Dim as ExportDim  # noqa: F401
-from torch.fx import Node
 
 BuiltInConstant = int | float | bool | None
 DeviceLikeType = str | torch.device | int
 Number = int | float | bool
-SymInt = int | torch.SymInt | Node
+SymInt = int | torch.SymInt
+SymbolicShape = tuple[SymInt, ...]
 
 
 class StrictlyTyped(BaseModel):

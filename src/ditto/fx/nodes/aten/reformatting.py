@@ -43,13 +43,13 @@ class Permute(ATenOp):
 @ATenOp.final(torch.ops.aten.reshape.default)
 class Reshape(ATenOp):
     this: Node
-    shape: list[SymInt]
+    shape: list[SymInt | Node]
 
     @property
     def target_shape(self) -> torch.Size | None:
-        sym_ints: list[int | torch.SymInt] = []
+        sym_ints: list[SymInt] = []
         for s in self.shape:
-            if isinstance(s, int | torch.SymInt):
+            if isinstance(s, SymInt):
                 sym_ints.append(s)
                 continue
             if not isinstance(val := s.meta.get("val"), torch.SymInt):
