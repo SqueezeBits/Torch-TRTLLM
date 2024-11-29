@@ -1,54 +1,34 @@
-from collections.abc import Callable
-from typing import Any
-
 import torch
 from loguru import logger
 from torch.export import ExportedProgram
 from torch.export._trace import _export as torch_export
 from torch.nn.attention import sdpa_kernel
 from transformers import PreTrainedModel
-from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from .arguments_for_export import ArgumentsForExport
-from .config import INPUT_IDS, INPUT_IDS_UNSQUEEZE_DIM
-from .types import SDPBackend
-from .wrappers import PreExportWrapper, TRTLLMPreTrainedModelWrapper
+from .arguments.torch_export_arguments import TorchExportArguments
+from .types import BuiltInConstant, SDPBackend
 
 
 def export(
-    model: torch.nn.Module,
-    arguments: ArgumentsForExport,
+    model: PreTrainedModel,
+    arguments: TorchExportArguments,
     *,
-    process_inputs: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
-    process_outputs: Callable[[Any], Any] | None = None,
-    force_static_export: bool = False,
     strict: bool = False,
     pre_dispatch: bool = False,
     sdp_backends: SDPBackend | list[SDPBackend] = SDPBackend.EFFICIENT_ATTENTION,
 ) -> ExportedProgram:
-    if isinstance(model, PreTrainedModel):
-        if not model._supports_sdpa:
-            logger.warning(
-                f"{type(model).__name__} doesn't have attention implementation via "
-                "`torch.nn.functional.scaled_dot_product_attention`."
-            )
-        process_inputs = process_inputs or unsqueeze_input_ids
-        process_outputs = process_outputs or squeeze_output_logits
-    wrapper = TRTLLMPreTrainedModelWrapper if isinstance(model, PreTrainedModel) else PreExportWrapper
-    constraints: dict[str, Any] = (
-        arguments.constraints if isinstance(model, PreTrainedModel) else {"kwargs": arguments.constraints}
-    )
+    if not model._supports_sdpa:
+        logger.warning(
+            f"{type(model).__name__} doesn't have attention implementation via "
+            "`torch.nn.functional.scaled_dot_product_attention`."
+        )
+
     with sdpa_kernel(sdp_backends):
         exported_program = torch_export(
-            wrapper(
-                model,
-                process_inputs=process_inputs,
-                process_outputs=process_outputs,
-                constant_inputs=arguments.constant_inputs,
-            ),
+            ConstantInputFilterer(model, constant_inputs=arguments.constant_inputs),
             args=(),
             kwargs=arguments.tensor_inputs,
-            dynamic_shapes=None if force_static_export else constraints,
+            dynamic_shapes={"kwargs": arguments.constraints},
             strict=strict,
             pre_dispatch=pre_dispatch,
         )
@@ -57,18 +37,15 @@ def export(
         return exported_program
 
 
-def unsqueeze_input_ids(kwargs: dict[str, Any]) -> dict[str, Any]:
-    kwargs = {**kwargs}
-    if not (isinstance(input_ids := kwargs.get("input_ids", None), torch.Tensor) and input_ids.ndim == 1):
-        return kwargs
-    kwargs[INPUT_IDS] = input_ids.unsqueeze(INPUT_IDS_UNSQUEEZE_DIM)
-    return kwargs
+class ConstantInputFilterer(torch.nn.Module):
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        constant_inputs: dict[str, BuiltInConstant] | None = None,
+    ) -> None:
+        super().__init__()
+        self.model = model
+        self.constants = constant_inputs or {}
 
-
-def squeeze_output_logits(outputs: Any) -> Any:
-    if isinstance(outputs, tuple) and isinstance(logits := outputs[0], torch.Tensor) and logits.ndim == 3:
-        return (logits.squeeze(INPUT_IDS_UNSQUEEZE_DIM), *outputs[1:])
-    if isinstance(outputs, CausalLMOutputWithPast) and outputs.logits.ndim == 3:
-        outputs.logits.squeeze_(INPUT_IDS_UNSQUEEZE_DIM)
-        return outputs
-    return outputs
+    def forward(self, **kwargs: torch.Tensor) -> torch.Tensor | tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
+        return self.model(**kwargs, **self.constants)

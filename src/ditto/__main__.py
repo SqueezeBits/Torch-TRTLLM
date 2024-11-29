@@ -12,8 +12,8 @@ from transformers import (
 )
 from typer import Option, Typer
 
-from . import trtllm_build
-from .config import DEFAULT_DEVICE, TRTLLM_LLAMA2_7B_CONFIG
+from .api import trtllm_build
+from .constants import DEFAULT_DEVICE, TRTLLM_LLAMA2_7B_CONFIG
 
 app = Typer()
 
@@ -77,6 +77,7 @@ def build(
     verbose: bool = False,
     trust_remote_code: bool = False,
     allow_matmul_in_fp16: bool = False,
+    allow_activation_in_fp16: bool = False,
 ) -> None:
     assert not os.path.exists(output_dir) or os.path.isdir(output_dir), f"Invalid output directory: {output_dir}"
     app.pretty_exceptions_show_locals = verbose
@@ -92,8 +93,8 @@ def build(
     engine = trtllm_build(
         model,
         allow_matmul_in_fp16=allow_matmul_in_fp16,
-        extra_outputs=add_output,
-        verbose=verbose,
+        allow_activation_in_fp16=allow_activation_in_fp16,
+        debug_node_names=add_output,
     )
 
     os.makedirs(output_dir, exist_ok=True)
