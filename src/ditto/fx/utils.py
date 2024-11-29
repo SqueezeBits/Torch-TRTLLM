@@ -99,7 +99,7 @@ def populate_tensor_metadata(
         assert (
             shape is not None and dtype is not None
         ), "`shape` and `dtype` needs to be provided when `tensor_metadata` is None"
-        return TensorMetadata(
+        node.meta["tensor_meta"] = tensor_metadata = TensorMetadata(
             shape=torch.Size(shape),  # type: ignore[arg-type]
             dtype=dtype,
             requires_grad=False,
@@ -108,6 +108,8 @@ def populate_tensor_metadata(
             is_quantized=False,
             qparams={},
         )
+        return tensor_metadata
+
     if isinstance(tensor_metadata, torch.Tensor):
         tensor_metadata = _extract_tensor_metadata(tensor_metadata)
     tensor_meta_as_dict = tensor_metadata._asdict()
