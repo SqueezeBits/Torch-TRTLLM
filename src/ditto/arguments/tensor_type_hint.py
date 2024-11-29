@@ -4,7 +4,7 @@ import torch
 from pydantic import TypeAdapter, field_serializer, field_validator
 from torch_tensorrt import Input
 
-from ..types import ExportDim, StrictlyTyped
+from ..types import StrictlyTyped, SymbolicShape
 from .dynamic_dim import DerivedDynamicDimension, DynamicDimension, DynamicDimensionType
 
 
@@ -13,8 +13,8 @@ class TensorTypeHint(StrictlyTyped):
     dtype: torch.dtype
 
     @property
-    def export_shape(self) -> tuple[int | ExportDim, ...]:
-        return tuple(s.export_dim if isinstance(s, DynamicDimensionType) else s for s in self.shape)
+    def symbolic_shape(self) -> SymbolicShape:
+        return tuple(s.sym_int if isinstance(s, DynamicDimensionType) else s for s in self.shape)
 
     def as_spec(self, name: str) -> Input:
         if self.shape == (int_shape := tuple(s for s in self.shape if isinstance(s, int))):
