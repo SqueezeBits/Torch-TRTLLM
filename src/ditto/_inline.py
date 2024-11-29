@@ -23,7 +23,7 @@ from torch_tensorrt.dynamo.lowering.passes import (
 from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
 
 from .arguments import TRTLLMArgumentHint
-from .constants import INPUT_IDS_UNSQUEEZE_DIM, PassName
+from .constants import INPUT_IDS, INPUT_IDS_UNSQUEEZE_DIM, PassName
 from .fx.optimize import get_optimization_transform
 from .fx.utils import get_tensor_metadata, populate_tensor_metadata
 from .pretty_print import detailed_sym_node_str
@@ -47,13 +47,14 @@ def inline(
 
     graph_module: GraphModule
     with ignore_symbolic_shapes_warning():
+        logger.debug("Running pre-inlining passes")
         _ = pre_inline_pass_manager(exported_program.graph_module)
+        logger.debug("Running aten decomposition passes")
         exported_program = exported_program.run_decompositions(get_decompositions(enable_experimental_decompositions))
+        logger.debug("Inlining the exported program")
         graph_module = exported_program.module()  # type: ignore[assignment]
-        if num_tokens_sym_int := get_input_ids_dynamic_dim(graph_module):
-            argument_hint.num_tokens.sym_int = num_tokens_sym_int
-            with detailed_sym_node_str():
-                logger.debug(f"Matched {repr(argument_hint.num_tokens)} to {num_tokens_sym_int}")
+        match_input_ids_dynamic_dims(argument_hint, graph_module)
+        logger.debug("Running post-inlining passes")
         graph_module = post_inline_pass_manager(graph_module)
 
     argument_hint.num_attn_layers = count_scaled_dot_product_attention(graph_module)
@@ -75,7 +76,6 @@ def inline(
         graph_module = custom_pass_manager(graph_module)
 
     graph_module.meta["pretrained_config"] = pretrained_config
-    assert isinstance(graph_module, GraphModule)
     graph_module._forward_pre_hooks.clear()
     return graph_module
 
@@ -91,7 +91,6 @@ def ignore_symbolic_shapes_warning() -> Generator[None, None, None]:
 
 
 def prepare_for_optimization_passes(graph_module: GraphModule) -> GraphModule:
-    sync_placeholder_names_with_forward_arg_names(graph_module)
     graph_module.graph._codegen = CodeGen()
     for node in graph_module.graph.nodes:
         if isinstance(val := node.meta.get("val"), torch.SymInt):
@@ -103,6 +102,16 @@ def prepare_for_optimization_passes(graph_module: GraphModule) -> GraphModule:
     return graph_module
 
 
+def match_input_ids_dynamic_dims(argument_hint: TRTLLMArgumentHint, graph_module: GraphModule) -> None:
+    sync_placeholder_names_with_forward_arg_names(graph_module)
+    if num_tokens_sym_int := get_input_ids_dynamic_dim(graph_module):
+        argument_hint.num_tokens.sym_int = num_tokens_sym_int
+        with detailed_sym_node_str():
+            logger.debug(f"Matched {repr(argument_hint.num_tokens)} to {num_tokens_sym_int}")
+    else:
+        logger.warning(f"Failed to match dynamic dimension of {INPUT_IDS}")
+
+
 def sync_placeholder_names_with_forward_arg_names(graph_module: GraphModule) -> None:
     def _impl(obj: Any) -> None:
         if isinstance(obj, tuple | list):
@@ -112,6 +121,7 @@ def sync_placeholder_names_with_forward_arg_names(graph_module: GraphModule) -> 
         if isinstance(obj, dict):
             for name, value in obj.items():
                 if isinstance(name, str) and isinstance(value, Node):
+                    logger.debug(f"Renaming placholder '{value}' as forward argument name '{name}'")
                     value.name = name
                     value.target = name
                     continue
@@ -126,6 +136,17 @@ def sync_placeholder_names_with_forward_arg_names(graph_module: GraphModule) -> 
         _impl(inputs)
 
 
+def get_input_ids_dynamic_dim(graph_module: GraphModule) -> torch.SymInt | None:
+    if (
+        (placeholders := {p.name: p for p in graph_module.graph.find_nodes(op="placeholder")})
+        and INPUT_IDS in placeholders
+        and (meta := get_tensor_metadata(placeholders[INPUT_IDS]))
+        and isinstance(sym_int := meta.shape[1 - INPUT_IDS_UNSQUEEZE_DIM], torch.SymInt)
+    ):
+        return sym_int
+    return None
+
+
 def count_scaled_dot_product_attention(graph_module: GraphModule) -> int:
     return len(
         [
@@ -134,14 +155,3 @@ def count_scaled_dot_product_attention(graph_module: GraphModule) -> int:
             if node.op == "call_function" and node.target is torch._C._nn.scaled_dot_product_attention
         ]
     )
-
-
-def get_input_ids_dynamic_dim(graph_module: GraphModule) -> torch.SymInt | None:
-    if (
-        (placeholders := graph_module.graph.find_nodes(op="placeholder"))
-        and (meta := get_tensor_metadata(placeholders[0]))
-        and isinstance(sym_int := meta.shape[1 - INPUT_IDS_UNSQUEEZE_DIM], torch.SymInt)
-    ):
-        return sym_int
-    logger.warning("Failed to extract input_ids dynamic dimension")
-    return None
