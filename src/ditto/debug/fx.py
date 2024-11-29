@@ -88,7 +88,7 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
             ]
             getitems = [user for user in node.users if user.op == "call_function" and user.target is operator.getitem]
             output_tensors: list[gs.Tensor] = []
-            if len(getitems) == len(node.users) and len(getitems) > 1:
+            if len(getitems) == len(node.users) and len(getitems) > 0:
                 for i, getitem in enumerate(getitems):
                     output_tensor = create_variable(getitem, name=f"{node.name}_output_{i}")
                     output_tensors.append(output_tensor)
@@ -124,7 +124,7 @@ def is_multi_output_getitem(node: Node) -> bool:
         node.op == "call_function"
         and node.target is operator.getitem
         and len(node.all_input_nodes) == 1
-        and len(siblings := node.all_input_nodes[0].users) > 1
+        and len(siblings := node.all_input_nodes[0].users) > 0
         and all(sibling.op == "call_function" and sibling.target is operator.getitem for sibling in siblings)
     )
 

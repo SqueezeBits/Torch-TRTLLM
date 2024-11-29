@@ -16,7 +16,6 @@ from pydantic import model_serializer, model_validator
 from typing_extensions import Self
 
 from ..types import StrictlyTyped
-from .network import ShapeRanges
 
 
 class EngineComponent(StrictlyTyped):
@@ -163,7 +162,7 @@ class EngineInfo(EngineComponent):
 
     def as_onnx(
         self,
-        input_ranges: list[ShapeRanges] | None = None,
+        profiles: list[trt.IOptimizationProfile] | None = None,
         network_flags: dict[str, bool] | None = None,
     ) -> onnx.ModelProto:
         nodes: dict[str, gs.Node] = {}
@@ -247,6 +246,7 @@ class EngineInfo(EngineComponent):
         def json_dumps(obj: Any) -> str:
             return json.dumps(obj, indent="··", sort_keys=True)
 
+        input_ranges = get_shape_ranges(self.bindings, profiles) if profiles is not None else None
         doc_string = "\n".join(
             f"{padstr(section)}\n{contents}"
             for section, contents in {
@@ -301,3 +301,28 @@ def padstr(msg: str, token: str = "-", length: int = 40) -> str:
     lpad = pads // 2
     rpad = pads - lpad
     return f"{token * lpad}{msg}{token * rpad}"
+
+
+ShapeRanges = dict[str, dict[Literal["min", "opt", "max"], tuple[int, ...]]]
+
+
+def get_shape_ranges(
+    input_names: list[str],
+    optimization_profiles: list[trt.IOptimizationProfile],
+) -> list[ShapeRanges]:
+    logger.info(
+        "You can ignore the following error messages starting with 'IOptimizationProfile::getDimensions: Error Code 4: "
+        "API Usage Error (...)', which are caused by inputs and outputs without optimization profiles."
+    )
+    return [
+        {
+            name: dict(
+                zip(
+                    ("min", "opt", "max"),
+                    ((*dims,) for dims in profile.get_shape(name)),
+                )
+            )
+            for name in input_names
+        }
+        for profile in optimization_profiles
+    ]

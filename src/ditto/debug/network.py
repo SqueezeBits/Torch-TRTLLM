@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any
 
 import tensorrt as trt
 
@@ -45,27 +45,6 @@ def builder_config_as_dict(builder_config: trt.IBuilderConfig) -> dict[str, Any]
                 config_data[attr] = f"Error retrieving: {str(e)}"
 
     return config_data
-
-
-ShapeRanges = dict[str, dict[Literal["min", "opt", "max"], tuple[int, ...]]]
-
-
-def get_dynamic_input_ranges(
-    network: trt.INetworkDefinition,
-    optimization_profiles: list[trt.IOptimizationProfile],
-) -> list[ShapeRanges]:
-    return [
-        {
-            (name := network.get_input(i).name): dict(
-                zip(
-                    ("min", "opt", "max"),
-                    ((*dims,) for dims in profile.get_shape(name)),
-                )
-            )
-            for i in range(network.num_inputs)
-        }
-        for profile in optimization_profiles
-    ]
 
 
 def get_human_readable_flags(network: trt.INetworkDefinition) -> dict[str, bool]:
