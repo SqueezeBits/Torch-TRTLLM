@@ -1,6 +1,10 @@
+from typing import overload
+
 import torch
 from torch.fx import Node
 from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
+
+from ..types import SymbolicShape
 
 
 def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
@@ -63,13 +67,47 @@ def get_tensor_metadata(node: Node) -> TensorMetadata | None:
     return None
 
 
+@overload
 def populate_tensor_metadata(
     node: Node,
     tensor_metadata: TensorMetadata | torch.Tensor,
     *,
-    shape: torch.Size | tuple[int | torch.SymInt, ...] | None = None,
+    shape: torch.Size | SymbolicShape | None = None,
     dtype: torch.dtype | None = None,
 ) -> TensorMetadata:
+    ...
+
+
+@overload
+def populate_tensor_metadata(
+    node: Node,
+    *,
+    shape: torch.Size | SymbolicShape,
+    dtype: torch.dtype,
+) -> TensorMetadata:
+    ...
+
+
+def populate_tensor_metadata(
+    node: Node,
+    tensor_metadata: TensorMetadata | torch.Tensor | None = None,
+    *,
+    shape: torch.Size | SymbolicShape | None = None,
+    dtype: torch.dtype | None = None,
+) -> TensorMetadata:
+    if tensor_metadata is None:
+        assert (
+            shape is not None and dtype is not None
+        ), "`shape` and `dtype` needs to be provided when `tensor_metadata` is None"
+        return TensorMetadata(
+            shape=torch.Size(shape),  # type: ignore[arg-type]
+            dtype=dtype,
+            requires_grad=False,
+            stride=(),
+            memory_format=None,
+            is_quantized=False,
+            qparams={},
+        )
     if isinstance(tensor_metadata, torch.Tensor):
         tensor_metadata = _extract_tensor_metadata(tensor_metadata)
     tensor_meta_as_dict = tensor_metadata._asdict()
