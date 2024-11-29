@@ -1,10 +1,12 @@
 import torch
+from loguru import logger
 from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 
-from ...config import INPUT_IDS_UNSQUEEZE_DIM
+from ...constants import INPUT_IDS_UNSQUEEZE_DIM
+from ..nodes import SymSizeInt
 from ..subgraphs import Linear
-from ..utils import find_or_create_placeholder_sym_size, get_tensor_metadata, populate_tensor_metadata
+from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .graph_pass import GraphOptimizationPass
 
 
@@ -13,15 +15,15 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
 
     def call(self, graph_module: GraphModule) -> PassResult:
         graph = graph_module.graph
-        placeholders = {n.name: n for n in graph.nodes if n.op == "placeholder"}
+        placeholders = {n.name: n for n in graph.find_nodes(op="placeholder")}
         input_ids_major_axis = 1 - INPUT_IDS_UNSQUEEZE_DIM
         if not (
             (last_token_ids := placeholders.get("last_token_ids"))
             and not any(user.target is torch.ops.aten.index_select.default for user in last_token_ids.users)
             and (last_token_ids_meta := get_tensor_metadata(last_token_ids))
-            and isinstance(num_seq := last_token_ids_meta.shape[0], torch.SymInt)
-            and (input_ids_size_node := find_or_create_placeholder_sym_size(graph, "input_ids"))
-            and (num_seq_node := find_or_create_placeholder_sym_size(graph, "last_token_ids"))
+            and isinstance(batch_size := last_token_ids_meta.shape[0], torch.SymInt)
+            and (num_tokens_node := find_or_create_placeholder_sym_size(graph, "input_ids"))
+            and (batch_size_node := find_or_create_placeholder_sym_size(graph, "last_token_ids"))
             and (lm_head := find_lm_head(graph))
             and (input_tensor_meta := get_tensor_metadata(lm_head.input_node))
             and isinstance(input_ids_size := input_tensor_meta.shape[input_ids_major_axis], torch.SymInt)
@@ -40,16 +42,17 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
                 input_tensor_meta,
                 shape=(
                     *input_tensor_meta.shape[:input_ids_major_axis],
-                    num_seq,
+                    batch_size,
                     *input_tensor_meta.shape[input_ids_major_axis + 1 :],
                 ),
             )
         lm_head.input_reshape.node.replace_input_with(lm_head.input_node, index_select)
         node_indices = {node: i for i, node in enumerate(graph.nodes)}
-        input_ids_size_node.replace_all_uses_with(
-            num_seq_node, delete_user_cb=lambda node: node_indices.get(node, -1) > node_indices[index_select]
+        num_tokens_node.replace_all_uses_with(
+            batch_size_node, delete_user_cb=lambda node: node_indices.get(node, -1) > node_indices[index_select]
         )
-        replace_size(index_select, input_ids_size, num_seq)
+        replace_size(index_select, input_ids_size, batch_size)
+        lm_head.output_reshape.node.replace_input_with(num_tokens_node, batch_size_node)
         return PassResult(graph_module, True)
 
 
@@ -70,3 +73,19 @@ def find_lm_head(graph: Graph) -> Linear | None:
         if subgraph := Linear.configure_from(node):
             return subgraph
     return None
+
+
+def find_or_create_placeholder_sym_size(graph: Graph, name: str, dim: int = 0) -> Node | None:
+    if name not in (placeholders := {node.name: node for node in graph.find_nodes(op="placeholder")}):
+        logger.warning(f"No such placholder: {name}")
+        return None
+    placeholder = placeholders[name]
+    for user in placeholder.users:
+        if (sym_size_int := SymSizeInt.specialize_from(user)) and sym_size_int.dim == dim:
+            return user
+    last_placeholder = [*placeholders.values()][-1]
+    with graph.inserting_after(last_placeholder):
+        node = graph.call_function(torch.ops.aten.sym_size.int, (placeholder, dim))
+        if (metadata := get_tensor_metadata(placeholder)) and isinstance(s := metadata.shape[dim], torch.SymInt):
+            node.meta["val"] = s
+        return node

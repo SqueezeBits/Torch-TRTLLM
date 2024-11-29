@@ -1,75 +1,63 @@
 from collections.abc import Callable
 
 import tensorrt as trt
+import torch
 from loguru import logger
 from torch.fx import GraphModule
 from torch.fx.graph import CodeGen
-from torch_tensorrt.dynamo._settings import CompilationSettings
+from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from transformers import PreTrainedModel
 
-from ._compile import build_engine, get_inlined_graph_module
+from ._convert import convert
 from ._export import export
-from .arguments_for_export import ArgumentsForExport
-from .config import DEFAULT_DEVICE, PassName
-from .debug import (
-    build_onnx_from_fx,
-    open_debug_artifact,
-    save_onnx_without_weights,
-)
-from .pretty_print import detailed_sym_node_str
+from ._inline import inline
+from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
+from .configs import TensorRTConfig, TRTLLMModelConfig, TRTLLMOptimizationProfileConfig
+from .constants import DEFAULT_DEVICE, INPUT_IDS, PassName
+from .debug import save_for_debug
+from .types import BuiltInConstant, DeviceLikeType
 
 
 def trtllm_build(
     model: PreTrainedModel,
-    arguments: ArgumentsForExport | None = None,
     *,
-    compilation_settings: CompilationSettings | None = None,
+    profile_config: TRTLLMOptimizationProfileConfig | None = None,
+    model_config: TRTLLMModelConfig | None = None,
+    trt_config: TensorRTConfig | None = None,
     allow_matmul_in_fp16: bool = False,
-    extra_outputs: list[str] | None = None,
-    verbose: bool = False,
+    allow_activation_in_fp16: bool = True,
+    debug_node_names: list[str] | None = None,
+    device: DeviceLikeType | None = None,
+    engine_cache: BaseEngineCache | None = None,
 ) -> trt.ICudaEngine:
-    try:
-        device = next(iter(model.parameters())).device
-    except StopIteration:
-        logger.warning(f"The model has no parameter. Will set the device as {DEFAULT_DEVICE}")
-        device = DEFAULT_DEVICE
-    arguments_for_export = arguments or ArgumentsForExport.get_trtllm_inputs(
-        device=device,
-        use_cache=False,
-    )
-
-    if verbose:
-        arguments_for_export.print_readable()
+    device = _resolve_device(model, device)
+    network_name = type(model).__name__
+    profile_config = profile_config or TRTLLMOptimizationProfileConfig()
+    model_config = model_config or TRTLLMModelConfig()
+    trt_config = trt_config or TensorRTConfig()
+    argument_hint = TRTLLMArgumentHint.configure(profile_config)
 
     graph_module = trtllm_export(
         model,
-        arguments,
+        argument_hint,
+        device=device,
         allow_matmul_in_fp16=allow_matmul_in_fp16,
-        extra_passes=[add_outputs(extra_outputs)] if extra_outputs else None,
-        verbose=verbose,
+        allow_activation_in_fp16=allow_activation_in_fp16,
+        extra_passes=[add_outputs(debug_node_names)] if debug_node_names else None,
     )
 
     logger.info("Building TensorRT engine ...")
     output_names = ["logits"]  # TRTLLM requires the first output name to be 'logits'
-    if extra_outputs:
-        output_names.extend(extra_outputs)
+    if debug_node_names:
+        output_names.extend(debug_node_names)
 
-    return build_engine(
+    return convert(
         graph_module,
-        (),
-        arguments_for_export.torch_trt_inputs,
-        settings=compilation_settings or get_default_compilation_settings(verbose=verbose),
-        name=type(model).__name__,
+        argument_hint,
+        trt_config,
+        engine_cache=engine_cache,
+        network_name=network_name,
         output_names=output_names,
-    )
-
-
-def get_default_compilation_settings(verbose: bool = False) -> CompilationSettings:
-    return CompilationSettings(
-        assume_dynamic_shape_support=True,
-        debug=verbose,
-        optimization_level=3,
-        max_aux_streams=-1,
     )
 
 
@@ -102,52 +90,43 @@ def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
 
 def trtllm_export(
     model: PreTrainedModel,
-    arguments: ArgumentsForExport | None = None,
+    argument_hint: TRTLLMArgumentHint,
     *,
+    device: DeviceLikeType | None = None,
     allow_matmul_in_fp16: bool = False,
+    allow_activation_in_fp16: bool = True,
     skipped_optimizers: list[PassName] | None = None,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
-    verbose: bool = False,
 ) -> GraphModule:
-    model_name = type(model).__name__
-    device = next(iter(model.parameters())).device
-    arguments_for_export = arguments or ArgumentsForExport.get_trtllm_inputs(
-        device=device,
-        use_cache=False,
-    )
-
-    if verbose:
-        arguments_for_export.print_readable()
-
     logger.info("torch.exporting module ...")
-    exported_program = export(model, arguments_for_export)
-    with detailed_sym_node_str(), open(f"{model_name}_program.txt", "w") as f:
-        f.write(f"{exported_program}")
+    device = _resolve_device(model, device)
+    hints: dict[str, TensorTypeHint | BuiltInConstant] = {
+        INPUT_IDS: argument_hint.batched_input_ids,
+        "use_cache": False,
+    }
+    arguments = TorchExportArguments.from_hints(device=device, **hints)
+    logger.opt(lazy=True).debug("{x}", x=lambda: arguments)
+    exported_program = export(model, arguments)
+    save_for_debug("exported_program", exported_program)
 
     logger.info("Lowering exported program into graph module ...")
-    graph_module = get_inlined_graph_module(
+    graph_module = inline(
         exported_program,
+        argument_hint=argument_hint,
         skipped_optimizers=skipped_optimizers,
         allow_matmul_in_fp16=allow_matmul_in_fp16,
+        allow_activation_in_fp16=allow_activation_in_fp16,
         extra_passes=extra_passes,
     )
-
-    with detailed_sym_node_str():
-        with open_debug_artifact("graph_module.py") as f:
-            if f:
-                f.write(
-                    "\n".join(
-                        [
-                            "import torch\n",
-                            graph_module.print_readable(print_output=False),
-                        ]
-                    )
-                )
-        with open_debug_artifact("graph.txt") as f:
-            if f:
-                f.write(f"{graph_module.graph}")
-        with open_debug_artifact("graph_module.onnx", "wb") as f:
-            if f:
-                save_onnx_without_weights(build_onnx_from_fx(graph_module), f)
-
+    save_for_debug("graph_module", graph_module)
     return graph_module
+
+
+def _resolve_device(model: torch.nn.Module, device: DeviceLikeType | None) -> DeviceLikeType:
+    if device is not None:
+        return device
+    try:
+        return next(iter(model.parameters())).device
+    except StopIteration:
+        logger.warning(f"The model has no parameter. Will set the device as {DEFAULT_DEVICE}")
+    return DEFAULT_DEVICE

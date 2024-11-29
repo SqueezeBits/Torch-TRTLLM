@@ -20,19 +20,15 @@ from tensorrt_llm.functional import (
     _create_tensor,
 )
 from tensorrt_llm.runtime.generation import GenerationSession
-from torch_tensorrt.logging import TRT_LOGGER
 
 from .debug import (
-    EngineInfo,
     open_debug_artifact,
-    save_onnx_without_weights,
+    save_for_debug,
 )
 
 
 def patched_trtllm_network_to_dot(self: trtllm.Network, path: str | None) -> str | None:
-    with open_debug_artifact("trt_network_def.onnx", "wb") as f:
-        if f:
-            save_onnx_without_weights(EngineInfo.from_network_definition(self.trt_network).as_onnx(), f)
+    save_for_debug("trt_network_def", self.trt_network)
     return None
 
 
@@ -79,17 +75,7 @@ def patched_builder_build_engine(
         if f:
             config_dict = builder_config.to_dict()
             json.dump(config_dict, f, indent=2, sort_keys=True)
-    with (
-        open_debug_artifact("trt_engine.onnx", "wb") as f,
-        open_debug_artifact("trt_engine.json") as g,
-    ):
-        if f and g:
-            with trt.Runtime(TRT_LOGGER) as runtime:
-                engine: trt.ICudaEngine = runtime.deserialize_cuda_engine(serialized_engine)
-            inspector = engine.create_engine_inspector()
-            engine_info = json.loads(inspector.get_engine_information(trt.LayerInformationFormat.JSON))
-            json.dump(engine_info, g, indent=2, sort_keys=True)
-            save_onnx_without_weights(EngineInfo.model_validate(engine_info).as_onnx(), f)
+    save_for_debug("trt_engine", serialized_engine)
     return serialized_engine
 
 

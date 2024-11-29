@@ -3,7 +3,7 @@ from loguru import logger
 from torch.fx import Node
 from torch.fx.graph_module import GraphModule
 
-from ...config import MATMUL_FUSION_MAX_OUTPUT_SIZE
+from ...constants import MATMUL_FUSION_MAX_OUTPUT_SIZE
 from ..subgraphs import MMConst
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses

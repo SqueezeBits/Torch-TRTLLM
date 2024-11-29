@@ -3,7 +3,7 @@
 import torch
 from torch.fx.node import Node
 
-from ....types import SymInt
+from ....types import SymbolicInteger
 from .aten_op import ATenOp
 
 
@@ -11,6 +11,6 @@ from .aten_op import ATenOp
 class Embedding(ATenOp):
     weight: Node
     indices: Node
-    padding_idx: SymInt = -1
+    padding_idx: SymbolicInteger = -1
     scale_grad_by_freq: bool = False
     sparse: bool = False

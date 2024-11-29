@@ -3,7 +3,7 @@
 import torch
 from torch.fx.node import Node
 
-from ....types import SymInt
+from ....types import SymbolicInteger
 from ...utils import get_tensor_metadata
 from .aten_op import ATenOp
 from .utils import make_axis_nonnegative, make_dim_nonnegative
@@ -13,9 +13,9 @@ from .utils import make_axis_nonnegative, make_dim_nonnegative
 class Slice(ATenOp):
     this: Node
     dim: int = 0
-    start: SymInt | None = None
-    end: SymInt | None = None
-    step: SymInt = 1
+    start: SymbolicInteger | None = None
+    end: SymbolicInteger | None = None
+    step: SymbolicInteger = 1
 
     @property
     def dim_size(self) -> int | None:

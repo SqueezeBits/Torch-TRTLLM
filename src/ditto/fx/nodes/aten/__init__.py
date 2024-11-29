@@ -34,6 +34,7 @@ from .reformatting import (
 )
 from .slice import Slice
 from .split import Split
+from .sym_size import SymSizeInt
 from .unary import Unary
 from .unary_elementwise import (
     Sqrt,

@@ -7,7 +7,7 @@ from tensorrt_llm.functional import PositionEmbeddingType
 from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 
-from ...config import GPT_ATTENTION_PLUGIN_DTYPE
+from ...constants import GPT_ATTENTION_PLUGIN_DTYPE
 from ..nodes import ScaledDotProductAttention
 from ..targets import GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
 from ..utils import get_tensor_metadata, populate_tensor_metadata

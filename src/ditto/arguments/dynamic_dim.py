@@ -2,19 +2,72 @@ import operator
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from functools import cached_property
+from typing import Any, ClassVar
 
+import torch
 from loguru import logger
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, TypeAdapter, field_serializer, field_validator, model_validator
+from sympy import Integer, Symbol
 from torch.export import Dim
+from torch.fx.experimental.sym_node import SymNode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.utils._sympy.value_ranges import ValueRanges
 from typing_extensions import Self
 
-from .types import DimType
+from ..pretty_print import detailed_sym_node_str
+from ..types import ExportDim
+
+
+class DynamicDimensionCacheConflictError(RuntimeError):
+    ...
 
 
 class DynamicDimensionType(BaseModel, ABC):
+    CACHE: ClassVar[dict[str, Self]] = {}
+    _shape_env: ClassVar[ShapeEnv | None] = None
+    _sym_int: torch.SymInt | None = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def cache_objects(self) -> Self:
+        if self.name in self.CACHE:
+            if (cached_self := self.CACHE[self.name]).model_dump() != self.model_dump():
+                raise DynamicDimensionCacheConflictError(
+                    "Creating dynamic dimensions with the same name but with at least one different attributes is not "
+                    f"allowed. Existing one was {repr(cached_self)} but tried to declare another one with the same "
+                    f"name: {repr(self)}"
+                )
+            logger.trace(f"Using cached dynamic dimension {self.name}")
+            return cached_self
+        self.CACHE[self.name] = self
+        return self
+
+    @property
+    def sym_int(self) -> torch.SymInt:
+        if self._sym_int is None:
+            if DynamicDimensionType._shape_env is None:
+                logger.warning(
+                    "Creating a new shape environment for dynamic shapes. This might cause unexpected behavior."
+                )
+                DynamicDimensionType._shape_env = ShapeEnv()
+            symbol = Symbol(self.name)
+            sym_int = torch.SymInt(SymNode(symbol, DynamicDimensionType._shape_env, pytype=int, hint=self.example))
+            DynamicDimensionType._shape_env.var_to_range[symbol] = ValueRanges(self.min, self.max)
+            DynamicDimensionType._shape_env.var_to_val[symbol] = Integer(self.example)
+            self._sym_int = sym_int
+        return self._sym_int
+
+    @sym_int.setter
+    def sym_int(self, other: torch.SymInt) -> None:
+        if not (isinstance(sym_node := other.node, SymNode) and isinstance(shape_env := sym_node.shape_env, ShapeEnv)):
+            with detailed_sym_node_str():
+                logger.warning(f"unsupported symbolic integer: {other}")
+            return
+        DynamicDimensionType._shape_env = shape_env
+        self._sym_int = other
+
     @property
     @abstractmethod
-    def export_dim(self) -> DimType | int:
+    def export_dim(self) -> ExportDim | int:
         ...
 
     @property
@@ -79,8 +132,15 @@ class DynamicDimension(DynamicDimensionType):
     given_max: int = Field(frozen=True, alias="max")
     given_example: int | None = Field(default=None, frozen=True, alias="example_for_export")
 
+    @model_validator(mode="before")
+    @classmethod
+    def removeprefix(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return {k.removeprefix("given_"): v for k, v in data.items()}
+        return data
+
     @cached_property
-    def export_dim(self) -> DimType | int:
+    def export_dim(self) -> ExportDim | int:
         return Dim(self.name, min=self.min, max=self.max) if self.min < self.max else self.min
 
     @property
@@ -136,8 +196,23 @@ class DerivedDynamicDimension(DynamicDimensionType):
     rhs: DynamicDimensionType | int = Field(frozen=True)
     op: Callable[[int, int], int] = Field(frozen=True)
 
+    @field_serializer("lhs", "rhs")
+    def serialize_origins(self, origin: Any) -> dict[str, Any] | int:
+        if isinstance(origin, DynamicDimensionType | int):
+            return origin if isinstance(origin, int) else origin.model_dump()
+        return origin
+
+    @field_validator("lhs", "rhs", mode="before")
+    @classmethod
+    def validate_origins(cls, origin: Any) -> Any:
+        if isinstance(origin, int):
+            return origin
+        if isinstance(origin, dict):
+            return TypeAdapter(DynamicDimension | DerivedDynamicDimension).validate_python(origin)
+        return origin
+
     @cached_property
-    def export_dim(self) -> DimType | int:
+    def export_dim(self) -> ExportDim | int:
         try:
             lhs = self.lhs.export_dim if isinstance(self.lhs, DynamicDimensionType) else self.lhs
             rhs = self.rhs.export_dim if isinstance(self.rhs, DynamicDimensionType) else self.rhs
@@ -151,7 +226,14 @@ class DerivedDynamicDimension(DynamicDimensionType):
     def name(self) -> str:
         lhs_name = self.lhs.name if isinstance(self.lhs, DynamicDimensionType) else f"{self.lhs}"
         rhs_name = self.rhs.name if isinstance(self.rhs, DynamicDimensionType) else f"{self.rhs}"
-        return f"{lhs_name}_{self.op.__name__}_{rhs_name}"
+        op_name = {
+            operator.add: "+",
+            operator.floordiv: "//",
+            operator.mul: "*",
+            operator.sub: "-",
+            operator.truediv: "/",
+        }.get(self.op, f"_{self.op.__name__}_")
+        return f"{lhs_name}{op_name}{rhs_name}"
 
     @cached_property
     def min(self) -> int:

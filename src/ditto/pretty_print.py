@@ -23,7 +23,9 @@ def brief_tensor_repr() -> Generator[None, None, None]:
 @contextlib.contextmanager
 def detailed_sym_node_str() -> Generator[None, None, None]:
     def sym_node_str(self: SymNode) -> str:
-        return f"{self._expr}({self.expr})"
+        if self._expr != self.expr:
+            return f"{self._expr}({self.expr})"
+        return f"{self.expr}"
 
     original_sym_node_str = SymNode.str
     SymNode.str = sym_node_str  # type: ignore[method-assign]

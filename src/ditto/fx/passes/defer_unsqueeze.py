@@ -8,7 +8,7 @@ import torch
 from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_manager import PassManager, PassResult
 
-from ...config import FX_TRANSFORM_MAXIMUM_ITERATION
+from ...constants import FX_TRANSFORM_MAXIMUM_ITERATION
 from ...types import Number
 from ..nodes import (
     BinaryElementwise,
@@ -17,12 +17,13 @@ from ..nodes import (
     IndexSelectNode,
     NodeSpecialization,
     Reduction,
+    SymSizeInt,
     UnaryElementwise,
     Unsqueeze,
 )
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .graph_pass import GraphOptimizationPass
-from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
+from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, ReplaceAmongInputs
 
 
 class DeferUnsqueeze(GraphOptimizationPass):
@@ -37,6 +38,7 @@ class DeferUnsqueeze(GraphOptimizationPass):
                 SwapUnsqueezeWithIndexSelectNode(depth=depth + 1),
                 SwapUnsqueezeWithReductionIntListNode(depth=depth + 1),
                 SwapUnsqueezeWithUnaryElementwiseNode(depth=depth + 1),
+                SwapUnsqueezeWithSymSizeInt(depth=depth + 1),
             ],
             steps=FX_TRANSFORM_MAXIMUM_ITERATION,
         )
@@ -49,9 +51,9 @@ SomeATenOpNode = TypeVar("SomeATenOpNode", bound=CallFunction)
 
 
 class EarlyExit(Exception):  # noqa: N818
-    def __init__(self, replacements: dict[Node, NodewisePassResult], *args: object) -> None:
+    def __init__(self, pass_results: dict[Node, NodewisePassResult], *args: object) -> None:
         super().__init__(*args)
-        self.replacements = replacements
+        self.replacements = pass_results
 
 
 class SwapUnsqueezeWith(Generic[SomeATenOpNode], NodewiseOptimizationPass):
@@ -324,6 +326,30 @@ class SwapUnsqueezeWithBinaryElementwiseNode(SwapUnsqueezeWith[BinaryElementwise
 
 class SwapUnsqueezeWithUnaryElementwiseNode(SwapUnsqueezeWith[UnaryElementwise]):
     """Swap the unsqueeze followed by a unary elementwise node."""
+
+
+class SwapUnsqueezeWithSymSizeInt(SwapUnsqueezeWith[SymSizeInt]):
+    """Swap the unsqueeze followed by a sym_size.int node."""
+
+    @classmethod
+    def get_hotfix_and_unsqueeze_dim(
+        cls,
+        parents: dict[str, Unsqueeze],
+        child: SymSizeInt,
+    ) -> tuple[dict[str, Any], int]:
+        first_unsqueeze = [*parents.values()][0]
+        if (
+            (child_dim := child.nonnegative_dim) is None
+            or (unsqueeze_dim := first_unsqueeze.nonnegative_dim) is None
+            # TODO: when `unsqueeze_dim == child_dim` the child node can be replaced by constant `1`
+            or unsqueeze_dim == child_dim
+        ):
+            raise EarlyExit({})
+
+        if unsqueeze_dim < child_dim:
+            child.node.args = (child.node.args[0], child_dim - 1)
+            child.node.kwargs = {}
+        raise EarlyExit({child.node: ReplaceAmongInputs(occurences_of=first_unsqueeze.node, by=first_unsqueeze.this)})
 
 
 def get_squeezed_shape(shape: torch.Size, dim: int) -> torch.Size:
