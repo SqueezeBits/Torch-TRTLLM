@@ -59,6 +59,10 @@ class TRTLLMInterpreter(TRTInterpreter):
             self.ctx.net.name = network_name
         self._constant_cache: dict[str, trt.ITensor] = {}
 
+    def validate_conversion(self) -> set[str]:
+        missing_ops = super().validate_conversion()
+        return {missing_op for missing_op in missing_ops if "gpt_attention_plugin" not in missing_op}
+
     def _construct_trt_network_def(self) -> None:
         super()._construct_trt_network_def()
         save_for_debug("trt_network_def", self.ctx.net, self.optimization_profiles)
@@ -117,7 +121,7 @@ class TRTLLMInterpreter(TRTInterpreter):
                     )
                     break
                 if isinstance(outputs[i], trt.ITensor):
-                    self.logger.info(f"The {i}-th output will be renamed: {outputs[i].name} -> {output_name}")
+                    self.logger.debug(f"The {i}-th output will be renamed: {outputs[i].name} -> {output_name}")
                     outputs[i].name = output_name
                     self._output_names[i] = output_name
                 else:

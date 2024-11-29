@@ -40,8 +40,11 @@ class TensorRTBuilderConfig(StrictlyTyped):
 
     def copy_to(self, native_config: trt.IBuilderConfig) -> None:
         for name, value in self.model_dump().items():
-            setattr(native_config, name, value)
+            if hasattr(native_config, name) and getattr(native_config, name) != value:
+                logger.debug(f"Setting '{name}' of trt.IBuilderConfig to {value}")
+                setattr(native_config, name, value)
         for pool, pool_size in self.memory_pool_limits.items():
+            logger.debug(f"Setting memory limit of '{pool}' to {pool_size}")
             native_config.set_memory_pool_limit(pool, pool_size)
         # pylint: disable-next=not-an-iterable
         for profile in self.optimization_profiles:
