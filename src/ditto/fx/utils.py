@@ -52,7 +52,7 @@ def get_ancestors_with_depth(node: Node) -> dict[Node, int]:
 def get_tensor_metadata(node: Node) -> TensorMetadata | None:
     if isinstance(tensor_meta := node.meta.get("tensor_meta"), TensorMetadata):
         return tensor_meta
-    if isinstance(val := node.meta.get("val"), torch.Tensor):
+    if isinstance(val := node.meta.get("val", node.meta.get("example_value")), torch.Tensor):
         return _extract_tensor_metadata(val)
     if isinstance(val, torch.SymInt) or node.target is torch.ops.aten.sym_size.int:
         return TensorMetadata(

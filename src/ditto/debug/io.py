@@ -11,6 +11,7 @@ from loguru import logger
 from onnx.external_data_helper import _get_all_tensors, uses_external_data
 from torch.export import ExportedProgram
 from torch.fx import GraphModule
+from torch.fx.graph import _PyTreeCodeGen
 from torch_tensorrt.logging import TRT_LOGGER
 
 from ..constants import DEBUG_ARTIFACTS_DIR, DEFAULT_ONNX_PROTO_SIZE_THRESHOLD
@@ -129,15 +130,13 @@ def save_exported_program_for_debug(
     name: str,
     exported_program: ExportedProgram,
 ) -> None:
-    save_graph_module_for_debug(name, exported_program.graph_module, header="import torch\n\nclass ")
+    save_graph_module_for_debug(name, exported_program.graph_module)
 
 
 def save_graph_module_for_debug(
     name: str,
     graph_module: GraphModule,
-    header: str | None = None,
 ) -> None:
-    header = header or "import torch\n\n"
     with (
         detailed_sym_node_str(),
         open_debug_artifact(f"{name}.py") as code_file,
@@ -145,6 +144,16 @@ def save_graph_module_for_debug(
         open_debug_artifact(f"{name}.onnx", "wb") as onnx_file,
     ):
         if code_file and graph_file and onnx_file:
+            import_statements = ["import torch"]
+            if isinstance(graph_module.graph._codegen, _PyTreeCodeGen):
+                import_statements.extend(
+                    [
+                        "import torch.fx._pytree as fx_pytree",
+                        "import torch.utils._pytree as pytree",
+                    ]
+                )
+            import_statements.append("\n\n")
+            header = "\n".join(import_statements)
             code_file.write(f"{header}{graph_module.print_readable(print_output=False)}")
             graph_file.write(f"{graph_module.graph}")
             save_onnx_without_weights(build_onnx_from_fx(graph_module), onnx_file)
