@@ -9,6 +9,7 @@ from torch_tensorrt._enums import dtype as torch_trt_dtype
 from ...constants import GPT_ATTENTION_PLUGIN_DTYPE
 from ...types import StrictlyTyped
 
+
 class GemmPluginFields(StrictlyTyped):
     # the order of the attributes does matter!
     transa: int = 0
@@ -40,6 +41,7 @@ class GemmPluginFields(StrictlyTyped):
             return trt.PluginField(name, np.array(value, dtype=dtype), plugin_field_type)
 
         return [convert_to_plugin_field(name, value) for name, value in self.model_dump().items()]
+
 
 class GemmPlugin(GemmPluginFields):
     @property

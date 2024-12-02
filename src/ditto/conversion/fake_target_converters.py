@@ -18,6 +18,7 @@ from torch_tensorrt.dynamo.conversion.converter_utils import (
 from ..debug import open_debug_artifact
 from ..fx.targets import GemmPlugin, GPTAttentionPlugin
 
+
 @dynamo_tensorrt_converter(
     GemmPlugin,
     supports_dynamic_shapes=True,
@@ -48,6 +49,7 @@ def convert_fake_gemm_plugin(
     set_plugin_info(ctx.net, layer.name, plugin_info)
     set_layer_name(layer, target, name, SourceIR.UNKNOWN)
     return layer.get_output(0)
+
 
 @dynamo_tensorrt_converter(
     GPTAttentionPlugin,

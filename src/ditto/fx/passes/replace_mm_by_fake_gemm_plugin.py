@@ -1,12 +1,10 @@
 import torch
-from loguru import logger
 from torch.fx import Node
 
-from ...constants import GPT_ATTENTION_PLUGIN_DTYPE
 from ..nodes import MM
 from ..targets import GemmPlugin
 from ..utils import get_tensor_metadata, populate_tensor_metadata
-from .node_wise_pass import NodewiseOptimizationPass, ReplaceAllUses, NodewisePassResult
+from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
@@ -24,7 +22,8 @@ class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
         assert len(other.shape) == 2
 
         graph = node.graph
-        # Note: It assume that a shape of the matrix weight is `k x n`. But, it should be transposed for a functionality from `k x n` to `n x k`.
+        # Note: It assume that a shape of the matrix weight is `k x n`.
+        # But, it should be transposed for a functionality from `k x n` to `n x k`.
         with graph.inserting_after(mm.other):
             other_t = graph.call_function(torch.ops.aten.permute.default, (mm.other, (1, 0)))
             populate_tensor_metadata(other_t, other, shape=(other.shape[1], other.shape[0]))
