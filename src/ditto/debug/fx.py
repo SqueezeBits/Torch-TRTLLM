@@ -1,4 +1,6 @@
+import json
 import operator
+from typing import Any, Literal
 
 import numpy as np
 import onnx
@@ -7,7 +9,6 @@ import torch
 from torch._ops import OpOverload
 from torch.fx import GraphModule, Node
 from torch.fx.node import Argument, Target
-from torch_tensorrt import dtype
 
 from ..fx.utils import get_tensor_metadata
 
@@ -20,21 +21,22 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
     const_args: dict[str, gs.Constant] = {}
 
     def create_variable(node: Node, name: str | None = None) -> gs.Variable:
-        assert (meta := get_tensor_metadata(node)), f"{node.format_node()} does not have tensor metadata"
-        return gs.Variable(
-            name or node.name,
-            dtype._from(meta.dtype).to(np.dtype),
-            tuple(-1 if isinstance(s, torch.SymInt) else s for s in meta.shape),
-        )
+        shape: tuple[int | str, ...] | None = None
+        dtype: np.dtype | None = None
+        if meta := get_tensor_metadata(node):
+            shape = tuple(str(s) if isinstance(s, torch.SymInt) else s for s in meta.shape)
+            dtype = torch.zeros((), dtype=meta.dtype).numpy().dtype
+        return gs.Variable(name or node.name, dtype, shape)
 
     def create_constant(
         node: Node,
         name: str | None = None,
         *,
         param: torch.nn.Parameter | None = None,
-    ) -> gs.Constant:
+    ) -> gs.Constant | gs.Variable:
         if param is None:
-            assert (meta := get_tensor_metadata(node)), f"{node.format_node()} does not have tensor metadata"
+            if (meta := get_tensor_metadata(node)) is None:
+                return gs.Variable(name or node.name)
             values = torch.zeros(meta.shape, dtype=meta.dtype).numpy()
         else:
             values = param.numpy(force=True)
@@ -76,9 +78,13 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
         elif node.op == "output":
             outputs = [tensors[x.name] for x in node.all_input_nodes]
         elif node.op == "get_attr" and isinstance(target := node.target, str):
-            tensor = create_constant(node, target, param=graph_module.get_parameter(target))
+            try:
+                param = graph_module.get_parameter(target)
+            except AttributeError:
+                param = None
+            tensor = create_constant(node, target, param=param)
             tensors[node.name] = tensor
-        elif node.op == "call_function" and callable(target := node.target):
+        elif node.op in ("call_function", "call_module", "call_method"):
             if is_multi_output_getitem(node):
                 continue
             all_inputs = {f"args_{i}": arg for i, arg in enumerate(node.args)}
@@ -99,14 +105,17 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
                 tensors[node.name] = output_tensor
 
             nodes[node.name] = gs.Node(
-                op=get_target_name(target),
+                op=get_target_name(node.op, node.target, node.meta),
                 name=node.name,
                 inputs=input_tensors,
                 outputs=output_tensors,
-                attrs={k: v for k, v in node.meta.items() if isinstance(v, int | float | bool | str | dict)},
+                attrs=process_metadata(node.meta),
             )
         else:
-            raise NotImplementedError(f"The following node could not be converted: {node.format_node}")
+            raise NotImplementedError(f"The following node could not be converted: {node.format_node()}")
+
+    def json_dumps(obj: Any) -> str:
+        return json.dumps(obj, indent="··", sort_keys=True)
 
     graph = gs.Graph(
         nodes=list(nodes.values()),
@@ -116,7 +125,9 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
     )
     graph.cleanup()
     graph.toposort()
-    return gs.export_onnx(graph, do_type_check=False)
+    model_proto = gs.export_onnx(graph, do_type_check=False)
+    model_proto.doc_string = json_dumps(process_metadata(graph_module.meta))
+    return model_proto
 
 
 def is_multi_output_getitem(node: Node) -> bool:
@@ -129,9 +140,56 @@ def is_multi_output_getitem(node: Node) -> bool:
     )
 
 
-def get_target_name(f: Target) -> str:
-    if isinstance(f, OpOverload):
-        return str(f).replace(".", "::")
-    if callable(f):
-        return f.__name__
-    return str(f)
+def get_target_name(
+    op: Literal["call_function", "call_module", "call_method"],
+    target: Target,
+    meta: dict[str, Any],
+) -> str:
+    match op:
+        case "call_function":
+            assert callable(target)
+            if isinstance(target, OpOverload):
+                return str(target).replace(".", "::")
+            module = target.__module__
+            if module.startswith("torch"):
+                if module in ("torch.nn.functional", "torch._C._nn"):
+                    module = "F"
+                return f"{module}.{target.__name__}".replace(".", "::")
+            if module.startswith("_operator"):
+                return f"operator::{target.__name__}"
+            return target.__name__
+        case "call_method":
+            assert isinstance(target, str)
+            return f"Tensor::{target}"
+        case "call_module":
+            assert isinstance(target, str)
+            if (
+                isinstance(module_stack := meta.get("nn_module_stack"), dict)
+                and isinstance(name_and_class := module_stack.get(target), tuple)
+                and len(name_and_class) == 2
+                and isinstance(original_layer_name := name_and_class[0], str)
+                and issubclass(module_class := name_and_class[1], torch.nn.Module)
+            ):
+                original_layer_name = original_layer_name.removeprefix("L['self'].").replace(".", "/")
+                return f"{original_layer_name}:{module_class.__name__}"
+            return target
+
+
+AllowedMetaDataType = int | float | bool | str | list[str]
+
+
+def process_metadata(meta: dict[str, Any]) -> dict[str, AllowedMetaDataType]:
+    def _impl(v: Any) -> AllowedMetaDataType:
+        if isinstance(v, torch.Tensor):
+            shape = (*v.shape,)
+            dtype = f"{v.dtype}".removeprefix("torch.")
+            return f"{type(v).__name__}(shape={shape}, dtype={dtype})"
+        if isinstance(v, int | float | bool | str):
+            return v
+        if isinstance(v, dict):
+            return [f"{key}: {val}" for key, val in v.items()]
+        if isinstance(v, list | tuple):
+            return [str(x) for x in v]
+        return str(v)
+
+    return {name: _impl(value) for name, value in meta.items()}
