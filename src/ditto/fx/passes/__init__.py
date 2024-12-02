@@ -22,6 +22,7 @@ from .fuse_reciprocal_mul import FuseReciprocalMul
 from .herd_constants_to_the_right import HerdConstantsToTheRight
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
 from .make_weights_contiguous import MakeWeightsContiguous
+from .replace_mm_by_fake_gemm_plugin import ReplaceMMByFakeGemmPlugin
 from .replace_sdpa_by_fake_gpt_attention_plugin import ReplaceSDPAByFakeGPTAttentionPlugin
 from .replace_sdpa_by_fake_gpt_attention_plugin_v2 import ReplaceSDPAByFakeGPTAttentionPluginV2
 from .replace_view_by_reshape import ReplaceViewByReshape

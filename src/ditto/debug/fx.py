@@ -33,9 +33,10 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
         name: str | None = None,
         *,
         param: torch.nn.Parameter | None = None,
-    ) -> gs.Constant:
+    ) -> gs.Constant | gs.Variable:
         if param is None:
-            assert (meta := get_tensor_metadata(node)), f"{node.format_node()} does not have tensor metadata"
+            if (meta := get_tensor_metadata(node)) is None:
+                return gs.Variable(name or node.name)
             values = torch.zeros(meta.shape, dtype=meta.dtype).numpy()
         else:
             values = param.numpy(force=True)
@@ -77,7 +78,11 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
         elif node.op == "output":
             outputs = [tensors[x.name] for x in node.all_input_nodes]
         elif node.op == "get_attr" and isinstance(target := node.target, str):
-            tensor = create_constant(node, target, param=graph_module.get_parameter(target))
+            try:
+                param = graph_module.get_parameter(target)
+            except AttributeError:
+                param = None
+            tensor = create_constant(node, target, param=param)
             tensors[node.name] = tensor
         elif node.op in ("call_function", "call_module", "call_method"):
             if is_multi_output_getitem(node):

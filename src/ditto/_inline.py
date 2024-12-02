@@ -24,6 +24,7 @@ from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_afte
 
 from .arguments import TRTLLMArgumentHint
 from .constants import INPUT_IDS, INPUT_IDS_UNSQUEEZE_DIM, PassName
+from .debug import save_for_debug
 from .fx.optimize import get_optimization_transform
 from .fx.utils import get_tensor_metadata, populate_tensor_metadata
 from .pretty_print import detailed_sym_node_str
@@ -53,6 +54,7 @@ def inline(
         exported_program = exported_program.run_decompositions(get_decompositions(enable_experimental_decompositions))
         logger.debug("Inlining the exported program")
         graph_module = exported_program.module()  # type: ignore[assignment]
+        save_for_debug("initial_graph_module", graph_module)
         match_input_ids_dynamic_dims(argument_hint, graph_module)
         logger.debug("Running post-inlining passes")
         graph_module = post_inline_pass_manager(graph_module)
