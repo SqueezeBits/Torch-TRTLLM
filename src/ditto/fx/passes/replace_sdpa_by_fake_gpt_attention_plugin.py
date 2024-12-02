@@ -4,7 +4,7 @@ from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.shape_prop import TensorMetadata
 
-from ...constants import GPT_ATTENTION_PLUGIN_DTYPE
+from ...constants import PLUGIN_DTYPE
 from ..nodes import ScaledDotProductAttention
 from ..subgraphs import Linear
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
@@ -108,17 +108,15 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 if prev_metadata and len(prev_metadata.shape) == 3 and prev_metadata.shape[0] == 1:
                     qkv_cat = graph.call_function(torch.ops.aten.squeeze.dim, (qkv_cat, 0))
                     prev_metadata = populate_tensor_metadata(qkv_cat, prev_metadata, shape=prev_metadata.shape[1:])
-                if prev_metadata and prev_metadata.dtype != GPT_ATTENTION_PLUGIN_DTYPE:
-                    qkv_cat = graph.call_function(
-                        torch.ops.aten._to_copy.default, (qkv_cat,), {"dtype": GPT_ATTENTION_PLUGIN_DTYPE}
-                    )
+                if prev_metadata and prev_metadata.dtype != PLUGIN_DTYPE:
+                    qkv_cat = graph.call_function(torch.ops.aten._to_copy.default, (qkv_cat,), {"dtype": PLUGIN_DTYPE})
                     out_dtype = prev_metadata.dtype
-                    prev_metadata = populate_tensor_metadata(qkv_cat, prev_metadata, dtype=GPT_ATTENTION_PLUGIN_DTYPE)
+                    prev_metadata = populate_tensor_metadata(qkv_cat, prev_metadata, dtype=PLUGIN_DTYPE)
                 plugin_node = graph.call_function(
                     fake_gpt_attention_plugin, (qkv_cat, *global_plugin_inputs.model_dump().values())
                 )
                 if q:
-                    prev_metadata = populate_tensor_metadata(plugin_node, q, dtype=GPT_ATTENTION_PLUGIN_DTYPE)
+                    prev_metadata = populate_tensor_metadata(plugin_node, q, dtype=PLUGIN_DTYPE)
                 if out_dtype is not None:
                     plugin_node = graph.call_function(
                         torch.ops.aten._to_copy.default,
