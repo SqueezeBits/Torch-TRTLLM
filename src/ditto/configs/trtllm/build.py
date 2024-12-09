@@ -2,10 +2,10 @@ from pydantic import model_validator
 from typing_extensions import Self
 
 from .model import TRTLLMModelConfig
-from .optimization_profile import TRTLLMOptimizationProfileConfig
+from .optimization_profile import RuntimeTRTLLMOptimizationProfileConfig, TRTLLMOptimizationProfileConfig
 
 
-class TRTLLMBuildConfig(TRTLLMOptimizationProfileConfig, TRTLLMModelConfig):
+class TRTLLMBuildConfig(RuntimeTRTLLMOptimizationProfileConfig, TRTLLMModelConfig):
     """Minimal subset of properties in `trtllm.BuildConfig` required at runtime."""
 
     @classmethod
@@ -14,7 +14,12 @@ class TRTLLMBuildConfig(TRTLLMOptimizationProfileConfig, TRTLLMModelConfig):
         profile_config: TRTLLMOptimizationProfileConfig,
         model_config: TRTLLMModelConfig,
     ) -> Self:
-        return cls.model_validate({**profile_config.model_dump(), **model_config.model_dump()})
+        return cls.model_validate(
+            {
+                **profile_config.runtime().model_dump(),
+                **model_config.model_dump(),
+            }
+        )
 
     @model_validator(mode="after")
     def check_context_mha_dependencies(self) -> Self:
