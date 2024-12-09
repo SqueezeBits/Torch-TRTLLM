@@ -4,6 +4,7 @@ from typing import Annotated
 import torch
 from loguru import logger
 from transformers import (
+    AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
     PreTrainedModel,
@@ -73,7 +74,7 @@ def build(
     output_dir: str,
     add_output: Annotated[list[str], Option(default_factory=list)],
     device: str = DEFAULT_DEVICE,
-    dtype: str = "float16",
+    dtype: str = "auto",
     verbose: bool = False,
     trust_remote_code: bool = False,
     allow_matmul_in_fp16: bool = False,
@@ -81,8 +82,17 @@ def build(
 ) -> None:
     assert not os.path.exists(output_dir) or os.path.isdir(output_dir), f"Invalid output directory: {output_dir}"
     app.pretty_exceptions_show_locals = verbose
-    torch_dtype = {"float16": torch.float16, "float32": torch.float32}[dtype]
-    logger.info(f"device: {device} | dtype: {dtype}")
+    hf_config = AutoConfig.from_pretrained(model_id, trust_remote_code=trust_remote_code)
+
+    if dtype == "auto":
+        torch_dtype = getattr(hf_config, "torch_dtype", torch.float16)
+    else:
+        torch_dtype = {
+            "bfloat16": torch.bfloat16,
+            "float16": torch.float16,
+            "float32": torch.float32,
+        }[dtype]
+    logger.info(f"device: {device} | dtype: {torch_dtype}")
 
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
@@ -92,6 +102,7 @@ def build(
 
     engine = trtllm_build(
         model,
+        torch_dtype,
         allow_matmul_in_fp16=allow_matmul_in_fp16,
         allow_activation_in_fp16=allow_activation_in_fp16,
         debug_node_names=add_output,

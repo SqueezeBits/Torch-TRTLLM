@@ -1,5 +1,5 @@
 from .add_trtllm_inputs import AddTRTLLMInputs
-from .cast_mm_const_to_fp32 import CastFP16MMToFP32
+from .cast_mm_to_fp32_if import CastMMToFP32If
 from .constant_sharing import ConstantSharing
 from .defer_unsqueeze import DeferUnsqueeze
 from .eliminate_copy import EliminateCopy

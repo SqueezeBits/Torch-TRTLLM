@@ -1,15 +1,13 @@
 import os
 from typing import Literal
 
-import numpy as np
 import tensorrt as trt
 import torch
-import torch_tensorrt as torch_trt
 from loguru import logger
 
 PassName = Literal[
     "AddTRTLLMInputs",
-    "CastFP16MMToFP32",
+    "CastMMToFP32If",
     "ConstantSharing",
     "DeferUnsqueeze",
     "EliminateCopy",
@@ -32,6 +30,7 @@ PassName = Literal[
     "InsertGatherLastTokenIds",
     "HerdConstantsToTheRight",
     "MakeWeightsContiguous",
+    "ReplaceMMByFakeGemmPlugin",
     "ReplaceSDPAByFakeGPTAttentionPlugin",
     "ReplaceSDPAByFakeGPTAttentionPluginV2",
     "ReplaceViewByReshape",
@@ -80,9 +79,6 @@ except KeyError as e:
 
 FX_TRANSFORM_MAXIMUM_ITERATION = int(os.getenv("FX_TRANSFORM_MAXIMUM_ITERATION", "100"))
 """Maximum iteration limit for FX graph transformations."""
-
-PLUGIN_DTYPE: torch.dtype = torch_trt.dtype._from(np.dtype(os.getenv("PLUGIN_DTYPE", "float16"))).to(torch.dtype)
-"""The precision for the GPT attention plugin"""
 
 INPUT_IDS: str = os.getenv("INPUT_IDS", "input_ids")
 """

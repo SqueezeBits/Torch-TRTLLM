@@ -159,3 +159,26 @@ def aten_ops_slice(
     layer.set_input(5, get_trt_tensor(ctx, np.array([inputs.dim]), f"{name}_axes"))
     set_layer_name(layer, target, name, SourceIR.ATEN)
     return layer.get_output(0)
+
+
+@dynamo_tensorrt_converter(
+    torch.ops.aten._to_copy.default,
+    supports_dynamic_shapes=True,
+    priority=ConverterPriority.HIGH,
+)
+def aten_ops_to_copy(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    return impl.cast.to_copy(
+        ctx,
+        target,
+        SourceIR.ATEN,
+        name,
+        args[0],
+        kwargs.get("dtype", args[0].dtype),
+        force_layer=True,
+    )

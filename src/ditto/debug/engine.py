@@ -1,21 +1,24 @@
 import json
 import keyword
 import re
+import sys
 from collections.abc import Callable
 from functools import cache
 from types import NoneType, UnionType
 from typing import Any, ClassVar, Literal, get_args
 
-import numpy as np
 import onnx
 import onnx_graphsurgeon as gs
 import tensorrt as trt
-import torch_tensorrt as torch_trt
+import torch
 from loguru import logger
+from onnx import TensorProto
+from onnx.helper import make_tensor
+from onnx_graphsurgeon.ir.tensor import LazyValues
 from pydantic import model_serializer, model_validator
 from typing_extensions import Self
 
-from ..types import StrictlyTyped
+from ..types import DataType, StrictlyTyped
 
 
 class EngineComponent(StrictlyTyped):
@@ -46,6 +49,8 @@ class EngineComponent(StrictlyTyped):
             if isinstance(value, str) and isinstance(  # handling Enum-like types in tensorrt
                 members := getattr(_type, "__members__", None), dict
             ):
+                if value == "BFloat16":
+                    value = "Bf16"
                 return _name, members[value.upper()]
             if _type is trt.Dims and isinstance(value, list):
                 return _name, trt.Dims(value)
@@ -115,10 +120,6 @@ class ETensor(NamedEngineComponent):
     def __str__(self) -> str:
         loc = f"@{self.location.name.lower()}" if self.location else ""
         return f"{self.name}: {self.dtype.name.lower()}{[*self.shape,]}{loc}"
-
-    @property
-    def numpy_dtype(self) -> np.dtype:
-        return torch_trt.dtype._from(self.dtype).to(np.dtype)
 
 
 class ELayer(NamedEngineComponent):
@@ -190,7 +191,7 @@ class EngineInfo(EngineComponent):
             name = get_tensor_key(t)
             tensors[name] = gs.Variable(
                 name=name,
-                dtype=t.numpy_dtype,
+                dtype=DataType(t.dtype).to(TensorProto.DataType),
                 shape=(*t.shape,),
             )
             if t.name in redefinition_counts:
@@ -207,9 +208,24 @@ class EngineInfo(EngineComponent):
                 redefinition_counts[t.name] = count = redefinition_counts.get(t.name, 0) + 1
                 logger.trace(f"Redefined {count} times: {t}")
             name = get_tensor_key(t)
+            torch_values = torch.zeros((*t.shape,), dtype=DataType(t.dtype).to(torch.dtype))
+            if torch_values.dtype != torch.bool:
+                byte_vals = torch_values.data_ptr().to_bytes(
+                    torch.numel(torch_values) * torch_values.element_size(), sys.byteorder
+                )
+                onnx_tensor_proto = make_tensor(
+                    name=name,
+                    data_type=DataType(t.dtype).to(TensorProto.DataType),
+                    dims=(*t.shape,),
+                    vals=byte_vals,
+                    raw=True,
+                )
+                values = LazyValues(onnx_tensor_proto)
+            else:
+                values = torch_values.numpy(force=True)
             tensors[name] = gs.Constant(
                 name=name,
-                values=np.zeros(shape=(*t.shape,), dtype=t.numpy_dtype),
+                values=values,
             )
 
         def add_as_node(l: ELayer) -> None:  # noqa: E741

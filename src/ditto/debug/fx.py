@@ -1,16 +1,21 @@
 import json
 import operator
+import sys
 from typing import Any, Literal
 
 import numpy as np
 import onnx
 import onnx_graphsurgeon as gs
 import torch
+from onnx import TensorProto
+from onnx.helper import make_tensor
+from onnx_graphsurgeon.ir.tensor import LazyValues
 from torch._ops import OpOverload
 from torch.fx import GraphModule, Node
 from torch.fx.node import Argument, Target
 
 from ..fx.utils import get_tensor_metadata
+from ..types import DataType
 
 
 def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
@@ -22,10 +27,10 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
 
     def create_variable(node: Node, name: str | None = None) -> gs.Variable:
         shape: tuple[int | str, ...] | None = None
-        dtype: np.dtype | None = None
+        dtype: TensorProto.DataType | None = None
         if meta := get_tensor_metadata(node):
             shape = tuple(str(s) if isinstance(s, torch.SymInt) else s for s in meta.shape)
-            dtype = torch.zeros((), dtype=meta.dtype).numpy().dtype
+            dtype = DataType(meta.dtype).to(TensorProto.DataType)
         return gs.Variable(name or node.name, dtype, shape)
 
     def create_constant(
@@ -37,9 +42,26 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
         if param is None:
             if (meta := get_tensor_metadata(node)) is None:
                 return gs.Variable(name or node.name)
-            values = torch.zeros(meta.shape, dtype=meta.dtype).numpy()
+            vals = torch.zeros(meta.shape, dtype=meta.dtype)
+            byte_vals = vals.data_ptr().to_bytes(torch.numel(vals) * vals.element_size(), sys.byteorder)
+            onnx_tensor_proto = make_tensor(
+                name=name or node.name,
+                data_type=DataType(meta.dtype).to(TensorProto.DataType),
+                dims=meta.shape,
+                vals=byte_vals,
+                raw=True,
+            )
+            values = LazyValues(onnx_tensor_proto)
         else:
-            values = param.numpy(force=True)
+            byte_vals = param.data_ptr().to_bytes(torch.numel(param) * param.element_size(), sys.byteorder)
+            onnx_tensor_proto = make_tensor(
+                name=name or node.name,
+                data_type=DataType(param.dtype).to(TensorProto.DataType),
+                dims=param.shape,
+                vals=byte_vals,
+                raw=True,
+            )
+            values = LazyValues(onnx_tensor_proto)
         return gs.Constant(name or node.name, values)
 
     def convert_argument_as_constant(a: Argument) -> gs.Constant:
