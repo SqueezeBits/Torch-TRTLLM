@@ -1,15 +1,13 @@
 import os
 from typing import Literal
 
-import numpy as np
 import tensorrt as trt
 import torch
-import torch_tensorrt as torch_trt
 from loguru import logger
 
 PassName = Literal[
     "AddTRTLLMInputs",
-    "CastTypeMMToFP32",
+    "CastMMToFP32If",
     "ConstantSharing",
     "DeferUnsqueeze",
     "EliminateCopy",

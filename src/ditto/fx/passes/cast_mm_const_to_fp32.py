@@ -6,7 +6,7 @@ from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class CastTypeMMToFP32(NodewiseOptimizationPass):
+class CastMMToFP32If(NodewiseOptimizationPass):
     """Prepend input FP32-castings and append output type-casting for a specific-type matmul node."""
 
     def __init__(self, dtype: torch.dtype):

@@ -10,7 +10,7 @@ from ..arguments import TRTLLMArgumentHint
 from ..constants import AUTO_DETECT_ROPE_SUBGRAPH, FX_TRANSFORM_MAXIMUM_ITERATION, PassName
 from .passes import (
     AddTRTLLMInputs,
-    CastTypeMMToFP32,
+    CastMMToFP32If,
     DeferUnsqueeze,
     EliminateCopy,
     EliminateNopCatOrStack,
@@ -149,7 +149,7 @@ def get_trtllm_conversion_transform(
         )
     )
     if not allow_matmul_in_fp16:
-        passes.append(CastTypeMMToFP32(dtype))
+        passes.append(CastMMToFP32If(dtype))
     if allow_activation_in_fp16:
         passes.append(FixActivationPrecision(dtype=dtype))
     return get_transform(
