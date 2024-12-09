@@ -30,6 +30,10 @@ def get_debug_artifacts_dir() -> str | None:
     return DEBUG_ARTIFACTS_DIR
 
 
+def should_save_debug_artifacts() -> bool:
+    return get_debug_artifacts_dir() is not None
+
+
 def open_debug_artifact(filename: str, mode: str = "w") -> IO[Any] | nullcontext[None]:
     if d := get_debug_artifacts_dir():
         path = os.path.join(d, filename)

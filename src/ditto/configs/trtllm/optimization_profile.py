@@ -7,22 +7,16 @@ from typing_extensions import Self
 from ...types import StrictlyTyped
 
 
-class TRTLLMOptimizationProfileConfig(StrictlyTyped):
-    """A subset of properties in `trtllm.BuildConfig` related to optimization profile."""
+class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
+    """A subset of properties in `trtllm.BuildConfig` related to optimization profile required at runtime."""
 
-    opt_batch_size: int = Field(default=8, gt=0)
-    max_batch_size: int = Field(default=256, gt=1)
-    _opt_num_tokens: int | None = PrivateAttr(default=None)
-    max_num_tokens: int = Field(default=8192, multiple_of=8, gt=1)
-    opt_seq_len: int = Field(default=2048, gt=0)
-    max_seq_len: int = Field(default=4096, gt=1)
     max_input_len: int = Field(default=1024, gt=1)
-    opt_beam_width: int = Field(default=1, gt=0)
+    max_seq_len: int = Field(default=4096, gt=1)
+    max_batch_size: int = Field(default=256, gt=1)
     max_beam_width: int = Field(default=1, gt=0)
-    opt_kv_cache_block_size: int = Field(default=32, gt=0)
-    max_kv_cache_block_size: int = Field(default=64, gt=1)
-    opt_attention_window_size: int = Field(default=2048, gt=0)
-    max_attention_window_size: int = Field(default=4096, gt=1)
+    max_num_tokens: int = Field(default=8192, multiple_of=8, gt=1)
+    opt_batch_size: int = Field(default=8, gt=0)
+    _opt_num_tokens: int | None = PrivateAttr(default=None)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -57,7 +51,7 @@ class TRTLLMOptimizationProfileConfig(StrictlyTyped):
         self._opt_num_tokens = value
 
     @model_validator(mode="after")
-    def check_attribute_dependencies(self) -> Self:
+    def check_runtime_attribute_dependencies(self) -> Self:
         """Check dependencies of attributes.
 
         The criterions and error messages are adopted from `tensorrt_llm._common.check_max_num_tokens`.
@@ -74,6 +68,43 @@ class TRTLLMOptimizationProfileConfig(StrictlyTyped):
         assert (
             self.opt_batch_size <= self.max_batch_size
         ), f"{self.opt_batch_size=} must be at most {self.max_batch_size=}."
+        assert self._opt_num_tokens is None or self._opt_num_tokens <= self.max_num_tokens
+        if self.max_num_tokens > (upper_bound := 16384):
+            logger.warning(
+                f"Specifying a {self.max_num_tokens=} larger than {upper_bound} is usually not recommended. You might "
+                "miss performance gain and too large `max_num_tokens` could possibly exceed the TensorRT tensor volume."
+            )
+        return self
+
+
+class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
+    """A subset of properties in `trtllm.BuildConfig` related to optimization profile."""
+
+    opt_seq_len: int = Field(default=2048, gt=0)
+    opt_beam_width: int = Field(default=1, gt=0)
+    opt_kv_cache_block_size: int = Field(default=32, gt=0)
+    max_kv_cache_block_size: int = Field(default=64, gt=1)
+    opt_attention_window_size: int = Field(default=2048, gt=0)
+    max_attention_window_size: int = Field(default=4096, gt=1)
+
+    def runtime(self) -> RuntimeTRTLLMOptimizationProfileConfig:
+        runtime_config = RuntimeTRTLLMOptimizationProfileConfig(
+            **{
+                key: value
+                for key, value in self.model_dump().items()
+                if key in RuntimeTRTLLMOptimizationProfileConfig.model_fields
+            }
+        )
+        runtime_config.opt_num_tokens = self.opt_num_tokens
+        return runtime_config
+
+    @model_validator(mode="after")
+    def check_attribute_dependencies(self) -> Self:
+        """Check dependencies of attributes.
+
+        The criterions and error messages are adopted from `tensorrt_llm._common.check_max_num_tokens`.
+        While TRT-LLM tries to adjust the wrong values provided by the user, we will simply reject them.
+        """
         assert self.opt_seq_len <= self.max_seq_len, f"{self.opt_seq_len=} must be at most {self.max_seq_len=}."
         assert self.opt_beam_width <= self.max_beam_width, f"{self.opt_seq_len=} must be at most {self.max_seq_len=}."
         assert (
@@ -85,10 +116,4 @@ class TRTLLMOptimizationProfileConfig(StrictlyTyped):
         assert (
             self.max_attention_window_size <= self.max_seq_len
         ), f"{self.max_attention_window_size=} must be at most {self.max_seq_len=}."
-        assert self._opt_num_tokens is None or self._opt_num_tokens <= self.max_num_tokens
-        if self.max_num_tokens > (upper_bound := 16384):
-            logger.warning(
-                f"Specifying a {self.max_num_tokens=} larger than {upper_bound} is usually not recommended. You might "
-                "miss performance gain and too large `max_num_tokens` could possibly exceed the TensorRT tensor volume."
-            )
         return self

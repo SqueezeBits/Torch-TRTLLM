@@ -14,7 +14,7 @@ from transformers import (
 from typer import Option, Typer
 
 from .api import trtllm_build
-from .constants import DEFAULT_DEVICE, TRTLLM_LLAMA2_7B_CONFIG
+from .constants import DEFAULT_DEVICE
 
 app = Typer()
 
@@ -100,7 +100,7 @@ def build(
         trust_remote_code=trust_remote_code,
     ).to(device)
 
-    engine = trtllm_build(
+    engine, config = trtllm_build(
         model,
         torch_dtype,
         allow_matmul_in_fp16=allow_matmul_in_fp16,
@@ -120,13 +120,12 @@ def build(
     engine_path = get_output_path("rank0.engine")
     logger.info(f"Writing serialized engine at {engine_path}")
     with open(engine_path, "wb") as engine_file:
-        engine_file.write(engine.serialize())
+        engine_file.write(engine)
 
-    # TODO: implement config compilation [FOC-422](https://squeezebits.atlassian.net/browse/FOC-422?atlOrigin=eyJpIjoiMTM5MDEyOWRjMzVlNDJiZDlhNzU3YjlkYjIwNTNkNjQiLCJwIjoiaiJ9)
     config_path = get_output_path("config.json")
     logger.info(f"Writing engine config at {config_path}")
     with open(config_path, "w") as config_file:
-        config_file.write(TRTLLM_LLAMA2_7B_CONFIG)
+        config_file.write(config.model_dump_json(indent=2))
 
 
 @app.command()
