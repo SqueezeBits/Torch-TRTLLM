@@ -20,6 +20,7 @@ from .types import BuiltInConstant, DeviceLikeType
 
 def trtllm_build(
     model: PreTrainedModel,
+    dtype: torch.dtype,
     *,
     profile_config: TRTLLMOptimizationProfileConfig | None = None,
     model_config: TRTLLMModelConfig | None = None,
@@ -40,6 +41,7 @@ def trtllm_build(
     graph_module = trtllm_export(
         model,
         argument_hint,
+        dtype,
         device=device,
         allow_matmul_in_fp16=allow_matmul_in_fp16,
         allow_activation_in_fp16=allow_activation_in_fp16,
@@ -91,6 +93,7 @@ def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
 def trtllm_export(
     model: PreTrainedModel,
     argument_hint: TRTLLMArgumentHint,
+    dtype: torch.dtype,
     *,
     device: DeviceLikeType | None = None,
     allow_matmul_in_fp16: bool = False,
@@ -113,6 +116,7 @@ def trtllm_export(
     graph_module = inline(
         exported_program,
         argument_hint=argument_hint,
+        dtype=dtype,
         skipped_optimizers=skipped_optimizers,
         allow_matmul_in_fp16=allow_matmul_in_fp16,
         allow_activation_in_fp16=allow_activation_in_fp16,

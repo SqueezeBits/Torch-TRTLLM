@@ -8,6 +8,7 @@ from loguru import logger
 from torch.fx import GraphModule
 from torch.fx.node import Node, Target
 from torch.fx.passes.shape_prop import TensorMetadata
+from torch.utils._python_dispatch import _disable_current_modes
 from torch_tensorrt import Input, dtype
 from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from torch_tensorrt.dynamo.conversion import (
@@ -27,6 +28,7 @@ from .debug import (
     save_for_debug,
 )
 from .fx.targets import GemmPlugin, GPTAttentionPlugin
+from .types import map_torch_to_trt_dtype
 
 
 class TRTLLMInterpreter(TRTInterpreter):
@@ -58,6 +60,7 @@ class TRTLLMInterpreter(TRTInterpreter):
         if network_name:
             self.ctx.net.name = network_name
         self._constant_cache: dict[str, trt.ITensor] = {}
+        self._constant_tensors: list[trt.ITensor] = []
 
     def validate_conversion(self) -> set[str]:
         missing_ops = super().validate_conversion()
@@ -106,10 +109,19 @@ class TRTLLMInterpreter(TRTInterpreter):
     def get_attr(self, target: str, args: Any, kwargs: Any) -> trt.ITensor:
         if target in self._constant_cache:
             return self._constant_cache[target]
-        numpy_array = super().get_attr(target, args, kwargs)
-        constant = create_constant(self.ctx, numpy_array, target, numpy_array.dtype)
-        self._constant_cache[target] = constant
-        return constant
+        with _disable_current_modes():
+            frozen_attr = self.fetch_attr(target)
+            if isinstance(frozen_attr, torch.nn.Parameter):
+                constant_tensor = frozen_attr.data
+            else:
+                constant_tensor = frozen_attr
+        constant_tensor = constant_tensor.cpu().detach().contiguous()
+        trt_weight = trt.Weights(map_torch_to_trt_dtype(constant_tensor.dtype), constant_tensor.data_ptr(), torch.numel(constant_tensor))
+        constant = self.ctx.net.add_constant(constant_tensor.shape, trt_weight)
+        constant.name = target
+        self._constant_tensors.append(constant_tensor)
+        self._constant_cache[target] = constant.get_output(0)
+        return constant.get_output(0)
 
     def output(self, target: str, args: Any, kwargs: Any) -> list[Any]:
         outputs = super().output(target, args, kwargs)

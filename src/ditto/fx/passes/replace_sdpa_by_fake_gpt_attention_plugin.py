@@ -4,16 +4,20 @@ from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.shape_prop import TensorMetadata
 
-from ...constants import PLUGIN_DTYPE
 from ..nodes import ScaledDotProductAttention
 from ..subgraphs import Linear
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
 from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata, traceback_reformats
 from .graph_pass import GraphOptimizationPass
+from ...types import map_torch_to_trt_dtype
 
 
 class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
     """Replace F.scaled_dot_product_attention by FakeGPTAttentionPlugin (required for trtllm)."""
+
+    def __init__(self, dtype: torch.dtype):
+        super().__init__()
+        self.dtype = dtype
 
     def call(self, graph_module: GraphModule) -> PassResult:
         layer_idx = -1
@@ -95,6 +99,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 num_heads=num_heads,
                 num_kv_heads=num_kv_heads,
                 head_size=embed_dim,
+                type_id=map_torch_to_trt_dtype(self.dtype),
                 **global_rope_config.model_dump(),
             )
             with graph.inserting_before(node):
@@ -108,15 +113,15 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 if prev_metadata and len(prev_metadata.shape) == 3 and prev_metadata.shape[0] == 1:
                     qkv_cat = graph.call_function(torch.ops.aten.squeeze.dim, (qkv_cat, 0))
                     prev_metadata = populate_tensor_metadata(qkv_cat, prev_metadata, shape=prev_metadata.shape[1:])
-                if prev_metadata and prev_metadata.dtype != PLUGIN_DTYPE:
-                    qkv_cat = graph.call_function(torch.ops.aten._to_copy.default, (qkv_cat,), {"dtype": PLUGIN_DTYPE})
+                if prev_metadata and prev_metadata.dtype != self.dtype:
+                    qkv_cat = graph.call_function(torch.ops.aten._to_copy.default, (qkv_cat,), {"dtype": self.dtype})
                     out_dtype = prev_metadata.dtype
-                    prev_metadata = populate_tensor_metadata(qkv_cat, prev_metadata, dtype=PLUGIN_DTYPE)
+                    prev_metadata = populate_tensor_metadata(qkv_cat, prev_metadata, dtype=self.dtype)
                 plugin_node = graph.call_function(
                     fake_gpt_attention_plugin, (qkv_cat, *global_plugin_inputs.model_dump().values())
                 )
                 if q:
-                    prev_metadata = populate_tensor_metadata(plugin_node, q, dtype=PLUGIN_DTYPE)
+                    prev_metadata = populate_tensor_metadata(plugin_node, q, dtype=self.dtype)
                 if out_dtype is not None:
                     plugin_node = graph.call_function(
                         torch.ops.aten._to_copy.default,

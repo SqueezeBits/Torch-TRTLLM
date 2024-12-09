@@ -5,6 +5,7 @@ from ..nodes import MM
 from ..targets import GemmPlugin
 from ..utils import get_tensor_metadata, populate_tensor_metadata
 from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
+from ...types import map_torch_to_trt_dtype
 
 
 class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
@@ -28,7 +29,7 @@ class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
             other_t = graph.call_function(torch.ops.aten.permute.default, (mm.other, (1, 0)))
             populate_tensor_metadata(other_t, other, shape=(other.shape[1], other.shape[0]))
 
-        fake_gemm_plugin = GemmPlugin(transb=1)
+        fake_gemm_plugin = GemmPlugin(transb=1, type_id=map_torch_to_trt_dtype(mm_output.dtype))
         with graph.inserting_before(node):
             output = graph.call_function(fake_gemm_plugin, (mm.this, other_t))
             populate_tensor_metadata(output, mm_output)

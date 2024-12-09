@@ -1,6 +1,7 @@
 from collections.abc import Callable
 
 from loguru import logger
+import torch
 from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_manager import PassManager
 from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
@@ -9,7 +10,7 @@ from ..arguments import TRTLLMArgumentHint
 from ..constants import AUTO_DETECT_ROPE_SUBGRAPH, FX_TRANSFORM_MAXIMUM_ITERATION, PassName
 from .passes import (
     AddTRTLLMInputs,
-    CastFP16MMToFP32,
+    CastTypeMMToFP32,
     DeferUnsqueeze,
     EliminateCopy,
     EliminateNopCatOrStack,
@@ -42,6 +43,7 @@ from .passes.graph_pass import GraphOptimizationPass
 
 def get_optimization_transform(
     argument_hint: TRTLLMArgumentHint,
+    dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
     allow_matmul_in_fp16: bool = False,
@@ -65,6 +67,7 @@ def get_optimization_transform(
         get_level1_transform(skipped_optimizers),
         get_trtllm_conversion_transform(
             argument_hint,
+            dtype,
             skipped_optimizers=skipped_optimizers,
             allow_matmul_in_fp16=allow_matmul_in_fp16,
             allow_activation_in_fp16=allow_activation_in_fp16,
@@ -81,25 +84,6 @@ def compose(*transforms: Callable[[GraphModule], GraphModule]) -> Callable[[Grap
 
     return composed_transform
 
-
-# conversions required for TRT-LLM engine
-TRTLLM_CONVERSION_PASSES: tuple[type[GraphOptimizationPass], ...] = (
-    (
-        InsertGatherLastTokenIds,
-        WrapRoPESubgraphs,
-        ReplaceSDPAByFakeGPTAttentionPlugin,
-        FuseMMConstSiblings,
-        ReplaceMMByFakeGemmPlugin,
-    )
-    if AUTO_DETECT_ROPE_SUBGRAPH
-    else (
-        InsertGatherLastTokenIds,
-        ReplaceSDPAByFakeGPTAttentionPluginV2,
-        # TODO: improve memory management of the pass `FuseMMConstSiblings`
-        FuseMMConstSiblings,
-        ReplaceMMByFakeGemmPlugin,
-    )
-)
 
 # passes required before the TRT-LLM conversion passes
 LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
@@ -136,6 +120,7 @@ LEVEL2_PASSES: tuple[type[GraphOptimizationPass], ...] = (
 
 def get_trtllm_conversion_transform(
     argument_hint: TRTLLMArgumentHint,
+    dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
     allow_matmul_in_fp16: bool = False,
@@ -145,11 +130,27 @@ def get_trtllm_conversion_transform(
         AddTRTLLMInputs(argument_hint=argument_hint),
         SwapUnsqueezeWithSymSizeInt,  # required for `InsertGatherLastTokenIds`
     ]
-    passes.extend(TRTLLM_CONVERSION_PASSES)
+    passes.extend(
+        (
+            InsertGatherLastTokenIds,
+            WrapRoPESubgraphs,
+            ReplaceSDPAByFakeGPTAttentionPlugin(dtype),
+            FuseMMConstSiblings,
+            ReplaceMMByFakeGemmPlugin,
+        )
+        if AUTO_DETECT_ROPE_SUBGRAPH
+        else (
+            InsertGatherLastTokenIds,
+            ReplaceSDPAByFakeGPTAttentionPluginV2(dtype),
+            # TODO: improve memory management of the pass `FuseMMConstSiblings`
+            FuseMMConstSiblings,
+            ReplaceMMByFakeGemmPlugin,
+        )
+    )
     if not allow_matmul_in_fp16:
-        passes.append(CastFP16MMToFP32)
+        passes.append(CastTypeMMToFP32(dtype))
     if allow_activation_in_fp16:
-        passes.append(FixActivationPrecision)
+        passes.append(FixActivationPrecision(dtype=dtype))
     return get_transform(
         *passes,
         skipped_optimizers=skipped_optimizers,
