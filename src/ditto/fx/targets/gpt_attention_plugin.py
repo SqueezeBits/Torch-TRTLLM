@@ -15,11 +15,9 @@ from tensorrt_llm.functional import (
 )
 from tensorrt_llm.plugin.plugin import ContextFMHAType
 from torch.fx import Graph, Node
-from torch_tensorrt._enums import dtype as torch_trt_dtype
 from transformers import PretrainedConfig
 from typing_extensions import Self
 
-from ...constants import PLUGIN_DTYPE
 from ...debug import open_debug_artifact
 from ...types import StrictlyTyped
 
@@ -146,7 +144,7 @@ class GPTAttentionPluginFields(StrictlyTyped):
     block_sparse_vertical_stride: int = 8
     paged_kv_cache: bool = True
     tokens_per_block: int = 64
-    type_id: trt.DataType = torch_trt_dtype._from(PLUGIN_DTYPE).to(trt.DataType)
+    type_id: trt.DataType
     max_context_length: int = 1024
     qkv_bias_enabled: bool = False
     do_cross_attention: bool = False

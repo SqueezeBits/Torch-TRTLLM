@@ -15,7 +15,7 @@ from .node_wise_pass import GraphOptimizationPass, ModifiedInsideThePass, Nodewi
 class FixActivationPrecision(GraphOptimizationPass):
     """Fix the activation layer precisions."""
 
-    def __init__(self, *, dtype: torch.dtype = torch.float16, depth: int = 0) -> None:
+    def __init__(self, *, dtype: torch.dtype, depth: int = 0) -> None:
         super().__init__(depth=depth)
         self.pass_manager = PassManager(
             passes=[
@@ -30,7 +30,7 @@ class FixActivationPrecision(GraphOptimizationPass):
 
 
 class FixPrecision(NodewiseOptimizationPass):
-    def __init__(self, *, to: torch.dtype = torch.float16, depth: int = 0) -> None:
+    def __init__(self, *, to: torch.dtype = torch.bfloat16, depth: int = 0) -> None:
         super().__init__(depth=depth)
         self.dtype = to
 
