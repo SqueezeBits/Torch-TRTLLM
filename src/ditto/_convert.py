@@ -12,7 +12,7 @@ from torch_tensorrt.logging import TRT_LOGGER
 from ditto.configs.tensorrt.config import TensorRTConfig
 
 from .arguments import TRTLLMArgumentHint
-from .debug import save_for_debug
+from .debug import save_for_debug, should_save_debug_artifacts
 from .interpreter import TRTLLMInterpreter
 
 CURRENT_DEVICE = Device._current_device()
@@ -27,7 +27,7 @@ def convert(
     engine_cache: BaseEngineCache | None = None,
     network_name: str | None = None,
     output_names: list[str] | None = None,
-) -> trt.ICudaEngine:
+) -> bytes:
     """Convert an graph module to a TensorRT engine."""
     input_specs = tuple(tensor_type_hint.as_spec(name) for name, tensor_type_hint in argument_hint.as_dict().items())
     logger.opt(lazy=True).debug("input_specs:\n{x}", x=lambda: "\n".join(str(spec) for spec in input_specs))
@@ -42,9 +42,12 @@ def convert(
             network_name=network_name,
             output_names=output_names,
         )
-        result = interpreter.run()
-        engine = trt.Runtime(TRT_LOGGER).deserialize_cuda_engine(result.serialized_engine)
-        save_for_debug("trt_engine", engine)
+        engine = interpreter.run().serialized_engine
+        if should_save_debug_artifacts():
+            save_for_debug(
+                "trt_engine",
+                trt.Runtime(TRT_LOGGER).deserialize_cuda_engine(engine),
+            )
         return engine
     except UnsupportedOperatorException as e:
         logger.error(

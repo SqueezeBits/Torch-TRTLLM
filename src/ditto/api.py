@@ -1,6 +1,5 @@
 from collections.abc import Callable
 
-import tensorrt as trt
 import torch
 from loguru import logger
 from torch.fx import GraphModule
@@ -12,7 +11,14 @@ from ._convert import convert
 from ._export import export
 from ._inline import inline
 from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
-from .configs import TensorRTConfig, TRTLLMModelConfig, TRTLLMOptimizationProfileConfig
+from .configs import (
+    TensorRTConfig,
+    TRTLLMBuildConfig,
+    TRTLLMEngineConfig,
+    TRTLLMModelConfig,
+    TRTLLMOptimizationProfileConfig,
+    generate_trtllm_pretrained_config,
+)
 from .constants import DEFAULT_DEVICE, INPUT_IDS, PassName
 from .debug import save_for_debug
 from .types import BuiltInConstant, DeviceLikeType
@@ -29,7 +35,7 @@ def trtllm_build(
     debug_node_names: list[str] | None = None,
     device: DeviceLikeType | None = None,
     engine_cache: BaseEngineCache | None = None,
-) -> trt.ICudaEngine:
+) -> tuple[bytes, TRTLLMEngineConfig]:
     device = _resolve_device(model, device)
     network_name = type(model).__name__
     profile_config = profile_config or TRTLLMOptimizationProfileConfig()
@@ -37,6 +43,7 @@ def trtllm_build(
     trt_config = trt_config or TensorRTConfig()
     argument_hint = TRTLLMArgumentHint.configure(profile_config)
 
+    logger.info("Exporting the model into graph module")
     graph_module = trtllm_export(
         model,
         argument_hint,
@@ -46,12 +53,20 @@ def trtllm_build(
         extra_passes=[add_outputs(debug_node_names)] if debug_node_names else None,
     )
 
-    logger.info("Building TensorRT engine ...")
+    logger.info("Generating engine config from the graph module")
+    config = generate_trtllm_engine_config(
+        graph_module,
+        profile_config,
+        model_config,
+        architecture=network_name,
+    )
+
     output_names = ["logits"]  # TRTLLM requires the first output name to be 'logits'
     if debug_node_names:
         output_names.extend(debug_node_names)
 
-    return convert(
+    logger.info("Building TensorRT engine ...")
+    engine = convert(
         graph_module,
         argument_hint,
         trt_config,
@@ -59,6 +74,8 @@ def trtllm_build(
         network_name=network_name,
         output_names=output_names,
     )
+
+    return engine, config
 
 
 def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
@@ -98,7 +115,7 @@ def trtllm_export(
     skipped_optimizers: list[PassName] | None = None,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
 ) -> GraphModule:
-    logger.info("torch.exporting module ...")
+    logger.debug("torch.exporting module ...")
     device = _resolve_device(model, device)
     hints: dict[str, TensorTypeHint | BuiltInConstant] = {
         INPUT_IDS: argument_hint.batched_input_ids,
@@ -109,7 +126,7 @@ def trtllm_export(
     exported_program = export(model, arguments)
     save_for_debug("exported_program", exported_program)
 
-    logger.info("Lowering exported program into graph module ...")
+    logger.debug("Lowering exported program into graph module ...")
     graph_module = inline(
         exported_program,
         argument_hint=argument_hint,
@@ -120,6 +137,22 @@ def trtllm_export(
     )
     save_for_debug("graph_module", graph_module)
     return graph_module
+
+
+def generate_trtllm_engine_config(
+    graph_module: GraphModule,
+    profile_config: TRTLLMOptimizationProfileConfig,
+    model_config: TRTLLMModelConfig,
+    *,
+    architecture: str | None = None,
+) -> TRTLLMEngineConfig:
+    return TRTLLMEngineConfig(
+        pretrained_config=generate_trtllm_pretrained_config(
+            graph_module,
+            architecture=architecture,
+        ),
+        build_config=TRTLLMBuildConfig.merge(profile_config, model_config),
+    )
 
 
 def _resolve_device(model: torch.nn.Module, device: DeviceLikeType | None) -> DeviceLikeType:
