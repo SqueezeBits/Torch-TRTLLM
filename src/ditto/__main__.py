@@ -85,7 +85,7 @@ def build(
     hf_config = AutoConfig.from_pretrained(model_id, trust_remote_code=trust_remote_code)
 
     if dtype == "auto":
-        torch_dtype = getattr(hf_config, "torch_dtype", "float16")
+        torch_dtype = getattr(hf_config, "torch_dtype", torch.float16)
     else:
         torch_dtype = {
             "bfloat16": torch.bfloat16,
@@ -102,6 +102,7 @@ def build(
 
     engine = trtllm_build(
         model,
+        torch_dtype,
         allow_matmul_in_fp16=allow_matmul_in_fp16,
         allow_activation_in_fp16=allow_activation_in_fp16,
         debug_node_names=add_output,

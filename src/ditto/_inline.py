@@ -33,6 +33,7 @@ from .pretty_print import detailed_sym_node_str
 def inline(
     exported_program: ExportedProgram,
     argument_hint: TRTLLMArgumentHint,
+    dtype: torch.dtype,
     *,
     enable_experimental_decompositions: bool = _defaults.ENABLE_EXPERIMENTAL_DECOMPOSITIONS,
     skipped_optimizers: list[PassName] | None = None,
@@ -66,6 +67,7 @@ def inline(
             prepare_for_optimization_passes,
             get_optimization_transform(
                 argument_hint,
+                dtype,
                 skipped_optimizers=skipped_optimizers,
                 allow_matmul_in_fp16=allow_matmul_in_fp16,
                 allow_activation_in_fp16=allow_activation_in_fp16,

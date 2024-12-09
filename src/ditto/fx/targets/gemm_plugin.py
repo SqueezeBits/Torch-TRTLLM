@@ -4,9 +4,7 @@ from typing import Any
 import numpy as np
 import tensorrt as trt
 import torch
-from torch_tensorrt._enums import dtype as torch_trt_dtype
 
-from ...constants import PLUGIN_DTYPE
 from ...types import StrictlyTyped
 
 
@@ -16,7 +14,7 @@ class GemmPluginFields(StrictlyTyped):
     transb: int = 0
     pad_lda: int = 0
     pad_ldb: int = 0
-    type_id: trt.DataType = torch_trt_dtype._from(PLUGIN_DTYPE).to(trt.DataType)
+    type_id: trt.DataType
     use_fp8: int = 0
     alpha: float = 1.0
 
