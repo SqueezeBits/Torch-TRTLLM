@@ -1,5 +1,7 @@
 from typing import Literal
 
+# The available data types are listed in `_str_to_trt_dtype_dict` from `tensorrt_llm._utils`
+# which is used by the function `str_dtype_to_trt` in the same file.
 DTypeLiteral = Literal[
     "float16",
     "bfloat16",
