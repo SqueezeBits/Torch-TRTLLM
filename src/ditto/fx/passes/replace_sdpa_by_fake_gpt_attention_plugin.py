@@ -1,15 +1,16 @@
+import tensorrt as trt
 import torch
 from loguru import logger
 from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.shape_prop import TensorMetadata
 
+from ...types import DataType
 from ..nodes import ScaledDotProductAttention
 from ..subgraphs import Linear
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
 from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata, traceback_reformats
 from .graph_pass import GraphOptimizationPass
-from ...types import map_torch_to_trt_dtype
 
 
 class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
@@ -99,7 +100,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 num_heads=num_heads,
                 num_kv_heads=num_kv_heads,
                 head_size=embed_dim,
-                type_id=map_torch_to_trt_dtype(self.dtype),
+                type_id=DataType(self.dtype).to(trt.DataType),
                 **global_rope_config.model_dump(),
             )
             with graph.inserting_before(node):

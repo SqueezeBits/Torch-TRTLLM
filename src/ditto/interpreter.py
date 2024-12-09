@@ -18,7 +18,6 @@ from torch_tensorrt.dynamo.conversion import (
     TRTInterpreter,
     UnsupportedOperatorException,
 )
-from torch_tensorrt.dynamo.conversion.converter_utils import create_constant
 from torch_tensorrt.logging import TRT_LOGGER
 
 from .configs import TensorRTBuilderConfig, TensorRTNetworkCreationFlags
@@ -28,7 +27,7 @@ from .debug import (
     save_for_debug,
 )
 from .fx.targets import GemmPlugin, GPTAttentionPlugin
-from .types import map_torch_to_trt_dtype
+from .types import DataType
 
 
 class TRTLLMInterpreter(TRTInterpreter):
@@ -90,9 +89,10 @@ class TRTLLMInterpreter(TRTInterpreter):
         return output
 
     def call_function(self, target: Target, args: Any, kwargs: Any) -> Any:
+        assert self._cur_node is not None
         converter_packet = (
             DYNAMO_CONVERTERS.get_unvalidated(type(target))
-            if isinstance(target, (GPTAttentionPlugin, GemmPlugin))
+            if isinstance(target, GPTAttentionPlugin | GemmPlugin)
             else DYNAMO_CONVERTERS.get(self._cur_node)
         )
         if converter_packet is None:
@@ -116,7 +116,11 @@ class TRTLLMInterpreter(TRTInterpreter):
             else:
                 constant_tensor = frozen_attr
         constant_tensor = constant_tensor.cpu().detach().contiguous()
-        trt_weight = trt.Weights(map_torch_to_trt_dtype(constant_tensor.dtype), constant_tensor.data_ptr(), torch.numel(constant_tensor))
+        trt_weight = trt.Weights(
+            DataType(constant_tensor.dtype).to(trt.DataType),
+            constant_tensor.data_ptr(),
+            torch.numel(constant_tensor),
+        )
         constant = self.ctx.net.add_constant(constant_tensor.shape, trt_weight)
         constant.name = target
         self._constant_tensors.append(constant_tensor)

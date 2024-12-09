@@ -7,20 +7,18 @@ from functools import cache
 from types import NoneType, UnionType
 from typing import Any, ClassVar, Literal, get_args
 
-import numpy as np
 import onnx
-from onnx import TensorProto
-from onnx.helper import make_tensor
 import onnx_graphsurgeon as gs
-from onnx_graphsurgeon.ir.tensor import LazyValues
 import tensorrt as trt
 import torch
-import torch_tensorrt as torch_trt
 from loguru import logger
+from onnx import TensorProto
+from onnx.helper import make_tensor
+from onnx_graphsurgeon.ir.tensor import LazyValues
 from pydantic import model_serializer, model_validator
 from typing_extensions import Self
 
-from ..types import StrictlyTyped, map_trt_to_onnx_dtype, map_trt_to_torch_dtype
+from ..types import DataType, StrictlyTyped
 
 
 class EngineComponent(StrictlyTyped):
@@ -51,8 +49,8 @@ class EngineComponent(StrictlyTyped):
             if isinstance(value, str) and isinstance(  # handling Enum-like types in tensorrt
                 members := getattr(_type, "__members__", None), dict
             ):
-                if value == 'BFloat16':
-                    value = 'Bf16'
+                if value == "BFloat16":
+                    value = "Bf16"
                 return _name, members[value.upper()]
             if _type is trt.Dims and isinstance(value, list):
                 return _name, trt.Dims(value)
@@ -193,7 +191,7 @@ class EngineInfo(EngineComponent):
             name = get_tensor_key(t)
             tensors[name] = gs.Variable(
                 name=name,
-                dtype=map_trt_to_onnx_dtype(t.dtype),
+                dtype=DataType(t.dtype).to(TensorProto.DataType),
                 shape=(*t.shape,),
             )
             if t.name in redefinition_counts:
@@ -210,15 +208,17 @@ class EngineInfo(EngineComponent):
                 redefinition_counts[t.name] = count = redefinition_counts.get(t.name, 0) + 1
                 logger.trace(f"Redefined {count} times: {t}")
             name = get_tensor_key(t)
-            torch_values = torch.zeros((*t.shape,), dtype=map_trt_to_torch_dtype(t.dtype))
+            torch_values = torch.zeros((*t.shape,), dtype=DataType(t.dtype).to(torch.dtype))
             if torch_values.dtype != torch.bool:
-                byte_vals = torch_values.data_ptr().to_bytes(torch.numel(torch_values) * torch_values.element_size(), sys.byteorder)
+                byte_vals = torch_values.data_ptr().to_bytes(
+                    torch.numel(torch_values) * torch_values.element_size(), sys.byteorder
+                )
                 onnx_tensor_proto = make_tensor(
                     name=name,
-                    data_type=map_trt_to_onnx_dtype(t.dtype),
+                    data_type=DataType(t.dtype).to(TensorProto.DataType),
                     dims=(*t.shape,),
                     vals=byte_vals,
-                    raw=True
+                    raw=True,
                 )
                 values = LazyValues(onnx_tensor_proto)
             else:
