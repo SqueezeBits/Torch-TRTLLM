@@ -1,7 +1,7 @@
 from collections.abc import Callable
 
-from loguru import logger
 import torch
+from loguru import logger
 from torch.fx import GraphModule
 from torch.fx.passes.infra.pass_manager import PassManager
 from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
@@ -53,6 +53,7 @@ def get_optimization_transform(
 
     Args:
         argument_hint (TRTLLMArgumentHint): the type hints for TRTLLM inputs
+        dtype (torch.dtype): the data type for the plugins
         skipped_optimizers (list[PassName] | None, optional): the names of optimization passes to skip.
             Defaults to None.
         allow_matmul_in_fp16 (bool, optional): whether to allow matrix multiplication to be performed in FP16 precision.
@@ -84,25 +85,6 @@ def compose(*transforms: Callable[[GraphModule], GraphModule]) -> Callable[[Grap
 
     return composed_transform
 
-
-# conversions required for TRT-LLM engine
-TRTLLM_CONVERSION_PASSES: tuple[type[GraphOptimizationPass], ...] = (
-    (
-        InsertGatherLastTokenIds,
-        WrapRoPESubgraphs,
-        ReplaceSDPAByFakeGPTAttentionPlugin,
-        FuseMMConstSiblings,
-        # ReplaceMMByFakeGemmPlugin,
-    )
-    if AUTO_DETECT_ROPE_SUBGRAPH
-    else (
-        InsertGatherLastTokenIds,
-        ReplaceSDPAByFakeGPTAttentionPluginV2,
-        # TODO: improve memory management of the pass `FuseMMConstSiblings`
-        FuseMMConstSiblings,
-        # ReplaceMMByFakeGemmPlugin,
-    )
-)
 
 # passes required before the TRT-LLM conversion passes
 LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
