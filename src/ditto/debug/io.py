@@ -144,7 +144,7 @@ def save_graph_module_for_debug(
     with (
         detailed_sym_node_str(),
         open_debug_artifact(f"{name}.py") as code_file,
-        open_debug_artifact(f"{name}.txt") as graph_file,
+        open_debug_artifact(f"{name}.mlir") as graph_file,
         open_debug_artifact(f"{name}.onnx", "wb") as onnx_file,
     ):
         if code_file and graph_file and onnx_file:
