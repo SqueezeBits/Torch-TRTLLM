@@ -17,7 +17,7 @@ KVCacheTypeLiteral = Literal["CONTINUOUS", "DISABLED", "PAGED"]
 
 LoraCheckpointLiteral = Literal["hf", "nemo"]
 
-PluginFlag = Literal["auto", None]
+PluginFlag = Literal["auto", "float16", "bfloat16", "fp8", None]
 
 QuantAlgoLiteral = Literal[
     "W8A16",

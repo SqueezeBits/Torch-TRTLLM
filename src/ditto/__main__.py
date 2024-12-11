@@ -1,3 +1,4 @@
+import math
 import os
 from typing import Annotated
 
@@ -14,6 +15,11 @@ from transformers import (
 from typer import Option, Typer
 
 from .api import trtllm_build
+from .configs import (
+    TRTLLMModelConfig,
+    TRTLLMOptimizationProfileConfig,
+    TRTLLMPluginConfig,
+)
 from .constants import DEFAULT_DEVICE
 
 app = Typer()
@@ -100,9 +106,27 @@ def build(
         trust_remote_code=trust_remote_code,
     ).to(device)
 
+    max_position_embeddings = getattr(
+        hf_config, "max_position_embeddings", 4096
+    )  # TODO: it needs to be an argument as cli's input
+    tokens_per_block = 64  # TODO: it needs to be an argument as cli's input
+    max_kv_cache_block_size = math.ceil(max_position_embeddings / tokens_per_block)
     engine, config = trtllm_build(
         model,
         torch_dtype,
+        profile_config=TRTLLMOptimizationProfileConfig(
+            max_seq_len=max_position_embeddings,
+            max_attention_window_size=max_position_embeddings,
+            max_kv_cache_block_size=max_kv_cache_block_size,
+            opt_kv_cache_block_size=max_kv_cache_block_size // 2,
+        ),
+        model_config=TRTLLMModelConfig(
+            plugin_config=TRTLLMPluginConfig(
+                gpt_attention_plugin=dtype,  # type: ignore[arg-type]
+                gemm_plugin=dtype,  # type: ignore[arg-type]
+                tokens_per_block=tokens_per_block,
+            ),
+        ),
         allow_matmul_in_fp16=allow_matmul_in_fp16,
         allow_activation_in_fp16=allow_activation_in_fp16,
         debug_node_names=add_output,
