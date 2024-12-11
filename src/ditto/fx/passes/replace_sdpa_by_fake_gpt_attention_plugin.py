@@ -1,22 +1,81 @@
 import tensorrt as trt
 import torch
 from loguru import logger
+from pydantic import model_validator
+from torch._ops import OpOverload
 from torch.fx import GraphModule, Node
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.shape_prop import TensorMetadata
+from typing_extensions import Self
 
-from ...types import DataType
+from ...types import DataType, StrictlyTyped
 from ..nodes import ScaledDotProductAttention
 from ..subgraphs import Linear
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
-from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata, traceback_reformats
+from ..utils import get_ancestors_with_depth, get_tensor_metadata, populate_tensor_metadata
 from .graph_pass import GraphOptimizationPass
+
+
+class TrailingReformatSequence(StrictlyTyped):
+    nodes: tuple[Node, ...]  # sorted from bottom to top
+
+    @property
+    def top(self) -> Node:
+        return self.nodes[-1]
+
+    @property
+    def reformats(self) -> tuple[Node, ...]:
+        return self.nodes[:-1]
+
+    @classmethod
+    def get_reformat_targets(cls) -> tuple[OpOverload, ...]:
+        return (
+            torch.ops.aten.clone.default,
+            torch.ops.aten.expand.default,
+            torch.ops.aten.permute.default,
+            torch.ops.aten.reshape.default,
+            torch.ops.aten.squeeze.default,
+            torch.ops.aten.squeeze.dim,
+            torch.ops.aten.squeeze.dims,
+            torch.ops.aten.unsqueeze.default,
+        )
+
+    @classmethod
+    def traceback_from(cls, node: Node) -> Self:
+        nodes: list[Node] = []
+        top = node
+        targets = cls.get_reformat_targets()
+        while top.target in targets:
+            nodes.append(top)
+            top = top.all_input_nodes[0]
+        nodes.append(top)
+        return cls(nodes=tuple(nodes))
+
+    @model_validator(mode="after")
+    def validate_adjacency(self) -> Self:
+        assert len(self.nodes) > 0
+        targets = self.get_reformat_targets()
+        for i in range(len(self.nodes) - 1):
+            reformat_node = self.nodes[i]
+            assert reformat_node.target in targets
+            next_node = self.nodes[i + 1] if i + 1 < len(self.nodes) else self.top
+            assert reformat_node.all_input_nodes[0] == next_node
+        return self
+
+    @property
+    def total_expansion(self) -> int | None:
+        if not self.reformats:
+            return 1
+        if not ((top := get_tensor_metadata(self.top)) and (bottom := get_tensor_metadata(self.reformats[0]))):
+            return None
+        # Note that `torch.ops.aten.expand.default` is the only target that can increase the number of elements.
+        return bottom.shape.numel() // top.shape.numel()
 
 
 class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
     """Replace F.scaled_dot_product_attention by FakeGPTAttentionPlugin (required for trtllm)."""
 
-    def __init__(self, dtype: torch.dtype):
+    def __init__(self, dtype: torch.dtype) -> None:
         super().__init__()
         self.dtype = dtype
 
@@ -34,14 +93,16 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 and (query := get_tensor_metadata(sdpa.query))
                 and (key := get_tensor_metadata(sdpa.key))
                 and (value := get_tensor_metadata(sdpa.value))
-                and (q_rope := traceback_reformats(sdpa.query)).target in FAKE_ROPE_TARGETS
-                and (k_rope := traceback_reformats(sdpa.key)).target in FAKE_ROPE_TARGETS
+                and (q_rope := TrailingReformatSequence.traceback_from(sdpa.query).top).target in FAKE_ROPE_TARGETS
+                and (k_rope_seq := TrailingReformatSequence.traceback_from(sdpa.key))
+                and (k_rope := k_rope_seq.top).target in FAKE_ROPE_TARGETS
                 and (q_proj := find_projection(sdpa.query))
                 and (k_proj := find_projection(sdpa.key))
                 and (v_proj := find_projection(sdpa.value))
-                and (q_proj.mm == traceback_reformats(q_rope.all_input_nodes[0]))
-                and (k_proj.mm == traceback_reformats(k_rope.all_input_nodes[0]))
-                and (v_proj.mm == traceback_reformats(sdpa.value))
+                and (q_proj.mm == TrailingReformatSequence.traceback_from(q_rope.all_input_nodes[0]).top)
+                and (k_proj.mm == TrailingReformatSequence.traceback_from(k_rope.all_input_nodes[0]).top)
+                and (v_seq := TrailingReformatSequence.traceback_from(sdpa.value))
+                and (v_proj.mm == v_seq.top)
             ):
                 continue
 
@@ -66,6 +127,23 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
             if not isinstance(key_rope_config := k_rope.meta.get("rope_config"), ROPEConfig):
                 logger.error(f"rope config for key not found in GPTAttentionPlugin pattern {layer_idx}")
                 continue
+            if (num_key_groups := k_rope_seq.total_expansion) is None or (
+                num_value_groups := v_seq.total_expansion
+            ) is None:
+                logger.error("Failed to infer `num_key_value_groups`.")
+                continue
+            if num_key_groups != num_value_groups:
+                logger.error(
+                    f"`num_key_value_groups` inferred from key ({num_key_groups=}) mismatched with "
+                    f"the value inferred from value ({num_value_groups=})"
+                )
+                continue
+            if num_kv_heads % (num_key_value_groups := num_key_groups) != 0:
+                logger.error(f"{num_kv_heads=} is not a multiple of {num_key_value_groups=}")
+                continue
+
+            if layer_idx == 0:
+                logger.debug(f"{num_key_value_groups=}")
 
             if global_rope_config is None:
                 global_rope_config = query_rope_config
@@ -98,7 +176,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
             fake_gpt_attention_plugin = GPTAttentionPlugin(
                 layer_idx=layer_idx,
                 num_heads=num_heads,
-                num_kv_heads=num_kv_heads,
+                num_kv_heads=num_kv_heads // num_key_value_groups,
                 head_size=embed_dim,
                 type_id=DataType(self.dtype).to(trt.DataType),
                 **global_rope_config.model_dump(),
