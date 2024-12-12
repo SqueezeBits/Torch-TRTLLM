@@ -15,15 +15,18 @@ class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
     max_batch_size: int = Field(default=256, gt=1)
     max_beam_width: int = Field(default=1, gt=0)
     max_num_tokens: int = Field(default=8192, multiple_of=8, gt=1)
-    opt_batch_size: int = Field(default=8, gt=0)
+    opt_batch_size: int = Field(default=128, gt=0)
     _opt_num_tokens: int | None = PrivateAttr(default=None)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def opt_num_tokens(self) -> int:
-        if self._opt_num_tokens is not None:
-            return self._opt_num_tokens
-        return self.max_batch_size * self.max_beam_width
+        if self._opt_num_tokens is None:
+            opt_num_tokens = min(
+                self.max_num_tokens, self.max_batch_size * self.max_beam_width
+            )
+            self._opt_num_tokens = 8 * max(int(round(opt_num_tokens / 8)), 1)
+        return self._opt_num_tokens
 
     @opt_num_tokens.setter
     def opt_num_tokens(self, value: Any) -> None:
@@ -68,7 +71,9 @@ class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
         assert (
             self.opt_batch_size <= self.max_batch_size
         ), f"{self.opt_batch_size=} must be at most {self.max_batch_size=}."
-        assert self._opt_num_tokens is None or self._opt_num_tokens <= self.max_num_tokens
+        assert (
+            self._opt_num_tokens is None or self._opt_num_tokens <= self.max_num_tokens
+        )
         if self.max_num_tokens > (upper_bound := 16384):
             logger.warning(
                 f"Specifying a {self.max_num_tokens=} larger than {upper_bound} is usually not recommended. You might "
@@ -92,6 +97,7 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             **{
                 key: value
                 for key, value in self.model_dump().items()
+                # pylint: disable-next=unsupported-membership-test
                 if key in RuntimeTRTLLMOptimizationProfileConfig.model_fields
             }
         )
@@ -105,8 +111,12 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
         The criterions and error messages are adopted from `tensorrt_llm._common.check_max_num_tokens`.
         While TRT-LLM tries to adjust the wrong values provided by the user, we will simply reject them.
         """
-        assert self.opt_seq_len <= self.max_seq_len, f"{self.opt_seq_len=} must be at most {self.max_seq_len=}."
-        assert self.opt_beam_width <= self.max_beam_width, f"{self.opt_seq_len=} must be at most {self.max_seq_len=}."
+        assert (
+            self.opt_seq_len <= self.max_seq_len
+        ), f"{self.opt_seq_len=} must be at most {self.max_seq_len=}."
+        assert (
+            self.opt_beam_width <= self.max_beam_width
+        ), f"{self.opt_seq_len=} must be at most {self.max_seq_len=}."
         assert (
             self.opt_kv_cache_block_size <= self.max_kv_cache_block_size
         ), f"{self.opt_kv_cache_block_size=} must be at most {self.max_kv_cache_block_size=}."
