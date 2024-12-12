@@ -5,7 +5,7 @@ from loguru import logger
 from torch.fx import GraphModule
 from torch.fx.graph import CodeGen
 from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
-from transformers import PreTrainedModel
+from transformers import PretrainedConfig, PreTrainedModel
 
 from ._convert import convert
 from ._export import export
@@ -15,8 +15,10 @@ from .configs import (
     TensorRTConfig,
     TRTLLMBuildConfig,
     TRTLLMEngineConfig,
+    TRTLLMLoraConfig,
     TRTLLMModelConfig,
     TRTLLMOptimizationProfileConfig,
+    TRTLLMPluginConfig,
     generate_trtllm_pretrained_config,
 )
 from .constants import DEFAULT_DEVICE, INPUT_IDS, PassName
@@ -26,29 +28,30 @@ from .types import BuiltInConstant, DeviceLikeType
 
 def trtllm_build(
     model: PreTrainedModel,
-    dtype: torch.dtype,
+    hf_config: PretrainedConfig,
     *,
+    model_dtype: torch.dtype,
+    device: DeviceLikeType | None = None,
     profile_config: TRTLLMOptimizationProfileConfig | None = None,
-    model_config: TRTLLMModelConfig | None = None,
+    lora_config: TRTLLMLoraConfig | None = None,
+    plugin_config: TRTLLMPluginConfig | None = None,
     trt_config: TensorRTConfig | None = None,
     allow_matmul_in_fp16: bool = False,
     allow_activation_in_fp16: bool = True,
     debug_node_names: list[str] | None = None,
-    device: DeviceLikeType | None = None,
     engine_cache: BaseEngineCache | None = None,
 ) -> tuple[bytes, TRTLLMEngineConfig]:
     device = _resolve_device(model, device)
     network_name = type(model).__name__
-    profile_config = profile_config or TRTLLMOptimizationProfileConfig()
-    model_config = model_config or TRTLLMModelConfig()
-    trt_config = trt_config or TensorRTConfig()
+    plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model_dtype)
+    profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(hf_config, plugin_config)
     argument_hint = TRTLLMArgumentHint.configure(profile_config)
 
     logger.info("Exporting the model into graph module")
     graph_module = trtllm_export(
         model,
         argument_hint,
-        dtype,
+        model_dtype,
         device=device,
         allow_matmul_in_fp16=allow_matmul_in_fp16,
         allow_activation_in_fp16=allow_activation_in_fp16,
@@ -59,7 +62,10 @@ def trtllm_build(
     config = generate_trtllm_engine_config(
         graph_module,
         profile_config,
-        model_config,
+        TRTLLMModelConfig(
+            lora_config=lora_config or TRTLLMLoraConfig(),
+            plugin_config=plugin_config,
+        ),
         architecture=network_name,
     )
 
@@ -71,7 +77,7 @@ def trtllm_build(
     engine = convert(
         graph_module,
         argument_hint,
-        trt_config,
+        trt_config or TensorRTConfig(),
         engine_cache=engine_cache,
         network_name=network_name,
         output_names=output_names,
