@@ -30,7 +30,7 @@ class FixActivationPrecision(GraphOptimizationPass):
 
 
 class FixPrecision(NodewiseOptimizationPass):
-    def __init__(self, *, to: torch.dtype = torch.bfloat16, depth: int = 0) -> None:
+    def __init__(self, *, to: torch.dtype, depth: int = 0) -> None:
         super().__init__(depth=depth)
         self.dtype = to
 
