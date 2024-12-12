@@ -142,4 +142,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def cache_indirection(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.batch_size, self.beam_width, self.attention_window_size), dtype=torch.int32)
+        return TensorTypeHint(
+            shape=(self.batch_size, self.beam_width, self.attention_window_size),
+            dtype=torch.int32,
+        )

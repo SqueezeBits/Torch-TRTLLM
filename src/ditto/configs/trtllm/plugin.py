@@ -4,6 +4,7 @@ from .literals import PluginFlag
 
 class TRTLLMPluginConfig(StrictlyTyped):
     gpt_attention_plugin: PluginFlag = "auto"
+    gemm_plugin: PluginFlag = "auto"
     lora_plugin: PluginFlag = None
     mamba_conv1d_plugin: PluginFlag = "auto"
     context_fmha: bool = True
