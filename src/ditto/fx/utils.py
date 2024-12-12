@@ -121,15 +121,3 @@ def populate_tensor_metadata(
         tensor_meta_as_dict["dtype"] = dtype
     node.meta["tensor_meta"] = (metadata := TensorMetadata(**tensor_meta_as_dict))
     return metadata
-
-
-def traceback_reformats(node: Node) -> Node:
-    if node.target not in (
-        torch.ops.aten.clone.default,
-        torch.ops.aten.expand.default,
-        torch.ops.aten.reshape.default,
-        torch.ops.aten.permute.default,
-        torch.ops.aten.unsqueeze.default,
-    ):
-        return node
-    return traceback_reformats(node.all_input_nodes[0])
