@@ -1,13 +1,14 @@
-import math
 import os
 from typing import Annotated
 
 import torch
 from loguru import logger
+from pydantic import TypeAdapter, ValidationError
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
+    PretrainedConfig,
     PreTrainedModel,
     PreTrainedTokenizer,
     PreTrainedTokenizerFast,
@@ -15,12 +16,8 @@ from transformers import (
 from typer import Option, Typer
 
 from .api import trtllm_build
-from .configs import (
-    TRTLLMModelConfig,
-    TRTLLMOptimizationProfileConfig,
-    TRTLLMPluginConfig,
-)
 from .constants import DEFAULT_DEVICE
+from .types import trt_to_torch_dtype_mapping
 
 app = Typer()
 
@@ -30,6 +27,8 @@ def generate(
     model_id: str,
     prompts: Annotated[list[str], Option(default_factory=list)],
     device: str = DEFAULT_DEVICE,
+    dtype: str = "auto",
+    trust_remote_code: bool = False,
     max_output_len: int = 100,
 ) -> None:
     if not prompts:
@@ -38,8 +37,16 @@ def generate(
     _prompts = "\n".join(f"* {p}" for p in prompts)
     logger.info(f"prompts:\n{_prompts}")
 
-    model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16)
-    model.to(device)
+    hf_config = AutoConfig.from_pretrained(model_id, trust_remote_code=trust_remote_code)
+    model_dtype = get_model_dtype(hf_config, dtype)
+    logger.info(f"device: {device} | dtype: {model_dtype}")
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=model_dtype,
+        trust_remote_code=trust_remote_code,
+    ).to(device)
+
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token_id = model.config.pad_token_id or 0
     tokenizer.padding_side = "left"
@@ -88,45 +95,21 @@ def build(
 ) -> None:
     assert not os.path.exists(output_dir) or os.path.isdir(output_dir), f"Invalid output directory: {output_dir}"
     app.pretty_exceptions_show_locals = verbose
-    hf_config = AutoConfig.from_pretrained(model_id, trust_remote_code=trust_remote_code)
 
-    if dtype == "auto":
-        torch_dtype = getattr(hf_config, "torch_dtype", torch.float16)
-    else:
-        torch_dtype = {
-            "bfloat16": torch.bfloat16,
-            "float16": torch.float16,
-            "float32": torch.float32,
-        }[dtype]
-    logger.info(f"device: {device} | dtype: {torch_dtype}")
+    hf_config = AutoConfig.from_pretrained(model_id, trust_remote_code=trust_remote_code)
+    model_dtype = get_model_dtype(hf_config, dtype)
+    logger.info(f"device: {device} | dtype: {model_dtype}")
 
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        torch_dtype=torch_dtype,
+        torch_dtype=model_dtype,
         trust_remote_code=trust_remote_code,
     ).to(device)
 
-    max_position_embeddings = getattr(
-        hf_config, "max_position_embeddings", 4096
-    )  # TODO: it needs to be an argument as cli's input
-    tokens_per_block = 64  # TODO: it needs to be an argument as cli's input
-    max_kv_cache_block_size = math.ceil(max_position_embeddings / tokens_per_block)
     engine, config = trtllm_build(
         model,
-        torch_dtype,
-        profile_config=TRTLLMOptimizationProfileConfig(
-            max_seq_len=max_position_embeddings,
-            max_attention_window_size=max_position_embeddings,
-            max_kv_cache_block_size=max_kv_cache_block_size,
-            opt_kv_cache_block_size=max_kv_cache_block_size // 2,
-        ),
-        model_config=TRTLLMModelConfig(
-            plugin_config=TRTLLMPluginConfig(
-                gpt_attention_plugin=dtype,  # type: ignore[arg-type]
-                gemm_plugin=dtype,  # type: ignore[arg-type]
-                tokens_per_block=tokens_per_block,
-            ),
-        ),
+        hf_config,
+        model_dtype=model_dtype,
         allow_matmul_in_fp16=allow_matmul_in_fp16,
         allow_activation_in_fp16=allow_activation_in_fp16,
         debug_node_names=add_output,
@@ -150,6 +133,22 @@ def build(
     logger.info(f"Writing engine config at {config_path}")
     with open(config_path, "w") as config_file:
         config_file.write(config.model_dump_json(indent=2))
+
+
+def get_model_dtype(hf_config: PretrainedConfig, dtype: str) -> torch.dtype:
+    hf_config_dtype = getattr(hf_config, "torch_dtype", torch.float16)
+    try:
+        if dtype == "auto":
+            return TypeAdapter(torch.dtype, config={"arbitrary_types_allowed": True}).validate_python(hf_config_dtype)
+    except ValidationError:
+        logger.warning(f"Found unrecognized torch data type in HF config: {hf_config_dtype}")
+    try:
+        return {
+            str(torch_dtype).removeprefix("torch."): torch_dtype
+            for torch_dtype in trt_to_torch_dtype_mapping().values()
+        }[dtype]
+    except KeyError as e:
+        raise TypeError(f"Unsupported torch data type: {dtype}") from e
 
 
 @app.command()
