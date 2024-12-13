@@ -63,6 +63,18 @@ class ROPEConfig(StrictlyTyped):
             "max_position_embeddings",
             default=rope_config.rotary_embedding_max_positions,
         )
+        rope_scaling: dict[str, Any] = lookup_attributes(
+            pretrained_config,
+            "rope_scaling",
+            default={},
+        )
+        if rope_scaling:
+            rope_config.rotary_embedding_scale = rope_scaling.get("factor", rope_config.rotary_embedding_scale)
+            rope_config.rotary_embedding_original_max_positions = 1024  # TODO: need to be updated for long_rope type
+            rotary_scaling_type: str | None = rope_scaling.get("type", rope_scaling.get("rope_type", None))
+            if rotary_scaling_type is not None:
+                rope_config.rotary_embedding_scale_type = RotaryScalingType.from_string(rotary_scaling_type)
+            rope_config.llama3_scaling_config = Llama3ScalingConfig(**rope_scaling)
         if positional_embedding_type is not None:
             rope_config.position_embedding_type = positional_embedding_type
         if embedding_dim is not None:
@@ -212,7 +224,10 @@ class GPTAttentionPluginInputs(StrictlyTyped):
             for name in reversed(cls.model_fields)
             if (
                 name not in excluded
-                and isinstance(node := existing_placeholders.get(name, get_attr_nodes.get(name, None)), Node)
+                and isinstance(
+                    node := existing_placeholders.get(name, get_attr_nodes.get(name, None)),
+                    Node,
+                )
             )
         }
         return cls(**nodes)
