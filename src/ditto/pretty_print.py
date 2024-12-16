@@ -1,9 +1,11 @@
 import contextlib
+import logging
 from collections.abc import Generator
 from typing import Any
 
 import torch
 from torch.fx.experimental.sym_node import SymNode
+from torch.fx.experimental.symbolic_shapes import log as symbolic_shape_logger
 
 
 @contextlib.contextmanager
@@ -33,3 +35,13 @@ def detailed_sym_node_str() -> Generator[None, None, None]:
         yield None
     finally:
         SymNode.str = original_sym_node_str  # type: ignore[method-assign]
+
+
+@contextlib.contextmanager
+def ignore_symbolic_shapes_warning() -> Generator[None, None, None]:
+    log_level = symbolic_shape_logger.level
+    symbolic_shape_logger.setLevel(logging.ERROR)
+    try:
+        yield None
+    finally:
+        symbolic_shape_logger.setLevel(log_level)
