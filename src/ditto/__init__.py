@@ -1,6 +1,6 @@
 # Note: logging must be imported first to set up the loguru logging.
 from . import logging, constants  # noqa: I001
-from ._convert import convert
+from .convert import convert
 from .export import export
 from .inline import inline
 from .api import trtllm_build, trtllm_export
