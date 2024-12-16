@@ -7,7 +7,6 @@ from torch.fx.graph import CodeGen
 from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from transformers import PreTrainedModel
 
-from ._convert import convert
 from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
 from .configs import (
     TensorRTConfig,
@@ -20,6 +19,7 @@ from .configs import (
     generate_trtllm_pretrained_config,
 )
 from .constants import DEFAULT_DEVICE, INPUT_IDS, PassName
+from .convert import convert
 from .debug import get_memory_footprint, save_for_debug
 from .export import export
 from .inline import inline
