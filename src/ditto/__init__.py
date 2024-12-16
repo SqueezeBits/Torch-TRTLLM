@@ -2,7 +2,7 @@
 from . import logging, constants  # noqa: I001
 from ._convert import convert
 from ._export import export
-from ._inline import inline
+from .inline import inline
 from .api import trtllm_build, trtllm_export
 from .arguments.dynamic_dim import DynamicDimension, DynamicDimensionType
 from .arguments.torch_export_arguments import TorchExportArguments
