@@ -9,7 +9,6 @@ from transformers import PreTrainedModel
 
 from ._convert import convert
 from ._export import export
-from ._inline import inline
 from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
 from .configs import (
     TensorRTConfig,
@@ -23,6 +22,7 @@ from .configs import (
 )
 from .constants import DEFAULT_DEVICE, INPUT_IDS, PassName
 from .debug import get_memory_footprint, save_for_debug
+from .inline import inline
 from .transform import transform
 from .types import BuiltInConstant, DeviceLikeType
 
