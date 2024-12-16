@@ -13,9 +13,9 @@ from .utils import make_axis_nonnegative, make_dim_nonnegative
 class Slice(ATenOp):
     this: Node
     dim: int = 0
-    start: SymbolicInteger | None = None
-    end: SymbolicInteger | None = None
-    step: SymbolicInteger = 1
+    start: SymbolicInteger | Node | None = None
+    end: SymbolicInteger | Node | None = None
+    step: SymbolicInteger | Node = 1
 
     @property
     def dim_size(self) -> int | None:
