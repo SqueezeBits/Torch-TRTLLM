@@ -1,7 +1,6 @@
 import json
 import keyword
 import re
-import sys
 from collections.abc import Callable
 from functools import cache
 from types import NoneType, UnionType
@@ -13,12 +12,11 @@ import tensorrt as trt
 import torch
 from loguru import logger
 from onnx import TensorProto
-from onnx.helper import make_tensor
-from onnx_graphsurgeon.ir.tensor import LazyValues
 from pydantic import model_serializer, model_validator
 from typing_extensions import Self
 
 from ..types import DataType, StrictlyTyped
+from .constant import make_constant
 
 
 class EngineComponent(StrictlyTyped):
@@ -57,7 +55,7 @@ class EngineComponent(StrictlyTyped):
             return _name, value
 
         if isinstance(values, dict):
-            values = dict([item for name, value in values.items() if (item := _resolve(name, value))])
+            values = dict(item for name, value in values.items() if (item := _resolve(name, value)))
             if attributes is not None:
                 values["attributes"] = attributes
         return values
@@ -208,24 +206,10 @@ class EngineInfo(EngineComponent):
                 redefinition_counts[t.name] = count = redefinition_counts.get(t.name, 0) + 1
                 logger.trace(f"Redefined {count} times: {t}")
             name = get_tensor_key(t)
-            torch_values = torch.zeros((*t.shape,), dtype=DataType(t.dtype).to(torch.dtype))
-            if torch_values.dtype != torch.bool:
-                byte_vals = torch_values.data_ptr().to_bytes(
-                    torch.numel(torch_values) * torch_values.element_size(), sys.byteorder
-                )
-                onnx_tensor_proto = make_tensor(
-                    name=name,
-                    data_type=DataType(t.dtype).to(TensorProto.DataType),
-                    dims=(*t.shape,),
-                    vals=byte_vals,
-                    raw=True,
-                )
-                values = LazyValues(onnx_tensor_proto)
-            else:
-                values = torch_values.numpy(force=True)
-            tensors[name] = gs.Constant(
-                name=name,
-                values=values,
+            tensors[name] = make_constant(
+                name,
+                shape=(*t.shape,),
+                dtype=DataType(t.dtype).to(torch.dtype),
             )
 
         def add_as_node(l: ELayer) -> None:  # noqa: E741

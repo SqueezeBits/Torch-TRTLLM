@@ -1,6 +1,5 @@
 import json
 import operator
-import sys
 from typing import Any, Literal
 
 import numpy as np
@@ -8,14 +7,13 @@ import onnx
 import onnx_graphsurgeon as gs
 import torch
 from onnx import TensorProto
-from onnx.helper import make_tensor
-from onnx_graphsurgeon.ir.tensor import LazyValues
 from torch._ops import OpOverload
 from torch.fx import GraphModule, Node
 from torch.fx.node import Argument, Target
 
 from ..fx.utils import get_tensor_metadata
 from ..types import DataType
+from .constant import make_constant
 
 
 def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
@@ -24,6 +22,11 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
     tensors: dict[str, gs.Tensor] = {}
     nodes: dict[str, gs.Node] = {}
     const_args: dict[str, gs.Constant] = {}
+
+    def find_tensor(node: Node) -> gs.Tensor:
+        if node.op == "get_attr" and isinstance(target := node.target, str):
+            return tensors[target]
+        return tensors[node.name]
 
     def create_variable(node: Node, name: str | None = None) -> gs.Variable:
         shape: tuple[int | str, ...] | None = None
@@ -35,34 +38,20 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
 
     def create_constant(
         node: Node,
-        name: str | None = None,
+        target: str,
         *,
         param: torch.nn.Parameter | None = None,
-    ) -> gs.Constant | gs.Variable:
-        if param is None:
-            if (meta := get_tensor_metadata(node)) is None:
-                return gs.Variable(name or node.name)
-            vals = torch.zeros(meta.shape, dtype=meta.dtype)
-            byte_vals = vals.data_ptr().to_bytes(torch.numel(vals) * vals.element_size(), sys.byteorder)
-            onnx_tensor_proto = make_tensor(
-                name=name or node.name,
-                data_type=DataType(meta.dtype).to(TensorProto.DataType),
-                dims=meta.shape,
-                vals=byte_vals,
-                raw=True,
-            )
-            values = LazyValues(onnx_tensor_proto)
-        else:
-            byte_vals = param.data_ptr().to_bytes(torch.numel(param) * param.element_size(), sys.byteorder)
-            onnx_tensor_proto = make_tensor(
-                name=name or node.name,
-                data_type=DataType(param.dtype).to(TensorProto.DataType),
-                dims=param.shape,
-                vals=byte_vals,
-                raw=True,
-            )
-            values = LazyValues(onnx_tensor_proto)
-        return gs.Constant(name or node.name, values)
+    ) -> gs.Tensor:
+        if target in tensors:
+            return tensors[target]
+
+        if param is not None:
+            return make_constant(target, param)
+
+        if (meta := get_tensor_metadata(node)) is not None:
+            return make_constant(target, shape=meta.shape, dtype=meta.dtype)
+
+        return gs.Variable(target)
 
     def convert_argument_as_constant(a: Argument) -> gs.Constant:
         if isinstance(a, int | float | bool):
@@ -104,15 +93,14 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
                 param = graph_module.get_parameter(target)
             except AttributeError:
                 param = None
-            tensor = create_constant(node, target, param=param)
-            tensors[node.name] = tensor
+            tensors[target] = create_constant(node, target, param=param)
         elif node.op in ("call_function", "call_module", "call_method"):
             if is_multi_output_getitem(node):
                 continue
             all_inputs = {f"args_{i}": arg for i, arg in enumerate(node.args)}
             all_inputs.update(node.kwargs)
             input_tensors = [
-                tensors[x.name] if isinstance(x, Node) else convert_argument_as_constant(x) for x in all_inputs.values()
+                find_tensor(x) if isinstance(x, Node) else convert_argument_as_constant(x) for x in all_inputs.values()
             ]
             getitems = [user for user in node.users if user.op == "call_function" and user.target is operator.getitem]
             output_tensors: list[gs.Tensor] = []
