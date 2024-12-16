@@ -13,8 +13,13 @@ from transformers import (
 from typer import Option, Typer
 
 from .api import trtllm_build
-from .constants import DEFAULT_DEVICE
+from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
 from .types import trt_to_torch_dtype_mapping
+
+if not DISABLE_TRANSFORMER_PATCHES:
+    from .patches import transformers  # noqa: F401
+
+    logger.info("To prevent custom patches for transformers set the environment variable DISABLE_TRANSFORMER_PATCHES=1")
 
 app = Typer()
 
