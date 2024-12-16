@@ -7,4 +7,5 @@ from .io import (
     save_onnx_without_weights,
     should_save_debug_artifacts,
 )
+from .memory import get_device_memory_footprint, get_host_memory_footprint, get_memory_footprint
 from .network import builder_config_as_dict, get_human_readable_flags
