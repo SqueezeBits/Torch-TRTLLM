@@ -5,7 +5,7 @@ from loguru import logger
 from torch.fx import GraphModule
 from torch.fx.graph import CodeGen
 from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
-from transformers import PretrainedConfig, PreTrainedModel
+from transformers import PreTrainedModel
 
 from ._convert import convert
 from ._export import export
@@ -22,15 +22,14 @@ from .configs import (
     generate_trtllm_pretrained_config,
 )
 from .constants import DEFAULT_DEVICE, INPUT_IDS, PassName
-from .debug import save_for_debug
+from .debug import get_memory_footprint, save_for_debug
+from .transform import transform
 from .types import BuiltInConstant, DeviceLikeType
 
 
 def trtllm_build(
     model: PreTrainedModel,
-    hf_config: PretrainedConfig,
     *,
-    model_dtype: torch.dtype,
     device: DeviceLikeType | None = None,
     profile_config: TRTLLMOptimizationProfileConfig | None = None,
     lora_config: TRTLLMLoraConfig | None = None,
@@ -43,8 +42,9 @@ def trtllm_build(
 ) -> tuple[bytes, TRTLLMEngineConfig]:
     device = _resolve_device(model, device)
     network_name = type(model).__name__
+    model_dtype = model.config.torch_dtype
     plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model_dtype)
-    profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(hf_config, plugin_config)
+    profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(model.config, plugin_config)
     argument_hint = TRTLLMArgumentHint.configure(profile_config)
 
     logger.info("Exporting the model into graph module")
@@ -73,7 +73,7 @@ def trtllm_build(
     if debug_node_names:
         output_names.extend(debug_node_names)
 
-    logger.info("Building TensorRT engine ...")
+    logger.info("Building TensorRT engine")
     engine = convert(
         graph_module,
         argument_hint,
@@ -82,6 +82,7 @@ def trtllm_build(
         network_name=network_name,
         output_names=output_names,
     )
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
 
     return engine, config
 
@@ -123,8 +124,9 @@ def trtllm_export(
     allow_activation_in_fp16: bool = True,
     skipped_optimizers: list[PassName] | None = None,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
+    enable_experimental_decompositions: bool = False,
 ) -> GraphModule:
-    logger.debug("torch.exporting module ...")
+    logger.debug("torch.exporting module")
     device = _resolve_device(model, device)
     hints: dict[str, TensorTypeHint | BuiltInConstant] = {
         INPUT_IDS: argument_hint.batched_input_ids,
@@ -135,9 +137,21 @@ def trtllm_export(
     exported_program = export(model, arguments)
     save_for_debug("exported_program", exported_program)
 
-    logger.debug("Lowering exported program into graph module ...")
+    logger.debug("Lowering exported program into graph module")
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
     graph_module = inline(
         exported_program,
+        class_name=type(model).__name__,
+        enable_experimental_decompositions=enable_experimental_decompositions,
+    ).cpu()  # Inlined graph module no longer needs to reside on GPU
+    # Delete the exported program to free GPU resources
+    del exported_program
+    torch.cuda.empty_cache()
+
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
+    logger.info("Optimizing the graph module")
+    graph_module = transform(
+        graph_module,
         argument_hint=argument_hint,
         dtype=dtype,
         skipped_optimizers=skipped_optimizers,
@@ -145,6 +159,7 @@ def trtllm_export(
         allow_activation_in_fp16=allow_activation_in_fp16,
         extra_passes=extra_passes,
     )
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
     save_for_debug("graph_module", graph_module)
     return graph_module
 
@@ -167,6 +182,7 @@ def generate_trtllm_engine_config(
 
 def _resolve_device(model: torch.nn.Module, device: DeviceLikeType | None) -> DeviceLikeType:
     if device is not None:
+        model.to(device)
         return device
     try:
         return next(iter(model.parameters())).device
