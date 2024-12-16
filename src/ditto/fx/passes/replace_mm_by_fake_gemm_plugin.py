@@ -17,15 +17,15 @@ class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
             (mm := MM.specialize_from(node))
             and (mm_output := get_tensor_metadata(mm.node))
             and (this := get_tensor_metadata(mm.this))
+            and len(this.shape) == 2
             and (other := get_tensor_metadata(mm.other))
+            and len(other.shape) == 2
         ):
             return {}
-        assert len(this.shape) == 2
-        assert len(other.shape) == 2
 
         graph = node.graph
-        # Note: It assume that a shape of the matrix weight is `k x n`.
-        # But, it should be transposed for a functionality from `k x n` to `n x k`.
+        # Note: the right-hand-side `mm.other` must be transposed before it is fed to GemmPlugin
+        # for the correct functionality as GemmPlugin's functionality breaks when `transb=0` (don't know why ...)
         with graph.inserting_after(mm.other):
             other_t = graph.call_function(torch.ops.aten.permute.default, (mm.other, (1, 0)))
             populate_tensor_metadata(other_t, other, shape=(other.shape[1], other.shape[0]))
