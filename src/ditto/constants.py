@@ -34,6 +34,7 @@ PassName = Literal[
     "ReplaceSDPAByFakeGPTAttentionPlugin",
     "ReplaceSDPAByFakeGPTAttentionPluginV2",
     "ReplaceViewByReshape",
+    "RewriteConstantOperandsAsNodes",
     "RewriteReshapeAsUnsqueeze",
     "WrapRoPESubgraphs",
 ]
@@ -53,7 +54,7 @@ DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 The default device for the PyTorch modules and tensors.
 """
 
-DEFAULT_ONNX_PROTO_SIZE_THRESHOLD: int = int(os.getenv("DEFAULT_ONNX_PROTO_SIZE_THRESHOLD", "1024"))
+DEFAULT_ONNX_PROTO_SIZE_THRESHOLD: int = int(os.getenv("DEFAULT_ONNX_PROTO_SIZE_THRESHOLD", "0"))
 """
 The default size threshold (bytes) for write weights in ONNX as an external data.
 """

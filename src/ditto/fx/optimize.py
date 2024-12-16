@@ -8,6 +8,7 @@ from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_afte
 
 from ..arguments import TRTLLMArgumentHint
 from ..constants import AUTO_DETECT_ROPE_SUBGRAPH, FX_TRANSFORM_MAXIMUM_ITERATION, PassName
+from ..debug import get_memory_footprint
 from .passes import (
     AddTRTLLMInputs,
     CastMMToFP32If,
@@ -34,6 +35,7 @@ from .passes import (
     ReplaceSDPAByFakeGPTAttentionPlugin,
     ReplaceSDPAByFakeGPTAttentionPluginV2,
     ReplaceViewByReshape,
+    RewriteConstantOperandsAsNodes,
     RewriteReshapeAsUnsqueeze,
     WrapRoPESubgraphs,
 )
@@ -115,6 +117,7 @@ LEVEL2_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     FuseConsecutiveSplitConcat,
     FuseReciprocalMul,
     DeferUnsqueeze,
+    RewriteConstantOperandsAsNodes,
     RewriteReshapeAsUnsqueeze,
 )
 
@@ -130,28 +133,23 @@ def get_trtllm_conversion_transform(
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
         AddTRTLLMInputs(argument_hint=argument_hint),
         SwapUnsqueezeWithSymSizeInt,  # required for `InsertGatherLastTokenIds`
-    ]
-    passes.extend(
+        InsertGatherLastTokenIds,
+        WrapRoPESubgraphs,
         (
-            InsertGatherLastTokenIds,
-            WrapRoPESubgraphs,
-            ReplaceSDPAByFakeGPTAttentionPlugin(dtype),
-            FuseMMConstSiblings,
-            ReplaceMMByFakeGemmPlugin,
-        )
-        if AUTO_DETECT_ROPE_SUBGRAPH
-        else (
-            InsertGatherLastTokenIds,
-            ReplaceSDPAByFakeGPTAttentionPluginV2(dtype),
-            # TODO: improve memory management of the pass `FuseMMConstSiblings`
-            FuseMMConstSiblings,
-            ReplaceMMByFakeGemmPlugin,
-        )
-    )
+            ReplaceSDPAByFakeGPTAttentionPlugin(dtype)
+            if AUTO_DETECT_ROPE_SUBGRAPH
+            else ReplaceSDPAByFakeGPTAttentionPluginV2(dtype)
+        ),
+        FuseMMConstSiblings,
+        ReplaceMMByFakeGemmPlugin,
+    ]
+
     if not allow_matmul_in_fp16:
         passes.append(CastMMToFP32If(dtype))
+
     if allow_activation_in_fp16:
         passes.append(FixActivationPrecision(dtype=dtype))
+
     return get_transform(
         *passes,
         skipped_optimizers=skipped_optimizers,
@@ -211,6 +209,7 @@ def get_transform(
         logger.warning(f"Unrecognized skipped optmizer names: {skipped_optimizers}")
 
     def optimize(graph_module: GraphModule) -> GraphModule:
+        logger.opt(lazy=True).trace("Memory Footprint: {m}", m=get_memory_footprint)
         result = pass_manager(graph_module)
         if result.modified:
             clean_up_graph_after_modifications(graph_module)
