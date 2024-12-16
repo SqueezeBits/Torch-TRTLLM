@@ -2,7 +2,6 @@ import json
 import os
 from typing import Any
 
-from .debug.network import builder_config_as_dict
 import numpy as np
 import tensorrt as trt
 import tensorrt_llm as trtllm
@@ -21,7 +20,8 @@ from tensorrt_llm.functional import (
 )
 from tensorrt_llm.runtime.generation import GenerationSession
 
-from .debug import (
+from ..debug import (
+    builder_config_as_dict,
     open_debug_artifact,
     save_for_debug,
 )
@@ -772,4 +772,4 @@ RopeEmbeddingUtils.create_sinusoidal_positions_for_attention_plugin = (
 GenerationSession.dump_debug_buffers = patched_dump_debug_buffers
 
 
-logger.info("ditto patches are applied!")
+logger.info("ditto patches for TensorRT-LLM are applied!")
