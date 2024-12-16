@@ -1,7 +1,7 @@
 # Note: logging must be imported first to set up the loguru logging.
 from . import logging, constants  # noqa: I001
 from ._convert import convert
-from ._export import export
+from .export import export
 from .inline import inline
 from .api import trtllm_build, trtllm_export
 from .arguments.dynamic_dim import DynamicDimension, DynamicDimensionType
