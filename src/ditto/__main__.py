@@ -79,8 +79,8 @@ def run_generation(
 @torch.no_grad()
 def build(
     model_id: str,
-    output_dir: str,
     add_output: Annotated[list[str], Option(default_factory=list)],
+    output_dir: str = "",
     device: str = DEFAULT_DEVICE,
     dtype: str = "auto",
     verbose: bool = False,
@@ -88,7 +88,7 @@ def build(
     allow_matmul_in_fp16: bool = False,
     allow_activation_in_fp16: bool = False,
 ) -> None:
-    assert not os.path.exists(output_dir) or os.path.isdir(output_dir), f"Invalid output directory: {output_dir}"
+    output_dir = resolve_output_dir(output_dir, model_id)
     app.pretty_exceptions_show_locals = verbose
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -136,6 +136,26 @@ def get_model_dtype(dtype: str) -> torch.dtype | Literal["auto"]:
         }[dtype]
     except KeyError as e:
         raise ValueError(f"Unsupported torch data type: {dtype}") from e
+
+
+def resolve_output_dir(output_dir: str, model_id: str) -> str:
+    if not output_dir:
+        output_dir = get_default_output_dir(model_id)
+        logger.info(f"Using default output directory: {output_dir}")
+
+    if os.path.exists(output_dir):
+        assert os.path.isdir(
+            output_dir
+        ), f"Invalid output directory: {output_dir} already exists, but it is not a directory."
+        logger.warning("The contents in output directory will be overwritten")
+
+    return output_dir
+
+
+def get_default_output_dir(model_id: str) -> str:
+    if os.path.isdir(model_id):
+        return os.path.join("./engines", os.path.basename(model_id))
+    return os.path.join("./engines", model_id)
 
 
 @app.command()
