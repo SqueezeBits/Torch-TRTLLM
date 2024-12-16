@@ -2,6 +2,7 @@ from torch.fx import GraphModule, Node
 
 from ditto.fx.passes.node_wise_pass import NodewisePassResult
 
+from ..nodes import GetAttr
 from .node_wise_pass import NodewiseOptimizationPass, ReplaceAllUses
 
 
@@ -16,6 +17,19 @@ class FuseEquivalentNodes(NodewiseOptimizationPass):
         self.nodes = {n: i for i, n in enumerate(graph_module.graph.nodes)}
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+        if (
+            (get_attr := GetAttr.specialize_from(node))
+            and (
+                same_get_attrs := [
+                    n
+                    for n in node.graph.nodes
+                    if ((other := GetAttr.specialize_from(n)) and other.target == get_attr.target)
+                ]
+            )
+            and same_get_attrs[0] == node
+        ):
+            return {same_get_attr: ReplaceAllUses(by=node) for same_get_attr in same_get_attrs[1:]}
+
         if not (
             groups := [
                 group for group in group_users(node) if len(group) > 1 and self.get_closest_input_node(group[0]) == node
