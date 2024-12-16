@@ -24,11 +24,11 @@ pip install -e /workspace/ditto
 
 ### 2. Build a TRT-LLM engine
 ```
-ditto build <model-id-or-hf-model-directory> <engine-output-directory>
+ditto build <model-id-or-hf-model-directory> --output-dir <engine-output-directory>
 ```
 For example,
 ```
-ditto build /data/Llama-2-7b-chat-hf ./engines/Llama-2-7b-chat-hf-ditto
+ditto build /data/Llama-2-7b-chat-hf --output-dir ./engines/Llama-2-7b-chat-hf-ditto
 ```
 
 ### 3. Run the inference with TRT-LLM example code
@@ -41,7 +41,7 @@ python /workspace/tensorrt_llm/examples/run.py --engine_dir ./engines/Llama-2-7b
 ### 1. Dumping Debug Artifacts while Building Engine with Ditto
 Set the environment variable `DEBUG_ARTIFACTS_DIR` to dump intermediate build artifacts, such as graph module and TensorRT network definition, as files.
 ```
-DEBUG_ARTIFACTS_DIR=./artifacts/ditto-build ditto build /data/Llama-2-7b-chat-hf ./engines/Llama-2-7b-chat-hf-ditto
+DEBUG_ARTIFACTS_DIR=./artifacts/ditto-build ditto build /data/Llama-2-7b-chat-hf --output-dir ./engines/Llama-2-7b-chat-hf-ditto
 ```
 
 ### 2. Dumping Debug Artifacts while Building Engine with trtllm-build
@@ -74,7 +74,7 @@ Just copy and paste the sections wrapped by the following comments at the right 
 
 For example, the following command will append the TRT tensors corresponding to the outputs of the FX nodes `mm_default` and `fake_gpt_attention_plugin` to the TensorRT network outputs.
 ```
-ditto build /data/Llama-2-7b-chat-hf ./engines/Llama-2-7b-chat-hf-ditto-more-outputs --add-output mm_default --add-output fake_gpt_attention_plugin
+ditto build /data/Llama-2-7b-chat-hf --output-dir ./engines/Llama-2-7b-chat-hf-ditto-more-outputs --add-output mm_default --add-output fake_gpt_attention_plugin
 ```
 
 
