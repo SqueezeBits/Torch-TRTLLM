@@ -2,7 +2,7 @@
 # EASY-INSTALL-ENTRY-SCRIPT: 'tensorrt-llm','console_scripts','trtllm-build'
 import re
 import sys
-import ditto.patches
+import ditto.patches.trtllm
 
 # for compatibility with easy_install; see #2198
 __requires__ = 'tensorrt-llm'
