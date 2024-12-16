@@ -58,8 +58,9 @@ class TRTLLMInterpreter(TRTInterpreter):
         self.user_output_names = output_names
         if network_name:
             self.ctx.net.name = network_name
-        self._constant_cache: dict[str, trt.ITensor] = {}
-        self._constant_tensors: list[trt.ITensor] = []
+        # Note that the `trt.IConstantLayer` created from a graph module's weight holds the data pointer
+        # to the corresponding PyTorch tensor, which must be cached along with TensorRT tensors.
+        self._constant_cache: dict[str, tuple[trt.ITensor, torch.Tensor]] = {}
 
     def validate_conversion(self) -> set[str]:
         missing_ops = super().validate_conversion()
@@ -108,24 +109,21 @@ class TRTLLMInterpreter(TRTInterpreter):
 
     def get_attr(self, target: str, args: Any, kwargs: Any) -> trt.ITensor:
         if target in self._constant_cache:
-            return self._constant_cache[target]
+            return self._constant_cache[target][0]
         with _disable_current_modes():
-            frozen_attr = self.fetch_attr(target)
-            if isinstance(frozen_attr, torch.nn.Parameter):
-                constant_tensor = frozen_attr.data
-            else:
-                constant_tensor = frozen_attr
+            assert isinstance(
+                constant_tensor := self.fetch_attr(target), torch.Tensor
+            ), f"The fetched attribute '{target}' is not a PyTorch tensor: {constant_tensor}"
         constant_tensor = constant_tensor.cpu().detach().contiguous()
         trt_weight = trt.Weights(
             DataType(constant_tensor.dtype).to(trt.DataType),
             constant_tensor.data_ptr(),
-            torch.numel(constant_tensor),
+            constant_tensor.numel(),
         )
-        constant = self.ctx.net.add_constant(constant_tensor.shape, trt_weight)
+        constant = self.ctx.net.add_constant(trt.Dims(list(constant_tensor.shape)), trt_weight)
         constant.name = target
-        self._constant_tensors.append(constant_tensor)
-        self._constant_cache[target] = constant.get_output(0)
-        return constant.get_output(0)
+        self._constant_cache[target] = (output := constant.get_output(0), constant_tensor)
+        return output
 
     def output(self, target: str, args: Any, kwargs: Any) -> list[Any]:
         outputs = super().output(target, args, kwargs)
