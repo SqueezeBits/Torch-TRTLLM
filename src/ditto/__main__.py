@@ -1,14 +1,11 @@
 import os
-from typing import Annotated
+from typing import Annotated, Literal
 
 import torch
 from loguru import logger
-from pydantic import TypeAdapter, ValidationError
 from transformers import (
-    AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
-    PretrainedConfig,
     PreTrainedModel,
     PreTrainedTokenizer,
     PreTrainedTokenizerFast,
@@ -37,15 +34,13 @@ def generate(
     _prompts = "\n".join(f"* {p}" for p in prompts)
     logger.info(f"prompts:\n{_prompts}")
 
-    hf_config = AutoConfig.from_pretrained(model_id, trust_remote_code=trust_remote_code)
-    model_dtype = get_model_dtype(hf_config, dtype)
-    logger.info(f"device: {device} | dtype: {model_dtype}")
-
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        torch_dtype=model_dtype,
+        torch_dtype=get_model_dtype(dtype),
+        device_map=device,
         trust_remote_code=trust_remote_code,
-    ).to(device)
+    )
+    logger.info(f"device: {device} | dtype: {model.config.torch_dtype}")
 
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token_id = model.config.pad_token_id or 0
@@ -96,20 +91,16 @@ def build(
     assert not os.path.exists(output_dir) or os.path.isdir(output_dir), f"Invalid output directory: {output_dir}"
     app.pretty_exceptions_show_locals = verbose
 
-    hf_config = AutoConfig.from_pretrained(model_id, trust_remote_code=trust_remote_code)
-    model_dtype = get_model_dtype(hf_config, dtype)
-    logger.info(f"device: {device} | dtype: {model_dtype}")
-
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        torch_dtype=model_dtype,
+        torch_dtype=get_model_dtype(dtype),
+        device_map=device,
         trust_remote_code=trust_remote_code,
-    ).to(device)
+    )
+    logger.info(f"device: {device} | dtype: {model.config.torch_dtype}")
 
     engine, config = trtllm_build(
         model,
-        hf_config,
-        model_dtype=model_dtype,
         allow_matmul_in_fp16=allow_matmul_in_fp16,
         allow_activation_in_fp16=allow_activation_in_fp16,
         debug_node_names=add_output,
@@ -135,20 +126,16 @@ def build(
         config_file.write(config.model_dump_json(indent=2))
 
 
-def get_model_dtype(hf_config: PretrainedConfig, dtype: str) -> torch.dtype:
-    hf_config_dtype = getattr(hf_config, "torch_dtype", torch.float16)
-    try:
-        if dtype == "auto":
-            return TypeAdapter(torch.dtype, config={"arbitrary_types_allowed": True}).validate_python(hf_config_dtype)
-    except ValidationError:
-        logger.warning(f"Found unrecognized torch data type in HF config: {hf_config_dtype}")
+def get_model_dtype(dtype: str) -> torch.dtype | Literal["auto"]:
+    if dtype == "auto":
+        return "auto"
     try:
         return {
             str(torch_dtype).removeprefix("torch."): torch_dtype
             for torch_dtype in trt_to_torch_dtype_mapping().values()
         }[dtype]
     except KeyError as e:
-        raise TypeError(f"Unsupported torch data type: {dtype}") from e
+        raise ValueError(f"Unsupported torch data type: {dtype}") from e
 
 
 @app.command()
