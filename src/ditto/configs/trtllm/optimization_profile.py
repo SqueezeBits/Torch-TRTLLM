@@ -96,6 +96,11 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
     @classmethod
     def create_from(cls, hf_config: PretrainedConfig, plugin_config: TRTLLMPluginConfig) -> Self:
         max_position_embeddings = getattr(hf_config, "max_position_embeddings", DEFAULT_MAX_POS_EMBEDDING)
+        rope_scaling = getattr(hf_config, "rope_scaling", None)
+        if rope_scaling is not None:
+            rotary_factor = rope_scaling.get("factor", 1.0)
+            max_position_embeddings = math.ceil(max_position_embeddings * rotary_factor)
+            logger.debug(f"max_seq_len is scaled to {max_position_embeddings} by rotary scaling {rotary_factor}.")
         max_kv_cache_block_size = math.ceil(max_position_embeddings / plugin_config.tokens_per_block)
         return cls(
             max_seq_len=max_position_embeddings,
