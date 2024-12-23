@@ -9,12 +9,14 @@ from onnx import TensorProto
 from pydantic import BaseModel, ConfigDict
 from torch._C import _SDPBackend as SDPBackend  # noqa: F401
 from torch.export.dynamic_shapes import _Dim as ExportDim  # noqa: F401
+from torch.fx import Node
 
 BuiltInConstant = int | float | bool | None
 DeviceLikeType = str | torch.device | int
 Number = int | float | bool
 SymbolicInteger = int | torch.SymInt
 SymbolicShape = tuple[SymbolicInteger, ...]
+ShapeArg = list[int | Node]
 
 
 class StrictlyTyped(BaseModel):
