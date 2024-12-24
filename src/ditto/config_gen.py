@@ -2,14 +2,36 @@ from pydantic import TypeAdapter, ValidationError
 from tensorrt_llm._utils import trt_dtype_to_str
 from torch.fx import Graph, GraphModule
 
-from .configs.trtllm import TRTLLMPretrainedConfig
-from .configs.trtllm.literals import DTypeLiteral
+from .configs import (
+    DTypeLiteral,
+    TRTLLMBuildConfig,
+    TRTLLMEngineConfig,
+    TRTLLMModelConfig,
+    TRTLLMOptimizationProfileConfig,
+    TRTLLMPretrainedConfig,
+)
 from .fx.subgraphs import TokenEmbedding
 from .fx.targets import GPTAttentionPlugin
 
 
 class PretrainedConfigGenerationError(RuntimeError):
     """Error indicating failure in pretrained config generation based on graph module."""
+
+
+def generate_trtllm_engine_config(
+    graph_module: GraphModule,
+    profile_config: TRTLLMOptimizationProfileConfig,
+    model_config: TRTLLMModelConfig,
+    *,
+    architecture: str | None = None,
+) -> TRTLLMEngineConfig:
+    return TRTLLMEngineConfig(
+        pretrained_config=generate_trtllm_pretrained_config(
+            graph_module,
+            architecture=architecture,
+        ),
+        build_config=TRTLLMBuildConfig.merge(profile_config, model_config),
+    )
 
 
 def generate_trtllm_pretrained_config(

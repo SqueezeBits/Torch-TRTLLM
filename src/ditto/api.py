@@ -8,10 +8,9 @@ from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from transformers import PreTrainedModel
 
 from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
-from .config_gen import generate_trtllm_pretrained_config
+from .config_gen import generate_trtllm_engine_config
 from .configs import (
     TensorRTConfig,
-    TRTLLMBuildConfig,
     TRTLLMEngineConfig,
     TRTLLMLoraConfig,
     TRTLLMModelConfig,
@@ -162,22 +161,6 @@ def trtllm_export(
     logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
     save_for_debug("graph_module", graph_module)
     return graph_module
-
-
-def generate_trtllm_engine_config(
-    graph_module: GraphModule,
-    profile_config: TRTLLMOptimizationProfileConfig,
-    model_config: TRTLLMModelConfig,
-    *,
-    architecture: str | None = None,
-) -> TRTLLMEngineConfig:
-    return TRTLLMEngineConfig(
-        pretrained_config=generate_trtllm_pretrained_config(
-            graph_module,
-            architecture=architecture,
-        ),
-        build_config=TRTLLMBuildConfig.merge(profile_config, model_config),
-    )
 
 
 def _resolve_device(model: torch.nn.Module, device: DeviceLikeType | None) -> DeviceLikeType:
