@@ -15,7 +15,7 @@ from torch.fx.graph import _PyTreeCodeGen
 from torch_tensorrt.logging import TRT_LOGGER
 
 from ..constants import DEBUG_ARTIFACTS_DIR, DEFAULT_ONNX_PROTO_SIZE_THRESHOLD
-from ..pretty_print import detailed_sym_node_str
+from ..contexts import detailed_sym_node_str
 from .engine import EngineInfo
 from .fx import build_onnx_from_fx
 from .network import get_human_readable_flags
