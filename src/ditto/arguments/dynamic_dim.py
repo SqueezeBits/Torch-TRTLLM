@@ -7,14 +7,15 @@ from typing import Any, ClassVar
 import torch
 from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr, TypeAdapter, field_serializer, field_validator, model_validator
-from sympy import Integer, Symbol
+from sympy import Integer
+from torch._dynamo.source import SyntheticLocalSource
 from torch.export import Dim
 from torch.fx.experimental.sym_node import SymNode
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv, StrictMinMaxConstraint
 from torch.utils._sympy.value_ranges import ValueRanges
 from typing_extensions import Self
 
-from ..pretty_print import detailed_sym_node_str
+from ..contexts import detailed_sym_node_str
 from ..types import ExportDim
 
 
@@ -44,26 +45,41 @@ class DynamicDimensionType(BaseModel, ABC):
     @property
     def sym_int(self) -> torch.SymInt:
         if self._sym_int is None:
-            if DynamicDimensionType._shape_env is None:
-                logger.warning(
-                    "Creating a new shape environment for dynamic shapes. This might cause unexpected behavior."
-                )
-                DynamicDimensionType._shape_env = ShapeEnv()
-            symbol = Symbol(self.name)
-            sym_int = torch.SymInt(SymNode(symbol, DynamicDimensionType._shape_env, pytype=int, hint=self.example))
-            DynamicDimensionType._shape_env.var_to_range[symbol] = ValueRanges(self.min, self.max)
-            DynamicDimensionType._shape_env.var_to_val[symbol] = Integer(self.example)
-            self._sym_int = sym_int
+            self._sym_int = self._create_sym_int()
         return self._sym_int
 
     @sym_int.setter
     def sym_int(self, other: torch.SymInt) -> None:
-        if not (isinstance(sym_node := other.node, SymNode) and isinstance(shape_env := sym_node.shape_env, ShapeEnv)):
+        if isinstance(sym_node := other.node, SymNode) and isinstance(shape_env := sym_node.shape_env, ShapeEnv):
+            if DynamicDimensionType._shape_env is not None and DynamicDimensionType._shape_env is not shape_env:
+                logger.warning(
+                    "Interleaving between two different shape environments has been detected! "
+                    "You might experience failure in graph module fake tensor propagation!"
+                )
+            DynamicDimensionType._shape_env = shape_env
+            self._sym_int = other
+        else:
             with detailed_sym_node_str():
-                logger.warning(f"unsupported symbolic integer: {other}")
-            return
-        DynamicDimensionType._shape_env = shape_env
-        self._sym_int = other
+                raise RuntimeError(f"Failed to extract shape environment from `torch.SymInt` object {other}.")
+
+    def _create_sym_int(self) -> torch.SymInt:
+        if DynamicDimensionType._shape_env is None:
+            logger.warning("Creating a new shape environment for dynamic shapes. This might cause unexpected behavior.")
+            DynamicDimensionType._shape_env = ShapeEnv()
+        shape_env = DynamicDimensionType._shape_env
+        source = SyntheticLocalSource(local_name=f"Custom dynamic dimension {self.name}")
+        expr = shape_env.create_symbol(
+            self.example,
+            source,
+            dynamic_dim=DimDynamic.DYNAMIC,
+            constraint_dim=StrictMinMaxConstraint(
+                warn_only=True,
+                vr=ValueRanges(Integer(self.min), Integer(self.max)),
+            ),
+        )
+        sym_int = shape_env.create_symintnode(expr, hint=self.example)
+        assert isinstance(sym_int, torch.SymInt)
+        return sym_int
 
     @property
     @abstractmethod
