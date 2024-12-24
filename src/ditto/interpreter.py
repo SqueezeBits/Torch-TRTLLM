@@ -7,7 +7,6 @@ import torch.fx
 from loguru import logger
 from torch.fx import GraphModule
 from torch.fx.node import Node, Target
-from torch.fx.passes.shape_prop import TensorMetadata
 from torch.utils._python_dispatch import _disable_current_modes
 from torch_tensorrt import Input, dtype
 from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
@@ -27,6 +26,7 @@ from .debug import (
     save_for_debug,
 )
 from .fx.targets import GemmPlugin, GPTAttentionPlugin
+from .fx.utils import get_tensor_metadata
 from .types import DataType
 
 
@@ -169,7 +169,7 @@ def infer_module_output_dtypes(
     the_output = [n for n in module.graph.nodes if n.op == "output"][0]
     output_dtypes: list[dtype] = []
     for node in the_output.all_input_nodes:
-        if not isinstance((tensor_meta := node.meta.get("tensor_meta", None)), TensorMetadata):
+        if not (tensor_meta := get_tensor_metadata(node)):
             raise RuntimeError(f"Found a graph output without tensor metadata: {node.format_node()}")
         output_dtype = tensor_meta.dtype
         output_dtypes.append(
