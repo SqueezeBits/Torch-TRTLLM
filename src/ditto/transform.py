@@ -29,8 +29,8 @@ def transform(
     dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
-    matmuls_in_fp32: bool = True,
-    allow_activation_in_fp16: bool = True,
+    run_matmuls_in_fp32: bool = True,
+    run_activations_in_model_dtype: bool = True,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
 ) -> GraphModule:
     post_inline_pass_manager = DynamoPassManager.build_from_passlist(
@@ -56,8 +56,8 @@ def transform(
                 argument_hint,
                 dtype,
                 skipped_optimizers=skipped_optimizers,
-                matmuls_in_fp32=matmuls_in_fp32,
-                allow_activation_in_fp16=allow_activation_in_fp16,
+                run_matmuls_in_fp32=run_matmuls_in_fp32,
+                run_activations_in_model_dtype=run_activations_in_model_dtype,
             ),
             ConstantFolding().as_transform(),
             *(extra_passes or []),

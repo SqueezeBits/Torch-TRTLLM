@@ -91,8 +91,8 @@ def build(
     dtype: str = "auto",
     verbose: bool = False,
     trust_remote_code: bool = False,
-    matmuls_in_fp32: bool = True,
-    allow_activation_in_fp16: bool = True,
+    run_matmuls_in_fp32: bool = True,
+    run_activations_in_model_dtype: bool = True,
 ) -> None:
     output_dir = resolve_output_dir(output_dir, model_id)
     app.pretty_exceptions_show_locals = verbose
@@ -107,8 +107,8 @@ def build(
 
     engine, config = trtllm_build(
         model,
-        matmuls_in_fp32=matmuls_in_fp32,
-        allow_activation_in_fp16=allow_activation_in_fp16,
+        run_matmuls_in_fp32=run_matmuls_in_fp32,
+        run_activations_in_model_dtype=run_activations_in_model_dtype,
         debug_node_names=add_output,
     )
 

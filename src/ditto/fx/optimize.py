@@ -45,8 +45,8 @@ def get_optimization_transform(
     dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
-    matmuls_in_fp32: bool = True,
-    allow_activation_in_fp16: bool = True,
+    run_matmuls_in_fp32: bool = True,
+    run_activations_in_model_dtype: bool = True,
 ) -> Callable[[GraphModule], GraphModule]:
     """Optimize the given graph module inplace.
 
@@ -55,10 +55,10 @@ def get_optimization_transform(
         dtype (torch.dtype): the data type for the plugins
         skipped_optimizers (list[PassName] | None, optional): the names of optimization passes to skip.
             Defaults to None.
-        matmuls_in_fp32 (bool, optional): whether to allow matrix multiplication to be performed in FP16 precision.
+        run_matmuls_in_fp32 (bool, optional): whether to run all matrix multiplications in FP32.
             Defaults to False.
-        allow_activation_in_fp16 (bool, optional): whether to allow activations (a.k.a. non-linearities) to be
-            performed in FP16 precision. Defaults to True.
+        run_activations_in_model_dtype (bool, optional): whether to run all activations (a.k.a. non-linearities) in
+            the given `dtype`. Defaults to True.
 
     Returns:
         Callable[[GraphModule], GraphModule]: the function that applies FX optimization passes to the given graph module
@@ -68,8 +68,8 @@ def get_optimization_transform(
             argument_hint,
             dtype,
             skipped_optimizers=skipped_optimizers,
-            matmuls_in_fp32=matmuls_in_fp32,
-            allow_activation_in_fp16=allow_activation_in_fp16,
+            run_matmuls_in_fp32=run_matmuls_in_fp32,
+            run_activations_in_model_dtype=run_activations_in_model_dtype,
         ),
         get_level2_transform(skipped_optimizers),
     )
@@ -117,8 +117,8 @@ def get_trtllm_conversion_transform(
     dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
-    matmuls_in_fp32: bool = True,
-    allow_activation_in_fp16: bool = True,
+    run_matmuls_in_fp32: bool = True,
+    run_activations_in_model_dtype: bool = True,
 ) -> Callable[[GraphModule], GraphModule]:
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
         AddTRTLLMInputs(argument_hint=argument_hint),
@@ -131,10 +131,10 @@ def get_trtllm_conversion_transform(
         ReplaceMMByFakeGemmPlugin,
     ]
 
-    if matmuls_in_fp32:
+    if run_matmuls_in_fp32:
         passes.append(CastMMToFP32)
 
-    if allow_activation_in_fp16:
+    if run_activations_in_model_dtype:
         passes.append(FixActivationPrecision(dtype=dtype))
 
     return get_transform(
