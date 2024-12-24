@@ -1,10 +1,11 @@
-from typing import overload
+from weakref import WeakKeyDictionary
 
 import torch
-from torch.fx import Node
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.fx import Graph, Node
 from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
 
-from ..types import SymbolicShape
+from ..contexts import detailed_sym_node_str
 
 
 def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
@@ -49,10 +50,18 @@ def get_ancestors_with_depth(node: Node) -> dict[Node, int]:
     return ancestors
 
 
+def forget_all_descendant_fake_tensors(node: Node) -> None:
+    nodes = [node]
+    while nodes:
+        n = nodes.pop()
+        _ = n.meta.pop("val", None)
+        nodes.extend(n.users)
+
+
 def get_tensor_metadata(node: Node) -> TensorMetadata | None:
     if isinstance(tensor_meta := node.meta.get("tensor_meta"), TensorMetadata):
         return tensor_meta
-    if isinstance(val := node.meta.get("val", node.meta.get("example_value")), torch.Tensor):
+    if isinstance(val := node.meta.get("val"), torch.Tensor):
         return _extract_tensor_metadata(val)
     if isinstance(val, torch.SymInt) or node.target is torch.ops.aten.sym_size.int:
         return TensorMetadata(
@@ -67,57 +76,30 @@ def get_tensor_metadata(node: Node) -> TensorMetadata | None:
     return None
 
 
-@overload
-def populate_tensor_metadata(
-    node: Node,
-    tensor_metadata: TensorMetadata | torch.Tensor,
-    *,
-    shape: torch.Size | SymbolicShape | None = None,
-    dtype: torch.dtype | None = None,
-) -> TensorMetadata:
-    ...
+def get_fake_mode(graph: Graph) -> FakeTensorMode | None:
+    for node in graph.nodes:
+        if isinstance(val := node.meta.get("val"), FakeTensor):
+            return val.fake_mode
+    return None
 
 
-@overload
-def populate_tensor_metadata(
-    node: Node,
-    *,
-    shape: torch.Size | SymbolicShape,
-    dtype: torch.dtype,
-) -> TensorMetadata:
-    ...
+def find_sym_size_node(graph: Graph, s: torch.SymInt) -> Node:
+    cache: WeakKeyDictionary[Node, torch.SymInt] | None = None
+    if graph_module := graph.owning_module:
+        if "symint_cache" not in graph_module.meta:
+            graph_module.meta["symint_cache"] = WeakKeyDictionary()
+        cache = graph_module.meta["symint_cache"]
 
+    if cache is not None:
+        for node, sym_int in cache.items():
+            if sym_int is s:
+                return node
 
-def populate_tensor_metadata(
-    node: Node,
-    tensor_metadata: TensorMetadata | torch.Tensor | None = None,
-    *,
-    shape: torch.Size | SymbolicShape | None = None,
-    dtype: torch.dtype | None = None,
-) -> TensorMetadata:
-    if tensor_metadata is None:
-        assert (
-            shape is not None and dtype is not None
-        ), "`shape` and `dtype` needs to be provided when `tensor_metadata` is None"
-        node.meta["tensor_meta"] = tensor_metadata = TensorMetadata(
-            shape=torch.Size(shape),  # type: ignore[arg-type]
-            dtype=dtype,
-            requires_grad=False,
-            stride=(),
-            memory_format=None,
-            is_quantized=False,
-            qparams={},
-        )
-        return tensor_metadata
+    for node in graph.nodes:
+        if isinstance(val := node.meta.get("val"), torch.SymInt) and val == s:
+            if cache is not None:
+                cache[node] = s
+            return node
 
-    if isinstance(tensor_metadata, torch.Tensor):
-        tensor_metadata = _extract_tensor_metadata(tensor_metadata)
-    tensor_meta_as_dict = tensor_metadata._asdict()
-    if shape is not None:
-        if not isinstance(shape, torch.Size):
-            shape = torch.Size(shape)  # type: ignore[arg-type]
-        tensor_meta_as_dict["shape"] = shape
-    if dtype is not None:
-        tensor_meta_as_dict["dtype"] = dtype
-    node.meta["tensor_meta"] = (metadata := TensorMetadata(**tensor_meta_as_dict))
-    return metadata
+    with detailed_sym_node_str():
+        raise RuntimeError(f"Failed to find a node producing the symbolic integer {s}")
