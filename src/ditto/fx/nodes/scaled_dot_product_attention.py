@@ -7,10 +7,10 @@ from loguru import logger
 from torch.fx import Node
 
 from ..utils import get_tensor_metadata
-from .call_function import CallFunction
+from .call_function import FinalCallFunction
 
 
-class ScaledDotProductAttention(CallFunction):
+class ScaledDotProductAttention(FinalCallFunction):
     query: Node
     key: Node
     value: Node

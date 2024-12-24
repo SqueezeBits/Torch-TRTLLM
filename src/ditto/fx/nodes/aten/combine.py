@@ -3,8 +3,7 @@
 import torch
 from torch.fx.node import Node
 
-from ...utils import get_tensor_metadata
-from .aten_op import ATenOp
+from .aten_op import ATenOp, FinalATenOp
 from .utils import make_dim_nonnegative
 
 
@@ -13,12 +12,12 @@ class Combine(ATenOp):
     dim: int = 0
 
 
-@Combine.final(torch.ops.aten.cat.default)
-class Cat(Combine):
+@Combine.register(torch.ops.aten.cat.default)
+class Cat(Combine, FinalATenOp):
     @property
     def ndim(self) -> int | None:
-        if t := get_tensor_metadata(self.node):
-            return len(t.shape)
+        if isinstance(t := self.output, torch.Tensor):
+            return t.ndim
         return None
 
     @property
@@ -28,6 +27,6 @@ class Cat(Combine):
         return None
 
 
-@Combine.final(torch.ops.aten.stack.default)
-class Stack(Combine):
+@Combine.register(torch.ops.aten.stack.default)
+class Stack(Combine, FinalATenOp):
     ...

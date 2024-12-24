@@ -2,13 +2,18 @@
 from abc import ABC, abstractmethod
 from typing import Any, Literal, TypeVar, overload
 
+import torch
+import torch.utils._pytree as pytree
 from loguru import logger
 from pydantic import Field, ValidationError
 from pydantic_core import PydanticUndefined
+from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx import Graph
 from torch.fx.node import Argument, Node, Target
 from typing_extensions import Self
 
-from ...types import StrictlyTyped
+from ...types import ShapeArg, StrictlyTyped, SymbolicShape
+from ..utils import find_sym_size_node
 
 
 class NodeSpecialization(StrictlyTyped, ABC):
@@ -39,6 +44,52 @@ class NodeSpecialization(StrictlyTyped, ABC):
     def name(self) -> str:
         return self.node.name
 
+    @property
+    def stack_trace(self) -> str | None:
+        return self.node.stack_trace
+
+    @stack_trace.setter
+    def stack_trace(self, value: str | None) -> None:
+        self.node.stack_trace = value
+
+    @property
+    def output(self) -> FakeTensor | torch.SymInt | None:
+        return self.node.meta.get("val")
+
+    @output.setter
+    def output(self, other: FakeTensor | torch.SymInt | None) -> None:
+        self.node.meta["val"] = other
+
+    @property
+    def output_shape(self) -> SymbolicShape | None:
+        """The shape of the output of this node."""
+        if isinstance(t := self.output, FakeTensor):
+            return (*t.shape,)
+        if isinstance(self.output, torch.SymInt):
+            return ()
+        return None
+
+    @property
+    def output_shape_arg(self) -> ShapeArg | None:
+        """The shape of the output of this node that can be provided as an argument for creating other nodes."""
+        if (shape := self.output_shape) is None:
+            return None
+
+        try:
+            return [s if isinstance(s, int) else find_sym_size_node(self.node.graph, s) for s in shape]
+        except RuntimeError as e:
+            logger.warning(e)
+
+        return None
+
+    @property
+    def output_dtype(self) -> torch.dtype | None:
+        if isinstance(t := self.output, FakeTensor):
+            return t.dtype
+        if isinstance(self.output, torch.SymInt):
+            return torch.int64
+        return None
+
     def args_kwargs(self, **hotfix: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
         _args: list[Any] = []
         _kwargs: dict[str, Any] = {}
@@ -56,6 +107,8 @@ class NodeSpecialization(StrictlyTyped, ABC):
                 _args.append(value)
             elif field.is_required() or value != field.get_default(call_default_factory=True):
                 _kwargs[name] = value
+            if append_in_args and not field.is_required():
+                append_in_args = False
         return tuple(_args), _kwargs
 
     @classmethod
@@ -80,23 +133,53 @@ class NodeSpecialization(StrictlyTyped, ABC):
         Returns:
             Self | None: the specialized node if succeeded, `None` otherwise.
         """
-        if not cls.validate_node(node):
-            return None
         try:
-            arguments = {
-                name: get_argument(
-                    node,
-                    index - 1,
-                    name,
-                    default=None if field.default is PydanticUndefined else field.default,
-                )
-                for index, (name, field) in enumerate(cls.model_fields.items())
-                if index > 0  # should skip the `node`
-            }
-            return cls.model_validate({"node": node, **arguments})
-        except (AssertionError, ValidationError) as e:
-            logger.warning(f"Incorrect arguments given to the node {node.format_node()}: {arguments}. ({e})")
+            return cls._specialize_from(node)
+        except (AssertionError, TypeError, ValidationError):
             return None
+
+    @classmethod
+    def _specialize_from(cls, node: Node) -> Self:
+        if not cls.validate_node(node):
+            raise TypeError(f"{node.format_node()} cannot be validated as {cls.__name__}")
+        arguments = {
+            name: get_argument(
+                node,
+                index - 1,
+                name,
+                default=None if field.default is PydanticUndefined else field.default,
+            )
+            for index, (name, field) in enumerate(cls.model_fields.items())
+            if index > 0  # should skip the `node`
+        }
+        return cls.model_validate({"node": node, **arguments})
+
+    def __str__(self) -> str:
+        return self.node.format_node()  # type: ignore[return-value]
+
+
+class FinalSpecialization(NodeSpecialization):
+    @classmethod
+    @abstractmethod
+    def create(
+        cls,
+        graph: Graph,
+        *args: Argument | NodeSpecialization,
+        **kwargs: Argument | NodeSpecialization,
+    ) -> Self:
+        ...
+
+    @classmethod
+    def unwrap_specialization(
+        cls,
+        *args: Argument | NodeSpecialization,
+        **kwargs: Argument | NodeSpecialization,
+    ) -> tuple[tuple[Argument, ...], dict[str, Argument]]:
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+        return pytree.tree_unflatten(
+            (x.node if isinstance(x, NodeSpecialization) else x for x in flat_args),
+            spec,
+        )
 
 
 DefaultValue = TypeVar("DefaultValue")

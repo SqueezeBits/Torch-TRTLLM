@@ -3,9 +3,10 @@
 import torch
 from torch.fx.node import Node
 
-from ....types import SymbolicInteger
+from ....types import ShapeArg
 from ...utils import get_tensor_metadata
-from .aten_op import ATenOp
+from ..asterick import Asterick
+from .aten_op import ATenOp, FinalATenOp
 from .utils import make_dim_nonnegative
 
 
@@ -21,8 +22,8 @@ class SingleDimensionReshape(ATenOp):
 
     @property
     def output_ndim(self) -> int | None:
-        if t := get_tensor_metadata(self.node):
-            return len(t.shape)
+        if isinstance(t := self.output, torch.Tensor):
+            return t.ndim
         return None
 
     @property
@@ -30,8 +31,16 @@ class SingleDimensionReshape(ATenOp):
         return None
 
 
-@ATenOp.final(torch.ops.aten.permute.default)
-class Permute(ATenOp):
+@ATenOp.register(torch.ops.aten.expand.default)
+class Expand(FinalATenOp):
+    this: Node
+    shape: ShapeArg
+    asterick: None = Asterick
+    implicit: bool = False
+
+
+@ATenOp.register(torch.ops.aten.permute.default)
+class Permute(FinalATenOp):
     this: Node
     dims: list[int]
 
@@ -40,26 +49,20 @@ class Permute(ATenOp):
         return len(self.dims)
 
 
-@ATenOp.final(torch.ops.aten.reshape.default)
-class Reshape(ATenOp):
+@ATenOp.register(torch.ops.aten.reshape.default)
+class Reshape(FinalATenOp):
     this: Node
-    shape: list[SymbolicInteger | Node]
-
-    @property
-    def target_shape(self) -> torch.Size | None:
-        sym_ints: list[SymbolicInteger] = []
-        for s in self.shape:
-            if isinstance(s, SymbolicInteger):
-                sym_ints.append(s)
-                continue
-            if not isinstance(val := s.meta.get("val"), torch.SymInt):
-                return None
-            sym_ints.append(val)
-        return torch.Size(sym_ints)  # type: ignore[arg-type]
+    shape: ShapeArg
 
 
-@SingleDimensionReshape.final(torch.ops.aten.squeeze.dim)
-class SqueezeDim(SingleDimensionReshape):
+@ATenOp.register(torch.ops.aten.view.default)
+class View(FinalATenOp):
+    this: Node
+    size: ShapeArg
+
+
+@SingleDimensionReshape.register(torch.ops.aten.squeeze.dim)
+class SqueezeDim(SingleDimensionReshape, FinalATenOp):
     @property
     def nonnegative_dim(self) -> int | None:
         if (ndim := self.input_ndim) is not None:
@@ -67,8 +70,8 @@ class SqueezeDim(SingleDimensionReshape):
         return None
 
 
-@SingleDimensionReshape.final(torch.ops.aten.unsqueeze.default)
-class Unsqueeze(SingleDimensionReshape):
+@SingleDimensionReshape.register(torch.ops.aten.unsqueeze.default)
+class Unsqueeze(SingleDimensionReshape, FinalATenOp):
     @property
     def nonnegative_dim(self) -> int | None:
         if (ndim := self.output_ndim) is not None:

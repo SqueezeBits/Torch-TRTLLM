@@ -5,12 +5,12 @@ from torch.fx.node import Node
 
 from ....types import SymbolicInteger
 from ...utils import get_tensor_metadata
-from .aten_op import ATenOp
+from .aten_op import ATenOp, FinalATenOp
 from .utils import make_axis_nonnegative, make_dim_nonnegative
 
 
-@ATenOp.final(torch.ops.aten.slice.Tensor)
-class Slice(ATenOp):
+@ATenOp.register(torch.ops.aten.slice.Tensor)
+class Slice(FinalATenOp):
     this: Node
     dim: int = 0
     start: SymbolicInteger | Node | None = None

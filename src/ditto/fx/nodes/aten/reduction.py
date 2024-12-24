@@ -6,7 +6,7 @@ from torch.fx.node import Node
 
 from ...utils import get_tensor_metadata
 from ..asterick import Asterick
-from .aten_op import ATenOp
+from .aten_op import ATenOp, FinalATenOp
 from .utils import make_dim_nonnegative
 
 
@@ -30,11 +30,11 @@ class Reduction(ATenOp):
         return None
 
 
-@Reduction.final(torch.ops.aten.mean.dim)
-class MeanDim(Reduction):
+@Reduction.register(torch.ops.aten.mean.dim)
+class MeanDim(Reduction, FinalATenOp):
     ...
 
 
-@Reduction.final(torch.ops.aten.sum.dim_IntList)
-class SumDimIntList(Reduction):
+@Reduction.register(torch.ops.aten.sum.dim_IntList)
+class SumDimIntList(Reduction, FinalATenOp):
     ...

@@ -4,12 +4,12 @@ import torch
 from torch.fx import Node
 
 from ...utils import get_tensor_metadata
-from .aten_op import ATenOp
+from .aten_op import ATenOp, FinalATenOp
 from .utils import make_dim_nonnegative
 
 
-@ATenOp.final(torch.ops.aten.sym_size.int)
-class SymSizeInt(ATenOp):
+@ATenOp.register(torch.ops.aten.sym_size.int)
+class SymSizeInt(FinalATenOp):
     this: Node
     dim: int
 

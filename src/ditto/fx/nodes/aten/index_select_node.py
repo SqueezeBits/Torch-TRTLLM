@@ -3,21 +3,20 @@
 import torch
 from torch.fx.node import Node
 
-from ...utils import get_tensor_metadata
-from .aten_op import ATenOp
+from .aten_op import ATenOp, FinalATenOp
 from .utils import make_dim_nonnegative
 
 
-@ATenOp.final(torch.ops.aten.index_select.default)
-class IndexSelectNode(ATenOp):
+@ATenOp.register(torch.ops.aten.index_select.default)
+class IndexSelect(FinalATenOp):
     this: Node
     dim: int
     index: Node
 
     @property
     def output_ndim(self) -> int | None:
-        if t := get_tensor_metadata(self.node):
-            return len(t.shape)
+        if isinstance(t := self.output, torch.Tensor):
+            return t.ndim
         return None
 
     @property
