@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import tensorrt as trt
 from loguru import logger
 from tensorrt_llm._common import _is_building
@@ -9,9 +7,8 @@ from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from torch_tensorrt.dynamo.conversion import UnsupportedOperatorException
 from torch_tensorrt.logging import TRT_LOGGER
 
-from ditto.configs.tensorrt.config import TensorRTConfig
-
 from .arguments import TRTLLMArgumentHint
+from .configs import TensorRTConfig
 from .debug import save_for_debug, should_save_debug_artifacts
 from .interpreter import TRTLLMInterpreter
 
