@@ -20,6 +20,8 @@ from typing_extensions import Self
 
 from ...debug import open_debug_artifact
 from ...types import StrictlyTyped
+from .fake_tensor_mode import is_in_fake_tensor_mode
+from .plugin_field_types import PLUGIN_FIELD_TYPES
 
 
 class Llama3ScalingConfig(StrictlyTyped):
@@ -171,14 +173,7 @@ class GPTAttentionPluginFields(StrictlyTyped):
                 dtype = np.int8
             else:
                 raise NotImplementedError(f"Converting attribute {name} of type {type(value)} is not implemented yet")
-            plugin_field_type = {
-                np.int8: trt.PluginFieldType.INT8,
-                np.int16: trt.PluginFieldType.INT16,
-                np.int32: trt.PluginFieldType.INT32,
-                np.float16: trt.PluginFieldType.FLOAT16,
-                np.float32: trt.PluginFieldType.FLOAT32,
-                np.float64: trt.PluginFieldType.FLOAT64,
-            }[dtype]
+            plugin_field_type = PLUGIN_FIELD_TYPES[dtype]
             if isinstance(value, IntEnum | IntFlag | trt.DataType):
                 value = value.value
             return trt.PluginField(name, np.array(value, dtype=dtype), plugin_field_type)
@@ -236,4 +231,8 @@ class GPTAttentionPlugin(GPTAttentionPluginFields):
         qkv: torch.Tensor,
         **kwargs: Any,
     ) -> torch.Tensor:
+        if is_in_fake_tensor_mode():
+            # Note that this is merely for the fake tensor propagation
+            q_size = self.num_heads * self.head_size
+            return qkv[..., :q_size]
         raise NotImplementedError(f"{type(self).__name__} doesn't have implementation")

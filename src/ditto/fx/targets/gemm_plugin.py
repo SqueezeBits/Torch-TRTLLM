@@ -6,6 +6,7 @@ import tensorrt as trt
 import torch
 
 from ...types import StrictlyTyped
+from .plugin_field_types import PLUGIN_FIELD_TYPES
 
 
 class GemmPluginFields(StrictlyTyped):
@@ -25,14 +26,7 @@ class GemmPluginFields(StrictlyTyped):
                 dtype = np.float32
             else:
                 dtype = np.int32
-            plugin_field_type = {
-                np.int8: trt.PluginFieldType.INT8,
-                np.int16: trt.PluginFieldType.INT16,
-                np.int32: trt.PluginFieldType.INT32,
-                np.float16: trt.PluginFieldType.FLOAT16,
-                np.float32: trt.PluginFieldType.FLOAT32,
-                np.float64: trt.PluginFieldType.FLOAT64,
-            }[dtype]
+            plugin_field_type = PLUGIN_FIELD_TYPES[dtype]
 
             if isinstance(value, IntEnum | IntFlag | trt.DataType):
                 value = value.value
@@ -60,4 +54,4 @@ class GemmPlugin(GemmPluginFields):
         weight: torch.Tensor,
         **kwargs: Any,
     ) -> torch.Tensor:
-        raise NotImplementedError(f"{type(self).__name__} doesn't have implementation")
+        return x @ weight.transpose(1, 0)

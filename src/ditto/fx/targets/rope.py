@@ -26,7 +26,7 @@ def get_llama2_rope_pattern_graph(
     return graph
 
 
-def get_llama2_rope_replacment_graph() -> Graph:
+def get_llama2_rope_replacement_graph() -> Graph:
     graph = Graph()
     x = graph.placeholder("x")
     cos = graph.placeholder("cos")
