@@ -7,18 +7,18 @@ from loguru import logger
 
 PassName = Literal[
     "AddTRTLLMInputs",
-    "CastMMToFP32If",
-    "ConstantSharing",
+    "CanonicalizeCopy",
+    "CastMMToFP32",
+    "ConstantFolding",
     "DeferUnsqueeze",
-    "EliminateCopy",
     "EliminateNopCatOrStack",
     "EliminateNopPermute",
-    "EliminateNopReshape",
+    "EliminateNopReshapeOrExpand",
     "EliminateNopSlice",
     "EliminateUnsqueezeSqueeze",
-    "EliminateUnusedWeights",
     "FixSliceRanges",
     "FixActivationPrecision",
+    "ForgetSubmodules",
     "FuseConsecutivePermutes",
     "FuseConsecutiveReshapes",
     "FuseConsecutiveSliceConcat",
@@ -29,21 +29,16 @@ PassName = Literal[
     "FuseReciprocalMul",
     "InsertGatherLastTokenIds",
     "HerdConstantsToTheRight",
-    "MakeWeightsContiguous",
     "ReplaceMMByFakeGemmPlugin",
     "ReplaceSDPAByFakeGPTAttentionPlugin",
-    "ReplaceSDPAByFakeGPTAttentionPluginV2",
     "ReplaceViewByReshape",
+    "ResetCodeGen",
     "RewriteConstantOperandsAsNodes",
     "RewriteReshapeAsUnsqueeze",
     "WrapRoPESubgraphs",
+    "WrapSDPASubgraphs",
 ]
 """The possible names of FX optimization passes"""
-
-AUTO_DETECT_ROPE_SUBGRAPH: bool = os.getenv("AUTO_DETECT_ROPE_SUBGRAPH", "1") == "1"
-"""
-Whether to automatically detect RoPE subgraph and fuse them in GPTAttentionPlugin.
-"""
 
 # pylint: disable-next=invalid-envvar-default
 DEBUG_ARTIFACTS_DIR: str | None = os.getenv("DEBUG_ARTIFACTS_DIR", None)
