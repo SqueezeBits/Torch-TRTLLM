@@ -1,9 +1,9 @@
 import torch
 from torch.fx import Node
 
-from ..nodes import Reshape
-from ..utils import get_tensor_metadata, populate_tensor_metadata
-from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
+from ..nodes import Reshape, Unsqueeze
+from ..utils import get_tensor_metadata
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
 
 
 class RewriteReshapeAsUnsqueeze(NodewiseOptimizationPass):
@@ -13,18 +13,15 @@ class RewriteReshapeAsUnsqueeze(NodewiseOptimizationPass):
         if not (
             (reshape := Reshape.specialize_from(node))
             and (input_tensor := get_tensor_metadata(reshape.this))
-            and (target_shape := reshape.target_shape) is not None
-            and (dim := find_unsqueeze_dim(input_tensor.shape, target_shape)) is not None
+            and (output_tensor := get_tensor_metadata(reshape.node)) is not None
+            and (dim := find_unsqueeze_dim(input_tensor.shape, output_tensor.shape)) is not None
         ):
             return {}
         graph = node.graph
         with graph.inserting_before(node):
-            unsqueeze = graph.call_function(torch.ops.aten.unsqueeze.default, (reshape.this, dim))
-            if node.stack_trace:
-                unsqueeze.stack_trace = f"{node.stack_trace}, pass: rewritten by {__name__}"
-            if t := get_tensor_metadata(node):
-                populate_tensor_metadata(unsqueeze, t)
-        return {node: ReplaceAllUses(by=unsqueeze)}
+            unsqueeze = Unsqueeze.create(graph, reshape.this, dim)
+            inject_stack_trace_from(reshape, to=unsqueeze)
+        return {node: ReplaceAllUses(by=unsqueeze.node)}
 
 
 def find_unsqueeze_dim(

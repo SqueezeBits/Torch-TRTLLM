@@ -1,26 +1,37 @@
+import warnings
+from functools import cached_property
 from inspect import isclass
 from typing import Generic, TypeVar, get_args
 
 import torch
+from pydantic.warnings import GenericBeforeBaseModelWarning
 from torch.fx import GraphModule, Node
-from torch.fx.passes.infra.pass_manager import PassManager, PassResult
 
 from ...constants import FX_TRANSFORM_MAXIMUM_ITERATION
-from ..nodes import Activation
+from ..nodes import Activation, ToCopy
 from ..subgraphs import ActivationSubgraph, Silu
-from ..utils import get_tensor_metadata, populate_tensor_metadata
-from .node_wise_pass import GraphOptimizationPass, ModifiedInsideThePass, NodewiseOptimizationPass, NodewisePassResult
+from ..utils import get_tensor_metadata
+from .infra import (
+    GraphOptimizationPass,
+    ModifiedInsideThePass,
+    NodewiseOptimizationPass,
+    NodewisePassResult,
+    PassManager,
+    PassResult,
+)
 
 
 class FixActivationPrecision(GraphOptimizationPass):
     """Fix the activation layer precisions."""
 
-    def __init__(self, *, dtype: torch.dtype, depth: int = 0) -> None:
-        super().__init__(depth=depth)
-        self.pass_manager = PassManager(
+    dtype: torch.dtype
+
+    @cached_property
+    def pass_manager(self) -> PassManager:
+        return PassManager(
             passes=[
-                FixSiluPrecision(to=dtype, depth=depth + 1),
-                FixNodePrecision(to=dtype, depth=depth + 1),
+                FixSiluPrecision(dtype=self.dtype, depth=self.depth + 1),
+                FixActivationNodePrecision(dtype=self.dtype, depth=self.depth + 1),
             ],
             steps=FX_TRANSFORM_MAXIMUM_ITERATION,
         )
@@ -30,49 +41,44 @@ class FixActivationPrecision(GraphOptimizationPass):
 
 
 class FixPrecision(NodewiseOptimizationPass):
-    def __init__(self, *, to: torch.dtype, depth: int = 0) -> None:
-        super().__init__(depth=depth)
-        self.dtype = to
+    dtype: torch.dtype
 
 
 # pylint: disable-next=invalid-name
 SubgraphType = TypeVar("SubgraphType", bound=ActivationSubgraph)
 
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=GenericBeforeBaseModelWarning)
 
-class FixSubgraphPrecision(Generic[SubgraphType], FixPrecision):
-    @property
-    def subgraph_class(self) -> type[ActivationSubgraph]:
-        cls = type(self)
-        # pylint: disable-next=no-member
-        type_arg = get_args(cls.__orig_bases__[0])[0]  # type: ignore[attr-defined]  # noqa: N806
-        assert isclass(type_arg) and issubclass(
-            type_arg, ActivationSubgraph
-        ), f"Wrong specialization of {cls.__name__} with type parameter {type_arg}"
-        return type_arg
+    class FixActivationSubgraphPrecision(Generic[SubgraphType], FixPrecision):
+        @property
+        def subgraph_class(self) -> type[ActivationSubgraph]:
+            cls = type(self)
+            # pylint: disable-next=no-member
+            type_arg = get_args(cls.__orig_bases__[0])[0]  # type: ignore[attr-defined]  # noqa: N806
+            assert isclass(type_arg) and issubclass(
+                type_arg, ActivationSubgraph
+            ), f"Wrong specialization of {cls.__name__} with type parameter {type_arg}"
+            return type_arg
 
-    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
-        if not (
-            (subgraph := self.subgraph_class.configure_from(node))
-            and (input_meta := get_tensor_metadata(subgraph.input))
-            and (output_meta := get_tensor_metadata(subgraph.output))
-            and input_meta.dtype == output_meta.dtype
-            and input_meta.dtype != self.dtype
-        ):
-            return {}
-        insert_cast(subgraph.input, self.dtype)
-        insert_cast(subgraph.output, self.dtype)
-        for n in subgraph.nodes:
-            if not (meta := get_tensor_metadata(n)):
-                continue
-            populate_tensor_metadata(n, meta, dtype=self.dtype)
-        return {node: ModifiedInsideThePass()}
+        def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+            if not (
+                (subgraph := self.subgraph_class.configure_from(node))
+                and (input_meta := get_tensor_metadata(subgraph.input))
+                and (output_meta := get_tensor_metadata(subgraph.output))
+                and input_meta.dtype == output_meta.dtype
+                and input_meta.dtype != self.dtype
+            ):
+                return {}
+            insert_cast_before(subgraph.input, self.dtype)
+            insert_cast_before(subgraph.output, self.dtype)
+            return {node: ModifiedInsideThePass()}
 
-
-class FixSiluPrecision(FixSubgraphPrecision[Silu]):
-    ...
+    class FixSiluPrecision(FixActivationSubgraphPrecision[Silu]):
+        ...
 
 
-class FixNodePrecision(FixPrecision):
+class FixActivationNodePrecision(FixPrecision):
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (activation := Activation.specialize_from(node))
@@ -82,19 +88,14 @@ class FixNodePrecision(FixPrecision):
             and input_meta.dtype != self.dtype
         ):
             return {}
-        insert_cast(activation.this, self.dtype)
-        insert_cast(activation.node, self.dtype)
-        populate_tensor_metadata(node, output_meta, dtype=self.dtype)
+        insert_cast_before(activation.this, self.dtype)
+        insert_cast_before(activation.node, self.dtype)
         return {node: ModifiedInsideThePass()}
 
 
-def insert_cast(x: Node, dtype: torch.dtype) -> None:
+def insert_cast_before(x: Node, dtype: torch.dtype) -> None:
     with x.graph.inserting_after(x):
-        input_cast = x.graph.call_function(torch.ops.aten._to_copy.default, (x,), {"dtype": dtype})
-    if x.stack_trace:
-        input_cast.stack_trace = f"{x.stack_trace}, pass: inserted by FixActivationPrecision"
-    if meta := get_tensor_metadata(x):
-        populate_tensor_metadata(input_cast, meta, dtype=dtype)
+        input_cast = ToCopy.create(x.graph, x, dtype=dtype).node
     for user in [*x.users]:
         if user == input_cast:
             continue

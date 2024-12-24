@@ -3,10 +3,10 @@ import torch
 from torch.fx import Node
 
 from ...types import DataType
-from ..nodes import MM
+from ..nodes import MM, Permute
 from ..targets import GemmPlugin
-from ..utils import get_tensor_metadata, populate_tensor_metadata
-from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
+from ..utils import get_tensor_metadata
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
 
 
 class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
@@ -15,7 +15,7 @@ class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (mm := MM.specialize_from(node))
-            and (mm_output := get_tensor_metadata(mm.node))
+            and isinstance(mm_output := mm.output, torch.Tensor)
             and (this := get_tensor_metadata(mm.this))
             and len(this.shape) == 2
             and (other := get_tensor_metadata(mm.other))
@@ -26,13 +26,10 @@ class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
         graph = node.graph
         # Note: the right-hand-side `mm.other` must be transposed before it is fed to GemmPlugin
         # for the correct functionality as GemmPlugin's functionality breaks when `transb=0` (don't know why ...)
-        with graph.inserting_after(mm.other):
-            other_t = graph.call_function(torch.ops.aten.permute.default, (mm.other, (1, 0)))
-            populate_tensor_metadata(other_t, other, shape=(other.shape[1], other.shape[0]))
-
         fake_gemm_plugin = GemmPlugin(transb=1, type_id=DataType(mm_output.dtype).to(trt.DataType))
         with graph.inserting_before(node):
-            output = graph.call_function(fake_gemm_plugin, (mm.this, other_t))
-            populate_tensor_metadata(output, mm_output)
+            other_t = Permute.create(graph, mm.other, (1, 0)).node
+            gemm_plugin = graph.call_function(fake_gemm_plugin, (mm.this, other_t))
+            inject_stack_trace_from(mm, to=gemm_plugin)
 
-        return {node: ReplaceAllUses(by=output)}
+        return {node: ReplaceAllUses(by=gemm_plugin)}

@@ -1,7 +1,7 @@
 from torch.fx.node import Node
 
 from ..nodes import Reshape, SingleDimensionReshape
-from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAmongInputs
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAmongInputs
 
 
 class FuseConsecutiveReshapes(NodewiseOptimizationPass):
@@ -17,10 +17,4 @@ class FuseConsecutiveReshapes(NodewiseOptimizationPass):
             )
         ):
             return {}
-        results: dict[Node, NodewisePassResult] = {}
-        for child_reshape in children:
-            child_node = child_reshape.node
-            if child_node.stack_trace:
-                child_node.stack_trace = f"{child_node.stack_trace}, pass: fused with {node} by {__name__}"
-            results[child_node] = ReplaceAmongInputs(occurences_of=node, by=parent.this)
-        return results
+        return {child.node: ReplaceAmongInputs(occurrences_of=node, by=parent.this) for child in children}

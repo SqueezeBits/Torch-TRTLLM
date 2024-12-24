@@ -2,51 +2,45 @@ from collections.abc import Callable
 
 import torch
 from pydantic import TypeAdapter
+from torch._subclasses import FakeTensor
 from torch.fx import GraphModule, Node
-from torch.fx.passes.infra.pass_base import PassResult
 
 from ...arguments import TRTLLMArgumentHint
 from ...constants import INPUT_IDS, INPUT_IDS_UNSQUEEZE_DIM
-from ..utils import get_tensor_metadata, populate_tensor_metadata
-from .graph_pass import GraphOptimizationPass
+from ..nodes import Placeholder, SqueezeDim, Unsqueeze
+from .infra import GraphOptimizationPass, PassResult
 
 
 class AddTRTLLMInputs(GraphOptimizationPass):
     """Add placeholder nodes corresponding to the TRTLLM model inputs."""
 
-    def __init__(self, *, argument_hint: TRTLLMArgumentHint, depth: int = 0) -> None:
-        super().__init__(depth=depth)
-        self.input_hints = argument_hint.as_dict()
+    argument_hint: TRTLLMArgumentHint
 
     def call(self, graph_module: GraphModule) -> PassResult:
         graph = graph_module.graph
         assert (
-            placeholders := {p.name: p for p in graph.find_nodes(op="placeholder")}
+            placeholders := {p.name: Placeholder._specialize_from(p) for p in graph.find_nodes(op="placeholder")}
         ), "Graph module with no inputs found!"
         last_placeholder = [*placeholders.values()][-1]
         modified = False
         input_ids_unsqueezed = False
-        for name, hint in reversed(self.input_hints.items()):
+        for name, hint in reversed(self.argument_hint.as_dict().items()):
             if name in placeholders:
                 if name != INPUT_IDS:
                     continue
-                batched_input_ids = get_tensor_metadata(input_ids := placeholders[name])
-                with graph.inserting_after(input_ids):
-                    unsqueeze = graph.call_function(
-                        torch.ops.aten.unsqueeze.default, (input_ids, INPUT_IDS_UNSQUEEZE_DIM)
-                    )
-                    if batched_input_ids:
-                        populate_tensor_metadata(
-                            input_ids, batched_input_ids, shape=(batched_input_ids.shape[1 - INPUT_IDS_UNSQUEEZE_DIM],)
-                        )
-                        populate_tensor_metadata(unsqueeze, batched_input_ids)
-                    input_ids.replace_all_uses_with(unsqueeze, delete_user_cb=is_not_equal_to(unsqueeze))
+                with graph.inserting_after((input_ids := placeholders[name]).node):
+                    unsqueeze = Unsqueeze.create(graph, input_ids, INPUT_IDS_UNSQUEEZE_DIM)
+                    if isinstance(val := input_ids.output, FakeTensor):
+                        with val.fake_mode:
+                            input_ids.output = torch.empty(  # type: ignore[assignment]
+                                hint.symbolic_shape, dtype=hint.dtype
+                            )
+                    input_ids.node.replace_all_uses_with(unsqueeze.node, delete_user_cb=is_not_equal_to(unsqueeze.node))
                     modified = True
                     input_ids_unsqueezed = True
                 continue
-            with graph.inserting_after(last_placeholder):
-                placeholder = graph.placeholder(name)
-                populate_tensor_metadata(placeholder, shape=hint.symbolic_shape, dtype=hint.dtype)
+            with graph.inserting_after(last_placeholder.node):
+                _ = Placeholder.create(graph, name, hint)
                 modified = True
 
         if (
@@ -62,16 +56,13 @@ class AddTRTLLMInputs(GraphOptimizationPass):
             replacements: dict[Node, Node] = {}
             for output in outputs:
                 with graph.inserting_before(the_output_node):
-                    squeeze = graph.call_function(torch.ops.aten.squeeze.dim, (output, INPUT_IDS_UNSQUEEZE_DIM))
-                if meta := get_tensor_metadata(output):
-                    shape = meta.shape[:INPUT_IDS_UNSQUEEZE_DIM] + meta.shape[INPUT_IDS_UNSQUEEZE_DIM + 1 :]
-                    populate_tensor_metadata(squeeze, meta, shape=shape)
-                replacements[output] = squeeze
+                    squeeze = SqueezeDim.create(graph, output, INPUT_IDS_UNSQUEEZE_DIM)
+                replacements[output] = squeeze.node
             for old_output, new_output in replacements.items():
                 the_output_node.replace_input_with(old_output, new_output)
             modified = True
 
-        return PassResult(graph_module, modified)
+        return PassResult(graph_module=graph_module, modified=modified)
 
 
 def is_not_equal_to(target: Node) -> Callable[[Node], bool]:

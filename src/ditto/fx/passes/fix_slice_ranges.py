@@ -1,7 +1,7 @@
 from torch.fx import Node
 
 from ..nodes import Slice
-from .node_wise_pass import ModifiedInsideThePass, NodewiseOptimizationPass, NodewisePassResult
+from .infra import ModifiedInsideThePass, NodewiseOptimizationPass, NodewisePassResult
 
 
 class FixSliceRanges(NodewiseOptimizationPass):
