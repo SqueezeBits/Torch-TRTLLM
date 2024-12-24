@@ -2,10 +2,10 @@ from pydantic import TypeAdapter, ValidationError
 from tensorrt_llm._utils import trt_dtype_to_str
 from torch.fx import Graph, GraphModule
 
-from ..fx.subgraphs import TokenEmbedding
-from ..fx.targets import GPTAttentionPlugin
-from .trtllm import TRTLLMPretrainedConfig
-from .trtllm.literals import DTypeLiteral
+from .configs.trtllm import TRTLLMPretrainedConfig
+from .configs.trtllm.literals import DTypeLiteral
+from .fx.subgraphs import TokenEmbedding
+from .fx.targets import GPTAttentionPlugin
 
 
 class PretrainedConfigGenerationError(RuntimeError):

@@ -25,7 +25,7 @@ with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=GenericBeforeBaseModelWarning)
 
     class BitmaskFlags(Generic[TRTEnumFlag], StrictlyTyped):
-        def __init_subclass__(cls, **kwargs: Unpack[ConfigDict]):
+        def __init_subclass__(cls, **kwargs: Unpack[ConfigDict]) -> None:
             super().__init_subclass__(**kwargs)
             for name, field in cls.model_fields.items():
                 assert field.annotation is bool, (
