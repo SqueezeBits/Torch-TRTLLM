@@ -8,6 +8,7 @@ from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from transformers import PreTrainedModel
 
 from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
+from .config_gen import generate_trtllm_pretrained_config
 from .configs import (
     TensorRTConfig,
     TRTLLMBuildConfig,
@@ -16,7 +17,6 @@ from .configs import (
     TRTLLMModelConfig,
     TRTLLMOptimizationProfileConfig,
     TRTLLMPluginConfig,
-    generate_trtllm_pretrained_config,
 )
 from .constants import DEFAULT_DEVICE, INPUT_IDS, PassName
 from .convert import convert
@@ -35,7 +35,7 @@ def trtllm_build(
     lora_config: TRTLLMLoraConfig | None = None,
     plugin_config: TRTLLMPluginConfig | None = None,
     trt_config: TensorRTConfig | None = None,
-    allow_matmul_in_fp16: bool = False,
+    matmuls_in_fp32: bool = True,
     allow_activation_in_fp16: bool = True,
     debug_node_names: list[str] | None = None,
     engine_cache: BaseEngineCache | None = None,
@@ -53,7 +53,7 @@ def trtllm_build(
         argument_hint,
         model_dtype,
         device=device,
-        allow_matmul_in_fp16=allow_matmul_in_fp16,
+        matmuls_in_fp32=matmuls_in_fp32,
         allow_activation_in_fp16=allow_activation_in_fp16,
         extra_passes=[add_outputs(debug_node_names)] if debug_node_names else None,
     )
@@ -120,7 +120,7 @@ def trtllm_export(
     dtype: torch.dtype,
     *,
     device: DeviceLikeType | None = None,
-    allow_matmul_in_fp16: bool = False,
+    matmuls_in_fp32: bool = True,
     allow_activation_in_fp16: bool = True,
     skipped_optimizers: list[PassName] | None = None,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
@@ -155,7 +155,7 @@ def trtllm_export(
         argument_hint=argument_hint,
         dtype=dtype,
         skipped_optimizers=skipped_optimizers,
-        allow_matmul_in_fp16=allow_matmul_in_fp16,
+        matmuls_in_fp32=matmuls_in_fp32,
         allow_activation_in_fp16=allow_activation_in_fp16,
         extra_passes=extra_passes,
     )

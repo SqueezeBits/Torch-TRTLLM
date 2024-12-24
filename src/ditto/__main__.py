@@ -17,6 +17,7 @@ from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
 from .types import trt_to_torch_dtype_mapping
 
 if not DISABLE_TRANSFORMER_PATCHES:
+    # pylint: disable-next=unused-import
     from .patches import transformers  # noqa: F401
 
     logger.info("To prevent custom patches for transformers set the environment variable DISABLE_TRANSFORMER_PATCHES=1")
@@ -90,7 +91,7 @@ def build(
     dtype: str = "auto",
     verbose: bool = False,
     trust_remote_code: bool = False,
-    allow_matmul_in_fp16: bool = False,
+    matmuls_in_fp32: bool = True,
     allow_activation_in_fp16: bool = False,
 ) -> None:
     output_dir = resolve_output_dir(output_dir, model_id)
@@ -106,7 +107,7 @@ def build(
 
     engine, config = trtllm_build(
         model,
-        allow_matmul_in_fp16=allow_matmul_in_fp16,
+        matmuls_in_fp32=matmuls_in_fp32,
         allow_activation_in_fp16=allow_activation_in_fp16,
         debug_node_names=add_output,
     )
