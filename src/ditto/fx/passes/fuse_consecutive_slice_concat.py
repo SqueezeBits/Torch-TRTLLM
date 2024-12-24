@@ -1,7 +1,7 @@
 from torch.fx import Node
 
 from ..nodes import Cat, Slice
-from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class FuseConsecutiveSliceConcat(NodewiseOptimizationPass):

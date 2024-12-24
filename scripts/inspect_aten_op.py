@@ -49,7 +49,10 @@ def display_op(aten_op: OpOverloadPacket) -> None:
 
 def print_div(msg: str, token: str = "=") -> None:
     assert len(token) == 1
-    terminal_width = os.get_terminal_size().columns
+    try:
+        terminal_width = os.get_terminal_size().columns
+    except OSError:
+        terminal_width = 128
     if len(msg) > terminal_width:
         print(msg)
         return

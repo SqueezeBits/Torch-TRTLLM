@@ -4,11 +4,24 @@ import torch
 from torch.fx.node import Node
 
 from ....types import SymbolicInteger
-from .aten_op import ATenOp
+from .aten_op import ATenOp, FinalATenOp
 
 
-@ATenOp.final(torch.ops.aten.split.default, torch.ops.aten.split.sizes)
 class Split(ATenOp):
     this: Node
     split_size: list[SymbolicInteger] | SymbolicInteger
+    dim: int = 0
+
+
+@Split.register(torch.ops.aten.split.default)
+class SplitDefault(Split, FinalATenOp):
+    this: Node
+    split_size: SymbolicInteger
+    dim: int = 0
+
+
+@Split.register(torch.ops.aten.split.sizes)
+class SplitSizes(Split, FinalATenOp):
+    this: Node
+    split_size: list[SymbolicInteger]
     dim: int = 0

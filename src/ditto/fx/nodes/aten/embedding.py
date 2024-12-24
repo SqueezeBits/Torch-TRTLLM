@@ -4,11 +4,11 @@ import torch
 from torch.fx.node import Node
 
 from ....types import SymbolicInteger
-from .aten_op import ATenOp
+from .aten_op import ATenOp, FinalATenOp
 
 
-@ATenOp.final(torch.ops.aten.embedding.default)
-class Embedding(ATenOp):
+@ATenOp.register(torch.ops.aten.embedding.default)
+class Embedding(FinalATenOp):
     weight: Node
     indices: Node
     padding_idx: SymbolicInteger = -1

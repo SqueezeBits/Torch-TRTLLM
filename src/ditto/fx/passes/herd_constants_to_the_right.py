@@ -2,7 +2,7 @@ from torch.fx import Node
 
 from ...types import Number
 from ..nodes import Binary
-from .node_wise_pass import ModifiedInsideThePass, NodewiseOptimizationPass, NodewisePassResult
+from .infra import ModifiedInsideThePass, NodewiseOptimizationPass, NodewisePassResult
 
 
 class HerdConstantsToTheRight(NodewiseOptimizationPass):

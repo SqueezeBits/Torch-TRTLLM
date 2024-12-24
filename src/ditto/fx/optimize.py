@@ -3,20 +3,17 @@ from collections.abc import Callable
 import torch
 from loguru import logger
 from torch.fx import GraphModule
-from torch.fx.passes.infra.pass_manager import PassManager
-from torch_tensorrt.dynamo.lowering.passes.pass_utils import clean_up_graph_after_modifications
 
 from ..arguments import TRTLLMArgumentHint
-from ..constants import AUTO_DETECT_ROPE_SUBGRAPH, FX_TRANSFORM_MAXIMUM_ITERATION, PassName
-from ..debug import get_memory_footprint
+from ..constants import FX_TRANSFORM_MAXIMUM_ITERATION, PassName
 from .passes import (
     AddTRTLLMInputs,
-    CastMMToFP32If,
+    CanonicalizeCopy,
+    CastMMToFP32,
     DeferUnsqueeze,
-    EliminateCopy,
     EliminateNopCatOrStack,
     EliminateNopPermute,
-    EliminateNopReshape,
+    EliminateNopReshapeOrExpand,
     EliminateNopSlice,
     EliminateUnsqueezeSqueeze,
     FixActivationPrecision,
@@ -33,14 +30,14 @@ from .passes import (
     InsertGatherLastTokenIds,
     ReplaceMMByFakeGemmPlugin,
     ReplaceSDPAByFakeGPTAttentionPlugin,
-    ReplaceSDPAByFakeGPTAttentionPluginV2,
     ReplaceViewByReshape,
     RewriteConstantOperandsAsNodes,
     RewriteReshapeAsUnsqueeze,
     WrapRoPESubgraphs,
+    WrapSDPASubgraphs,
 )
 from .passes.defer_unsqueeze import SwapUnsqueezeWithSymSizeInt
-from .passes.graph_pass import GraphOptimizationPass
+from .passes.infra import GraphOptimizationPass, PassManager
 
 
 def get_optimization_transform(
@@ -48,8 +45,8 @@ def get_optimization_transform(
     dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
-    allow_matmul_in_fp16: bool = False,
-    allow_activation_in_fp16: bool = True,
+    run_matmuls_in_fp32: bool = True,
+    run_activations_in_model_dtype: bool = True,
 ) -> Callable[[GraphModule], GraphModule]:
     """Optimize the given graph module inplace.
 
@@ -58,22 +55,21 @@ def get_optimization_transform(
         dtype (torch.dtype): the data type for the plugins
         skipped_optimizers (list[PassName] | None, optional): the names of optimization passes to skip.
             Defaults to None.
-        allow_matmul_in_fp16 (bool, optional): whether to allow matrix multiplication to be performed in FP16 precision.
+        run_matmuls_in_fp32 (bool, optional): whether to run all matrix multiplications in FP32.
             Defaults to False.
-        allow_activation_in_fp16 (bool, optional): whether to allow activations (a.k.a. non-linearities) to be
-            performed in FP16 precision. Defaults to True.
+        run_activations_in_model_dtype (bool, optional): whether to run all activations (a.k.a. non-linearities) in
+            the given `dtype`. Defaults to True.
 
     Returns:
         Callable[[GraphModule], GraphModule]: the function that applies FX optimization passes to the given graph module
     """
     return compose(
-        get_level1_transform(skipped_optimizers),
         get_trtllm_conversion_transform(
             argument_hint,
             dtype,
             skipped_optimizers=skipped_optimizers,
-            allow_matmul_in_fp16=allow_matmul_in_fp16,
-            allow_activation_in_fp16=allow_activation_in_fp16,
+            run_matmuls_in_fp32=run_matmuls_in_fp32,
+            run_activations_in_model_dtype=run_activations_in_model_dtype,
         ),
         get_level2_transform(skipped_optimizers),
     )
@@ -90,24 +86,18 @@ def compose(*transforms: Callable[[GraphModule], GraphModule]) -> Callable[[Grap
 
 # passes required before the TRT-LLM conversion passes
 LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
-    # TODO: improve memory management of the pass `ConstantSharing`
-    # ConstantSharing,
     EliminateNopCatOrStack,
-    EliminateCopy,
+    CanonicalizeCopy,
     EliminateNopSlice,
     FixSliceRanges,
     FuseConsecutiveReshapes,
     FuseConsecutivePermutes,
     FuseConsecutiveToCopys,
     FuseEquivalentNodes,
-    EliminateNopReshape,
+    EliminateNopReshapeOrExpand,
     EliminateNopPermute,
     EliminateUnsqueezeSqueeze,
     HerdConstantsToTheRight,
-    # TODO: improve memory management of the pass `EliminateUnusedWeights`
-    # EliminateUnusedWeights,
-    # TODO: improve memory management of the pass `MakeWeightsContiguous`
-    # MakeWeightsContiguous,
     ReplaceViewByReshape,
 )
 
@@ -127,33 +117,31 @@ def get_trtllm_conversion_transform(
     dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
-    allow_matmul_in_fp16: bool = False,
-    allow_activation_in_fp16: bool = True,
+    run_matmuls_in_fp32: bool = True,
+    run_activations_in_model_dtype: bool = True,
 ) -> Callable[[GraphModule], GraphModule]:
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
         AddTRTLLMInputs(argument_hint=argument_hint),
         SwapUnsqueezeWithSymSizeInt,  # required for `InsertGatherLastTokenIds`
         InsertGatherLastTokenIds,
+        WrapSDPASubgraphs,
         WrapRoPESubgraphs,
-        (
-            ReplaceSDPAByFakeGPTAttentionPlugin(dtype)
-            if AUTO_DETECT_ROPE_SUBGRAPH
-            else ReplaceSDPAByFakeGPTAttentionPluginV2(dtype)
-        ),
+        ReplaceSDPAByFakeGPTAttentionPlugin(dtype=dtype),
         FuseMMConstSiblings,
         ReplaceMMByFakeGemmPlugin,
     ]
 
-    if not allow_matmul_in_fp16:
-        passes.append(CastMMToFP32If(dtype))
+    if run_matmuls_in_fp32:
+        passes.append(CastMMToFP32)
 
-    if allow_activation_in_fp16:
+    if run_activations_in_model_dtype:
         passes.append(FixActivationPrecision(dtype=dtype))
 
     return get_transform(
         *passes,
         skipped_optimizers=skipped_optimizers,
         steps=1,
+        warn_on_partial_convergence=False,
     )
 
 
@@ -180,6 +168,7 @@ def get_transform(
     *fx_passes: type[GraphOptimizationPass] | GraphOptimizationPass,
     skipped_optimizers: list[PassName] | None = None,
     steps: int = FX_TRANSFORM_MAXIMUM_ITERATION,
+    warn_on_partial_convergence: bool = True,
 ) -> Callable[[GraphModule], GraphModule]:
     """Get transform out of the given FX passes.
 
@@ -189,11 +178,13 @@ def get_transform(
             Defaults to None.
         steps (int, optional): the maximum number of iterations until convergence.
             Defaults to FX_TRANSFORM_MAXIMUM_ITERATION.
+        warn_on_partial_convergence (bool, optional): Whether to warn when the graph module doesn't converge
+            within the specified `steps`. Defaults to True.
 
     Returns:
         PassManager: a pass manager
     """
-    pass_manager = PassManager(steps=steps)
+    pass_manager = PassManager(steps=steps, warn_on_partial_convergence=warn_on_partial_convergence)
 
     skipped_optimizers = skipped_optimizers or []
     for fx_pass in fx_passes:
@@ -203,16 +194,9 @@ def get_transform(
             logger.info(f"Skipping FX optimization pass {pass_name}")
             _ = skipped_optimizers.pop(skipped_optimizers.index(pass_name))  # type: ignore[arg-type]
             continue
-        pass_manager.add_pass(fx_pass if isinstance(fx_pass, GraphOptimizationPass) else fx_pass())
+        pass_manager.add_pass(fx_pass)
 
     if skipped_optimizers:
         logger.warning(f"Unrecognized skipped optmizer names: {skipped_optimizers}")
 
-    def optimize(graph_module: GraphModule) -> GraphModule:
-        logger.opt(lazy=True).trace("Memory Footprint: {m}", m=get_memory_footprint)
-        result = pass_manager(graph_module)
-        if result.modified:
-            clean_up_graph_after_modifications(graph_module)
-        return result.graph_module
-
-    return optimize
+    return pass_manager.as_transform()

@@ -1,19 +1,15 @@
 from torch.fx import GraphModule, Node
 
-from ditto.fx.passes.node_wise_pass import NodewisePassResult
-
 from ..nodes import GetAttr
-from .node_wise_pass import NodewiseOptimizationPass, ReplaceAllUses
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class FuseEquivalentNodes(NodewiseOptimizationPass):
     """Fuse nodes performing identical operations for the same input node."""
 
-    def __init__(self, *, depth: int = 0) -> None:
-        super().__init__(depth=depth)
-        self.nodes: dict[Node, int] | None = None
+    nodes: dict[Node, int] | None = None
 
-    def requires(self, graph_module: GraphModule) -> None:
+    def preprocess(self, graph_module: GraphModule) -> None:
         self.nodes = {n: i for i, n in enumerate(graph_module.graph.nodes)}
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
@@ -40,11 +36,10 @@ class FuseEquivalentNodes(NodewiseOptimizationPass):
         results: dict[Node, NodewisePassResult] = {}
         for group in groups:
             rep = group[0]
-            rep.stack_trace = f"{rep.stack_trace}, pass: fused by {__name__}"
             results.update({user: ReplaceAllUses(by=rep) for user in group[1:]})
         return results
 
-    def ensures(self, graph_module: GraphModule) -> None:
+    def postprocess(self, graph_module: GraphModule) -> None:
         self.nodes = None
 
     def get_closest_input_node(self, n: Node) -> Node:

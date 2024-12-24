@@ -5,20 +5,24 @@ from typing import Literal
 from loguru import logger
 from torch.fx import GraphModule
 from torch.fx.node import Node
-from torch.fx.passes.infra.pass_base import PassResult
 
-from ...types import StrictlyTyped
+from ....types import StrictlyTyped
 from .graph_pass import GraphOptimizationPass
+from .pass_result import PassResult
 
 
 class NodewisePassResult(StrictlyTyped, ABC):
+    require_fake_tensor_prop: bool = False
+
     @abstractmethod
-    def apply(self, node: Node) -> bool:
+    def apply(self, node: Node, pass_name: str) -> bool:
         ...
 
 
 class ModifiedInsideThePass(NodewisePassResult):
-    def apply(self, node: Node) -> bool:
+    def apply(self, node: Node, pass_name: str) -> bool:
+        if node.stack_trace:
+            node.stack_trace = f"{node.stack_trace} -> modified inside {pass_name}"
         return True
 
 
@@ -31,7 +35,11 @@ class ReplaceAllUses(NodewisePassResult):
     replace_user_only_if: Callable[[Node], bool] = always
     propagate_meta: bool = False
 
-    def apply(self, node: Node) -> bool:
+    def apply(self, node: Node, pass_name: str) -> bool:
+        if not self.propagate_meta and self.by.stack_trace:
+            self.by.stack_trace = (
+                f"{self.by.stack_trace} -> replaced all uses of {node.format_node()} after {pass_name}"
+            )
         replaced_nodes = node.replace_all_uses_with(
             self.by,
             self.replace_user_only_if,
@@ -41,11 +49,16 @@ class ReplaceAllUses(NodewisePassResult):
 
 
 class ReplaceAmongInputs(NodewisePassResult):
-    occurences_of: Node
+    occurrences_of: Node
     by: Node
 
-    def apply(self, node: Node) -> bool:
-        node.replace_input_with(self.occurences_of, self.by)
+    def apply(self, node: Node, pass_name: str) -> bool:
+        if self.by.stack_trace:
+            self.by.stack_trace = (
+                f"{self.by.stack_trace} "
+                f"-> replaced all occurrences of {self.occurrences_of} in {node.format_node()} after {pass_name}"
+            )
+        node.replace_input_with(self.occurrences_of, self.by)
         return True
 
 
@@ -62,14 +75,20 @@ class NodewiseOptimizationPass(GraphOptimizationPass):
             PassResult: the result of the pass
         """
         modified = False
+        require_fake_tensor_prop = False
         nodes = list(graph_module.graph.nodes)
         for node in nodes:
             for src, result in self.rewrite(node).items():
-                is_applied = result.apply(src)
-                logger.debug(f"{src}: {type(result).__name__}({result}) (success: {is_applied})")
+                is_applied = result.apply(src, pass_name=type(self).__name__)
+                logger.trace(f"[{type(self).__name__}] {src}: {type(result).__name__}({result}) ({is_applied=})")
                 modified = modified or is_applied
+                require_fake_tensor_prop = require_fake_tensor_prop or result.require_fake_tensor_prop
 
-        return PassResult(graph_module, modified)
+        return PassResult(
+            graph_module=graph_module,
+            modified=modified,
+            require_fake_tensor_prop=require_fake_tensor_prop,
+        )
 
     @abstractmethod
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:

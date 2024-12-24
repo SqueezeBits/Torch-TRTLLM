@@ -3,7 +3,7 @@ from pydantic import Field
 from typing_extensions import Self
 
 from ..constants import DEFAULT_DEVICE
-from ..pretty_print import brief_tensor_repr
+from ..contexts import brief_tensor_repr
 from ..types import BuiltInConstant, DeviceLikeType, ExportDim, StrictlyTyped
 from .dynamic_dim import DynamicDimensionType
 from .tensor_type_hint import TensorTypeHint

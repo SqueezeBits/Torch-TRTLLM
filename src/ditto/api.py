@@ -8,15 +8,14 @@ from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from transformers import PreTrainedModel
 
 from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
+from .config_gen import generate_trtllm_engine_config
 from .configs import (
     TensorRTConfig,
-    TRTLLMBuildConfig,
     TRTLLMEngineConfig,
     TRTLLMLoraConfig,
     TRTLLMModelConfig,
     TRTLLMOptimizationProfileConfig,
     TRTLLMPluginConfig,
-    generate_trtllm_pretrained_config,
 )
 from .constants import DEFAULT_DEVICE, INPUT_IDS, PassName
 from .convert import convert
@@ -35,8 +34,8 @@ def trtllm_build(
     lora_config: TRTLLMLoraConfig | None = None,
     plugin_config: TRTLLMPluginConfig | None = None,
     trt_config: TensorRTConfig | None = None,
-    allow_matmul_in_fp16: bool = False,
-    allow_activation_in_fp16: bool = True,
+    run_matmuls_in_fp32: bool = True,
+    run_activations_in_model_dtype: bool = True,
     debug_node_names: list[str] | None = None,
     engine_cache: BaseEngineCache | None = None,
 ) -> tuple[bytes, TRTLLMEngineConfig]:
@@ -53,8 +52,8 @@ def trtllm_build(
         argument_hint,
         model_dtype,
         device=device,
-        allow_matmul_in_fp16=allow_matmul_in_fp16,
-        allow_activation_in_fp16=allow_activation_in_fp16,
+        run_matmuls_in_fp32=run_matmuls_in_fp32,
+        run_activations_in_model_dtype=run_activations_in_model_dtype,
         extra_passes=[add_outputs(debug_node_names)] if debug_node_names else None,
     )
 
@@ -120,8 +119,8 @@ def trtllm_export(
     dtype: torch.dtype,
     *,
     device: DeviceLikeType | None = None,
-    allow_matmul_in_fp16: bool = False,
-    allow_activation_in_fp16: bool = True,
+    run_matmuls_in_fp32: bool = True,
+    run_activations_in_model_dtype: bool = True,
     skipped_optimizers: list[PassName] | None = None,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
     enable_experimental_decompositions: bool = False,
@@ -155,29 +154,13 @@ def trtllm_export(
         argument_hint=argument_hint,
         dtype=dtype,
         skipped_optimizers=skipped_optimizers,
-        allow_matmul_in_fp16=allow_matmul_in_fp16,
-        allow_activation_in_fp16=allow_activation_in_fp16,
+        run_matmuls_in_fp32=run_matmuls_in_fp32,
+        run_activations_in_model_dtype=run_activations_in_model_dtype,
         extra_passes=extra_passes,
     )
     logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
     save_for_debug("graph_module", graph_module)
     return graph_module
-
-
-def generate_trtllm_engine_config(
-    graph_module: GraphModule,
-    profile_config: TRTLLMOptimizationProfileConfig,
-    model_config: TRTLLMModelConfig,
-    *,
-    architecture: str | None = None,
-) -> TRTLLMEngineConfig:
-    return TRTLLMEngineConfig(
-        pretrained_config=generate_trtllm_pretrained_config(
-            graph_module,
-            architecture=architecture,
-        ),
-        build_config=TRTLLMBuildConfig.merge(profile_config, model_config),
-    )
 
 
 def _resolve_device(model: torch.nn.Module, device: DeviceLikeType | None) -> DeviceLikeType:

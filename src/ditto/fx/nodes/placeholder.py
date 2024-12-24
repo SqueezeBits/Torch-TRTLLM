@@ -1,13 +1,32 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from torch.fx.node import Node
+import torch
+from torch.fx import Graph, Node
+from typing_extensions import Self
 
-from .node_specialization import NodeSpecialization
+from ..utils import get_fake_mode
+from .node_specialization import FinalSpecialization
+
+if TYPE_CHECKING:
+    from ...arguments import TensorTypeHint
 
 
-class Placeholder(NodeSpecialization):
+class Placeholder(FinalSpecialization):
+    @classmethod  # pylint: disable-next=arguments-differ
+    def create(  # type: ignore[override]
+        cls,
+        graph: Graph,
+        name: str,
+        hint: "TensorTypeHint",
+    ) -> Self:
+        x = cls._specialize_from(graph.placeholder(name))
+        if fake_mode := get_fake_mode(graph):
+            with fake_mode:
+                x.output = torch.empty(hint.symbolic_shape, dtype=hint.dtype)  # type: ignore[assignment]
+        return x
+
     @property
     def target(self) -> str:
         assert isinstance(name := super().target, str)

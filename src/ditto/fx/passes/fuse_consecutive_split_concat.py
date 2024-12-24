@@ -3,7 +3,7 @@ import operator
 from torch.fx import Node
 
 from ..nodes import Cat, Split
-from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class FuseConsecutiveSplitConcat(NodewiseOptimizationPass):

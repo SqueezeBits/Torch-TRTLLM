@@ -15,7 +15,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     kv_cache_block_size: DynamicDimensionType = Field(frozen=True, exclude=True)
     beam_width: DynamicDimensionType | int = Field(frozen=True, exclude=True)
     attention_window_size: DynamicDimensionType = Field(frozen=True, exclude=True)
-    num_attn_layers: int | None = Field(default=None, exclude=True, gt=0)
+    num_attn_layers: int | None = Field(default=None, exclude=True, ge=0)
 
     @classmethod
     def configure(cls, profile_config: TRTLLMOptimizationProfileConfig) -> Self:

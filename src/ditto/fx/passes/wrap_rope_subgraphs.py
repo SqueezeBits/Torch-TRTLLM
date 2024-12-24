@@ -1,6 +1,5 @@
 from loguru import logger
 from torch.fx import GraphModule, Node
-from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 from transformers import PretrainedConfig
 
@@ -8,10 +7,10 @@ from ..targets import (
     FAKE_ROPE_TARGETS,
     ROPEConfig,
     get_llama2_rope_pattern_graph,
-    get_llama2_rope_replacment_graph,
+    get_llama2_rope_replacement_graph,
 )
 from ..utils import get_tensor_metadata
-from .graph_pass import GraphOptimizationPass
+from .infra import GraphOptimizationPass, PassResult
 
 
 class WrapRoPESubgraphs(GraphOptimizationPass):
@@ -22,11 +21,11 @@ class WrapRoPESubgraphs(GraphOptimizationPass):
             replaced_patterns := replace_pattern_with_filters(
                 graph_module,
                 pattern=get_llama2_rope_pattern_graph(),
-                replacement=get_llama2_rope_replacment_graph(),
+                replacement=get_llama2_rope_replacement_graph(),
                 ignore_literals=True,
             )
         ):
-            return PassResult(graph_module, False)
+            return PassResult(graph_module=graph_module, modified=False)
 
         if not isinstance(
             pretrained_config := graph_module.meta.get("pretrained_config"),
@@ -59,4 +58,4 @@ class WrapRoPESubgraphs(GraphOptimizationPass):
                 rope_node.meta = output.meta
             rope_node.meta["rope_config"] = rope_config
 
-        return PassResult(graph_module, True)
+        return PassResult(graph_module=graph_module, modified=True)

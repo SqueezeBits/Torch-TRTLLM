@@ -1,8 +1,7 @@
-import torch
 from torch.fx import Node
 
-from ..nodes import Cat, Stack
-from .node_wise_pass import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
+from ..nodes import Cat, Stack, Unsqueeze
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class EliminateNopCatOrStack(NodewiseOptimizationPass):
@@ -16,7 +15,7 @@ class EliminateNopCatOrStack(NodewiseOptimizationPass):
             x = stack.tensors[0]
             graph = x.graph
             with graph.inserting_after(x):
-                unsqueeze = graph.call_function(torch.ops.aten.unsqueeze.default, (x, stack.dim))
-            return {node: ReplaceAllUses(by=unsqueeze, propagate_meta=True)}
+                unsqueeze = Unsqueeze.create(graph, x, stack.dim)
+            return {node: ReplaceAllUses(by=unsqueeze.node, propagate_meta=True)}
 
         return {}

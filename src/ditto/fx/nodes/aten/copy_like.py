@@ -1,35 +1,37 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
-
-from abc import abstractmethod
-from typing import Literal
-
 import torch
 
 from ...utils import get_tensor_metadata
 from ..asterick import Asterick
+from .aten_op import FinalATenOp
 from .unary_elementwise import UnaryElementwise
 
 
-class CopyLike(UnaryElementwise):
+@UnaryElementwise.register(torch.ops.aten.clone.default)
+class Clone(UnaryElementwise, FinalATenOp):
     asterick: None = Asterick
-
-    @property
-    @abstractmethod
-    def is_pure_copy(self) -> bool:
-        ...
-
-
-@CopyLike.final(torch.ops.aten.clone.default)
-class Clone(CopyLike):
     memory_format: torch.memory_format | None = None
 
-    @property
-    def is_pure_copy(self) -> Literal[True]:
-        return True
 
+@UnaryElementwise.register(torch.ops.aten._to_copy.default)
+class ToCopy(UnaryElementwise, FinalATenOp):
+    """ATen op _to_copy::default.
 
-@CopyLike.final(torch.ops.aten._to_copy.default)
-class ToCopy(CopyLike):
+    ```
+    aten::_to_copy(
+        Tensor self,
+        *,
+        ScalarType? dtype=None,
+        Layout? layout=None,
+        Device? device=None,
+        bool? pin_memory=None,
+        bool non_blocking=False,
+        MemoryFormat? memory_format=None
+    ) -> Tensor
+    ```
+    """
+
+    asterick: None = Asterick
     dtype: torch.dtype | None = None
     layout: torch.layout | None = None
     device: torch.device | None = None
@@ -38,7 +40,9 @@ class ToCopy(CopyLike):
     memory_format: torch.memory_format | None = None
 
     @property
-    def is_pure_copy(self) -> bool:
+    def dtype_unchanged(self) -> bool:
+        if self.dtype is None:
+            return True
         if meta := get_tensor_metadata(self.this):
             return meta.dtype == self.dtype
         return False
