@@ -92,7 +92,7 @@ def build(
     verbose: bool = False,
     trust_remote_code: bool = False,
     matmuls_in_fp32: bool = True,
-    allow_activation_in_fp16: bool = False,
+    allow_activation_in_fp16: bool = True,
 ) -> None:
     output_dir = resolve_output_dir(output_dir, model_id)
     app.pretty_exceptions_show_locals = verbose
