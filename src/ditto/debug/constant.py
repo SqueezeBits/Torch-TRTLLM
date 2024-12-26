@@ -1,8 +1,10 @@
+from ctypes import c_char
 from typing import overload
 
 import onnx_graphsurgeon as gs
 import torch
 from onnx import TensorProto
+from onnx.helper import make_tensor
 from onnx_graphsurgeon.ir.tensor import LazyValues
 
 from ..types import DataType
@@ -12,8 +14,7 @@ from ..types import DataType
 def make_constant(
     name: str,
     tensor: torch.Tensor,
-) -> gs.Constant:
-    ...
+) -> gs.Constant: ...
 
 
 @overload
@@ -22,8 +23,7 @@ def make_constant(
     *,
     shape: tuple[int, ...],
     dtype: torch.dtype,
-) -> gs.Constant:
-    ...
+) -> gs.Constant: ...
 
 
 def make_constant(
@@ -48,3 +48,14 @@ def make_lazy_values(name: str, tensor: torch.Tensor) -> LazyValues:
         data_type=DataType(tensor.dtype).to(TensorProto.DataType),
     )
     return LazyValues(tensor_proto)
+
+
+def make_attribute(name: str, tensor: torch.Tensor) -> TensorProto:
+    buf = (c_char * (tensor.numel() * tensor.element_size())).from_address(tensor.data_ptr())
+    return make_tensor(
+        name=name,
+        data_type=DataType(tensor.dtype).to(TensorProto.DataType),
+        dims=(*tensor.shape,),
+        vals=buf.raw,
+        raw=True,
+    )
