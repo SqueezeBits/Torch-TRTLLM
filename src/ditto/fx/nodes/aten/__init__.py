@@ -6,6 +6,7 @@ from .activations import (
     LeakyRelu,
     Relu,
     Sigmoid,
+    Silu,
     Tanh,
 )
 from .aten_op import ATenOp

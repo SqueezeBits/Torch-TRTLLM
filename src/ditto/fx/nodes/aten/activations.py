@@ -39,6 +39,11 @@ class Sigmoid(Activation, FinalATenOp):
     ...
 
 
+@Activation.register(torch.ops.aten.silu.default)
+class Silu(Activation, FinalATenOp):
+    ...
+
+
 @Activation.register(torch.ops.aten.softplus.default)
 class Softplus(Activation, FinalATenOp):
     ...
