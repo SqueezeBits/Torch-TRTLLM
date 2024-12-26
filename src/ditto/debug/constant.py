@@ -14,7 +14,8 @@ from ..types import DataType
 def make_constant(
     name: str,
     tensor: torch.Tensor,
-) -> gs.Constant: ...
+) -> gs.Constant:
+    ...
 
 
 @overload
@@ -23,7 +24,8 @@ def make_constant(
     *,
     shape: tuple[int, ...],
     dtype: torch.dtype,
-) -> gs.Constant: ...
+) -> gs.Constant:
+    ...
 
 
 def make_constant(
@@ -51,7 +53,7 @@ def make_lazy_values(name: str, tensor: torch.Tensor) -> LazyValues:
 
 
 def make_attribute(name: str, tensor: torch.Tensor) -> TensorProto:
-    buf = (c_char * (tensor.numel() * tensor.element_size())).from_address(tensor.data_ptr())
+    buf = (c_char * tensor.nbytes).from_address(tensor.data_ptr())
     return make_tensor(
         name=name,
         data_type=DataType(tensor.dtype).to(TensorProto.DataType),
