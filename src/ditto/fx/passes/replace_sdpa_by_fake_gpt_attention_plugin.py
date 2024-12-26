@@ -6,7 +6,7 @@ from torch.fx import GraphModule, Node
 from ...debug import save_for_debug
 from ...types import DataType
 from ..nodes import Cat, GetAttr, Permute, Reshape, ScaledDotProductAttention, ToCopy
-from ..subgraphs import MMConst, TrailingReformatSequence
+from ..subgraphs import Linear, TrailingReformatSequence
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
 from ..utils import get_ancestors_with_depth, get_tensor_metadata
 from .infra import GraphOptimizationPass, PassResult
@@ -38,10 +38,10 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 and (q_proj := find_projection(sdpa.query))
                 and (k_proj := find_projection(sdpa.key))
                 and (v_proj := find_projection(sdpa.value))
-                and (q_proj.mm.node == TrailingReformatSequence.configure_from(q_rope.all_input_nodes[0]).top)
-                and (k_proj.mm.node == TrailingReformatSequence.configure_from(k_rope.all_input_nodes[0]).top)
+                and (q_proj.output == TrailingReformatSequence.configure_from(q_rope.all_input_nodes[0]).top)
+                and (k_proj.output == TrailingReformatSequence.configure_from(k_rope.all_input_nodes[0]).top)
                 and (v_seq := TrailingReformatSequence.configure_from(sdpa.value))
-                and (v_proj.mm.node == v_seq.top)
+                and (v_proj.output == v_seq.top)
             ):
                 continue
             layer_idx += 1
@@ -117,7 +117,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 **global_rope_config.model_dump(),
             )
             with graph.inserting_before(node):
-                qkv_nodes = (q_proj.mm.node, k_proj.mm.node, v_proj.mm.node)
+                qkv_nodes = (q_proj.output, k_proj.output, v_proj.output)
                 qkv_cat = Cat.create(graph, qkv_nodes, -1)
                 out_dtype: torch.dtype | None = None
                 first_plugin_input: Node
@@ -145,12 +145,12 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
         return PassResult(graph_module=graph_module, modified=modified)
 
 
-def find_projection(x: Node) -> MMConst | None:
+def find_projection(x: Node) -> Linear | None:
     if not (
         ancester_linear_subgraphs := {
             subgraph: depth
             for node, depth in get_ancestors_with_depth(x).items()
-            if (subgraph := MMConst.configure_from(node))
+            if (subgraph := Linear.configure_from(node))
         }
     ):
         return None
