@@ -50,8 +50,10 @@ def ignore_symbolic_shapes_warning() -> Generator[None, None, None]:
 
 @contextlib.contextmanager
 def disable_torch_jit_state() -> Generator[None, None, None]:
-    torch_jit_state.disable()
+    if was_enabled := torch_jit_state._enabled.enabled:
+        torch_jit_state.disable()
     try:
         yield None
     finally:
-        torch_jit_state.enable()
+        if was_enabled:
+            torch_jit_state.enable()
