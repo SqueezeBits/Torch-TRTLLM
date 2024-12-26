@@ -10,6 +10,7 @@ PassName = Literal[
     "CanonicalizeCopy",
     "CastMMToFP32",
     "ConstantFolding",
+    "DecomposeSiLU",
     "DeferUnsqueeze",
     "EliminateNopCatOrStack",
     "EliminateNopPermute",

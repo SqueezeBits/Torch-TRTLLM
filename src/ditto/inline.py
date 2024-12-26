@@ -8,6 +8,7 @@ from torch_tensorrt.dynamo.lowering.passes import (
 )
 
 from .contexts import ignore_symbolic_shapes_warning
+from .fx.passes import DecomposeSiLU
 
 
 def inline(
@@ -17,7 +18,12 @@ def inline(
     enable_experimental_decompositions: bool = False,
 ) -> GraphModule:
     pretrained_config = exported_program.graph_module.meta.get("pretrained_config", None)
-    pre_inline_pass_manager = DynamoPassManager.build_from_passlist(ATEN_PRE_LOWERING_PASSES.passes)
+    pre_inline_pass_manager = DynamoPassManager.build_from_passlist(
+        [
+            DecomposeSiLU().as_transform(),
+            *ATEN_PRE_LOWERING_PASSES.passes,
+        ]
+    )
 
     graph_module: GraphModule
     with ignore_symbolic_shapes_warning():
