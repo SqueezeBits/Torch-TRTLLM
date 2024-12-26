@@ -10,6 +10,7 @@ from .passes import (
     AddTRTLLMInputs,
     CanonicalizeCopy,
     CastMMToFP32,
+    DecomposeAddMM,
     DeferUnsqueeze,
     EliminateNopCatOrStack,
     EliminateNopPermute,
@@ -99,6 +100,7 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateUnsqueezeSqueeze,
     HerdConstantsToTheRight,
     ReplaceViewByReshape,
+    DecomposeAddMM,
 )
 
 # passes required after the TRT-LLM conversion passes
