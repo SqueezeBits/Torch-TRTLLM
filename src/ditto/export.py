@@ -6,6 +6,7 @@ from torch.nn.attention import sdpa_kernel
 from transformers import PreTrainedModel
 
 from .arguments.torch_export_arguments import TorchExportArguments
+from .contexts import disable_torch_jit_state
 from .types import BuiltInConstant, SDPBackend
 
 
@@ -23,7 +24,7 @@ def export(
             "`torch.nn.functional.scaled_dot_product_attention`."
         )
 
-    with sdpa_kernel(sdp_backends):
+    with sdpa_kernel(sdp_backends), disable_torch_jit_state():
         exported_program = torch_export(
             ConstantInputFilterer(model, constant_inputs=arguments.constant_inputs),
             args=(),

@@ -3,7 +3,6 @@ from typing import Annotated, Literal
 
 import torch
 from loguru import logger
-from torch.jit._state import disable
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -95,7 +94,6 @@ def build(
     run_matmuls_in_fp32: bool = True,
     run_activations_in_model_dtype: bool = True,
 ) -> None:
-    disable()
     logger.info("torch.jit.script disabled")
     output_dir = resolve_output_dir(output_dir, model_id)
     app.pretty_exceptions_show_locals = verbose
