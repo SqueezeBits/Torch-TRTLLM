@@ -2,6 +2,7 @@ from .add_trtllm_inputs import AddTRTLLMInputs
 from .canonicalize_copy import CanonicalizeCopy
 from .cast_mm_to_fp32 import CastMMToFP32
 from .constant_folding import ConstantFolding
+from .decompose_addmm import DecomposeAddMM
 from .defer_unsqueeze import DeferUnsqueeze
 from .eliminate_nop_cat_or_stack import EliminateNopCatOrStack
 from .eliminate_nop_permute import EliminateNopPermute

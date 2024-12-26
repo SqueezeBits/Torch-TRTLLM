@@ -8,6 +8,7 @@ from .activations import (
     Sigmoid,
     Tanh,
 )
+from .addmm import AddMM
 from .aten_op import ATenOp
 from .binary import Binary
 from .binary_elementwise import (

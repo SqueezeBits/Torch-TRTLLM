@@ -1,0 +1,18 @@
+from torch.fx import Node
+
+from ..nodes import MM, Add, AddMM
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
+
+
+class DecomposeAddMM(NodewiseOptimizationPass):
+    """Decompose addmm into mm and add."""
+
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+        if not ((addmm := AddMM.specialize_from(node)) and (len(node.args) >= 3) and (graph := node.graph)):
+            return {}
+
+        with graph.inserting_before(node):
+            mm = MM.create(graph, addmm.mat1, addmm.mat2)
+            add = Add.create(graph, mm.node, addmm.bias)
+
+        return {node: ReplaceAllUses(by=add.node)}
