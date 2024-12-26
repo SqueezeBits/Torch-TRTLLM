@@ -32,7 +32,7 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
             batch_size_node, delete_user_cb=lambda node: node_indices.get(node, -1) > node_indices[index_select]
         )
         forget_all_descendant_fake_tensors(index_select)
-        lm_head.output_reshape.node.replace_input_with(num_tokens_node, batch_size_node)
+        lm_head.output.replace_input_with(num_tokens_node, batch_size_node)
         return PassResult(graph_module=graph_module, modified=True, require_fake_tensor_prop=True)
 
 
