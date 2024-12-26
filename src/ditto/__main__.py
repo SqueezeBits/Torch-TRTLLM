@@ -12,6 +12,8 @@ from transformers import (
 )
 from typer import Option, Typer
 
+from ditto.contexts import disable_torch_jit_state
+
 from .api import trtllm_build
 from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
 from .types import trt_to_torch_dtype_mapping
@@ -94,16 +96,16 @@ def build(
     run_matmuls_in_fp32: bool = True,
     run_activations_in_model_dtype: bool = True,
 ) -> None:
-    logger.info("torch.jit.script disabled")
     output_dir = resolve_output_dir(output_dir, model_id)
     app.pretty_exceptions_show_locals = verbose
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        torch_dtype=get_model_dtype(dtype),
-        device_map=device,
-        trust_remote_code=trust_remote_code,
-    )
+    with disable_torch_jit_state():
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=get_model_dtype(dtype),
+            device_map=device,
+            trust_remote_code=trust_remote_code,
+        )
     logger.info(f"device: {device} | dtype: {model.config.torch_dtype}")
 
     engine, config = trtllm_build(
