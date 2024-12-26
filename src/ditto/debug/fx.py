@@ -1,5 +1,6 @@
 import json
 import operator
+from collections.abc import Iterable
 from typing import Any, Literal
 
 import numpy as np
@@ -13,7 +14,7 @@ from torch.fx.node import Argument, Target
 
 from ..fx.utils import get_tensor_metadata
 from ..types import DataType
-from .constant import make_constant
+from .constant import make_attribute, make_constant
 
 
 def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
@@ -92,12 +93,26 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
             try:
                 param = graph_module.get_parameter(target)
             except AttributeError:
-                param = None
+                param = graph_module.get_buffer(target)
             tensors[target] = create_constant(node, target, param=param)
+            if param is not None:
+                for user in node.users:
+                    param = param.reshape(-1)
+                    if (numel := param.numel()) > 30:
+                        param = torch.cat((param[:10], param[numel // 2 - 5 : numel // 2 + 5], param[-10:])).reshape(
+                            3, -1
+                        )
+                    user.meta.update({node.name: make_attribute(node.name, param)})
         elif node.op in ("call_function", "call_module", "call_method"):
             if is_multi_output_getitem(node):
                 continue
-            all_inputs = {f"args_{i}": arg for i, arg in enumerate(node.args)}
+            all_inputs = {}
+            for i, arg in enumerate(node.args):
+                if isinstance(arg, Iterable):
+                    for j, nested_arg in enumerate(arg):
+                        all_inputs[f"args_{i}_{j}"] = nested_arg
+                else:
+                    all_inputs[f"args_{i}"] = arg
             all_inputs.update(node.kwargs)
             input_tensors = [
                 find_tensor(x) if isinstance(x, Node) else convert_argument_as_constant(x) for x in all_inputs.values()
@@ -200,6 +215,8 @@ def process_metadata(meta: dict[str, Any]) -> dict[str, AllowedMetaDataType]:
             return [f"{key}: {val}" for key, val in v.items()]
         if isinstance(v, list | tuple):
             return [str(x) for x in v]
+        if isinstance(v, TensorProto):
+            return v
         return str(v)
 
     return {name: _impl(value) for name, value in meta.items()}
