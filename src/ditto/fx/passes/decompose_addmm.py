@@ -8,10 +8,10 @@ class DecomposeAddMM(NodewiseOptimizationPass):
     """Decompose addmm into mm and add."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
-        if not ((addmm := AddMM.specialize_from(node)) and (len(node.args) >= 3) and (graph := node.graph)):
+        if not (addmm := AddMM.specialize_from(node)):
             return {}
 
-        with graph.inserting_before(node):
+        with (graph := node.graph).inserting_before(node):
             mm = MM.create(graph, addmm.mat1, addmm.mat2)
             add = Add.create(graph, mm.node, addmm.bias)
 

@@ -91,18 +91,26 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
             outputs = [tensors[x.name] for x in node.all_input_nodes]
         elif node.op == "get_attr" and isinstance(target := node.target, str):
             try:
-                param = graph_module.get_parameter(target)
+                param: torch.nn.Parameter | torch.Tensor = graph_module.get_parameter(target)
             except AttributeError:
                 param = graph_module.get_buffer(target)
             tensors[target] = create_constant(node, target, param=param)
             if param is not None:
                 for user in node.users:
-                    param = param.reshape(-1)
                     if (numel := param.numel()) > 30:
-                        param = torch.cat((param[:10], param[numel // 2 - 5 : numel // 2 + 5], param[-10:])).reshape(
-                            3, -1
+                        param = param.flatten()
+                        user.meta.update(
+                            {
+                                attr_name: make_attribute(attr_name, param_chunk)
+                                for attr_name, param_chunk in {
+                                    f"{node.name}_first_10_elements": param[:10],
+                                    f"{node.name}_middle_10_elements": param[numel // 2 - 5 : numel // 2 + 5],
+                                    f"{node.name}_last_10_elements": param[-10:],
+                                }.items()
+                            }
                         )
-                    user.meta.update({node.name: make_attribute(node.name, param)})
+                    else:
+                        user.meta.update({node.name: make_attribute(node.name, param)})
         elif node.op in ("call_function", "call_module", "call_method"):
             if is_multi_output_getitem(node):
                 continue
@@ -200,7 +208,7 @@ def get_target_name(
             return target
 
 
-AllowedMetaDataType = int | float | bool | str | list[str]
+AllowedMetaDataType = int | float | bool | str | list[str] | TensorProto
 
 
 def process_metadata(meta: dict[str, Any]) -> dict[str, AllowedMetaDataType]:
