@@ -1,18 +1,5 @@
-diff --git a/.github/workflows/docgen.yml b/.github/workflows/docgen.yml
-index 593c4e90f..8175a8dfe 100644
---- a/.github/workflows/docgen.yml
-+++ b/.github/workflows/docgen.yml
-@@ -17,7 +17,7 @@ jobs:
-       image: docker.io/pytorch/manylinux-builder:cuda12.4
-       options: --gpus all
-     env:
--      CUDA_HOME: /usr/local/cuda-12.4
-+      CUDA_HOME: /usr/local/cuda
-       VERSION_SUFFIX: cu124
-       CU_VERSION: cu124
-       CHANNEL: nightly
 diff --git a/MODULE.bazel b/MODULE.bazel
-index add7821fc..51db5ca36 100644
+index add7821fc..a4bd3fd3f 100644
 --- a/MODULE.bazel
 +++ b/MODULE.bazel
 @@ -36,7 +36,7 @@ new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.
@@ -24,7 +11,7 @@ index add7821fc..51db5ca36 100644
  )
  
  new_local_repository(
-@@ -51,19 +51,19 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
+@@ -51,50 +51,50 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
  # Tarballs and fetched dependencies (default - use in cases when building from precompiled bin and tarballs)
  #############################################################################################################
  
@@ -34,29 +21,42 @@ index add7821fc..51db5ca36 100644
 -    strip_prefix = "libtorch",
 -    urls = ["https://download.pytorch.org/libtorch/nightly/cu124/libtorch-cxx11-abi-shared-with-deps-latest.zip"],
 -)
-+# http_archive(
-+#     name = "libtorch",
-+#     build_file = "@//third_party/libtorch:BUILD",
-+#     strip_prefix = "libtorch",
-+#     urls = ["https://download.pytorch.org/libtorch/nightly/cu124/libtorch-cxx11-abi-shared-with-deps-latest.zip"],
-+# )
- 
+-
 -http_archive(
 -    name = "libtorch_pre_cxx11_abi",
 -    build_file = "@//third_party/libtorch:BUILD",
 -    strip_prefix = "libtorch",
 -    urls = ["https://download.pytorch.org/libtorch/nightly/cu124/libtorch-shared-with-deps-latest.zip"],
 -)
+-
+-http_archive(
+-    name = "libtorch_win",
+-    build_file = "@//third_party/libtorch:BUILD",
+-    strip_prefix = "libtorch",
+-    urls = ["https://download.pytorch.org/libtorch/nightly/cu124/libtorch-win-shared-with-deps-latest.zip"],
+-)
++# http_archive(
++#     name = "libtorch",
++#     build_file = "@//third_party/libtorch:BUILD",
++#     strip_prefix = "libtorch",
++#     urls = ["https://download.pytorch.org/libtorch/nightly/cu124/libtorch-cxx11-abi-shared-with-deps-latest.zip"],
++# )
++
 +# http_archive(
 +#     name = "libtorch_pre_cxx11_abi",
 +#     build_file = "@//third_party/libtorch:BUILD",
 +#     strip_prefix = "libtorch",
 +#     urls = ["https://download.pytorch.org/libtorch/nightly/cu124/libtorch-shared-with-deps-latest.zip"],
 +# )
++
++# http_archive(
++#     name = "libtorch_win",
++#     build_file = "@//third_party/libtorch:BUILD",
++#     strip_prefix = "libtorch",
++#     urls = ["https://download.pytorch.org/libtorch/nightly/cu124/libtorch-win-shared-with-deps-latest.zip"],
++# )
  
- http_archive(
-     name = "libtorch_win",
-@@ -76,15 +76,15 @@ http_archive(
+ # Download these tarballs manually from the NVIDIA website
  # Either place them in the distdir directory in third_party and use the --distdir flag
  # or modify the urls to "file:///<PATH TO TARBALL>/<TARBALL NAME>.tar.gz
  
@@ -69,6 +69,16 @@ index add7821fc..51db5ca36 100644
 -        "https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/10.3.0/tars/TensorRT-10.3.0.26.Linux.x86_64-gnu.cuda-12.5.tar.gz",
 -    ],
 -)
+-
+-http_archive(
+-    name = "tensorrt_win",
+-    build_file = "@//third_party/tensorrt/archive:BUILD",
+-    sha256 = "2bb4bcb79e8c33575816d874b0512ea28c302af1c06ee6d224da71aa182f75e0",
+-    strip_prefix = "TensorRT-10.3.0.26",
+-    urls = [
+-        "https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/10.3.0/zip/TensorRT-10.3.0.26.Windows.win10.cuda-12.5.zip",
+-    ],
+-)
 +# http_archive(
 +#     name = "tensorrt",
 +#     build_file = "@//third_party/tensorrt/archive:BUILD",
@@ -78,9 +88,19 @@ index add7821fc..51db5ca36 100644
 +#         "https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/10.3.0/tars/TensorRT-10.3.0.26.Linux.x86_64-gnu.cuda-12.5.tar.gz",
 +#     ],
 +# )
++
++# http_archive(
++#     name = "tensorrt_win",
++#     build_file = "@//third_party/tensorrt/archive:BUILD",
++#     sha256 = "2bb4bcb79e8c33575816d874b0512ea28c302af1c06ee6d224da71aa182f75e0",
++#     strip_prefix = "TensorRT-10.3.0.26",
++#     urls = [
++#         "https://developer.nvidia.com/downloads/compute/machine-learning/tensorrt/10.3.0/zip/TensorRT-10.3.0.26.Windows.win10.cuda-12.5.zip",
++#     ],
++# )
  
- http_archive(
-     name = "tensorrt_win",
+ ####################################################################################
+ # Locally installed dependencies (use in cases of custom dependencies or aarch64)
 @@ -107,20 +107,20 @@ http_archive(
  # x86_64 python distribution. If using NVIDIA's version just point to the root of the package
  # for both versions here and do not use --config=pre-cxx11-abi
@@ -120,41 +140,19 @@ index add7821fc..51db5ca36 100644
 +  build_file = "@//third_party/tensorrt/local:BUILD"
 +)
 diff --git a/core/util/Exception.h b/core/util/Exception.h
-index 872560146..87bedfb34 100644
+index 872560146..3a031fa1c 100644
 --- a/core/util/Exception.h
 +++ b/core/util/Exception.h
-@@ -1,5 +1,6 @@
- #pragma once
- 
-+#include <cstdint>
- #include <exception>
+@@ -4,6 +4,7 @@
  #include <sstream>
  #include <string>
-diff --git a/py/ci/build_whl.sh b/py/ci/build_whl.sh
-index d8f91da68..f732e1b6a 100755
---- a/py/ci/build_whl.sh
-+++ b/py/ci/build_whl.sh
-@@ -3,15 +3,15 @@
- # Example usage: docker run -it -v$(pwd):/workspace/TensorRT build_torch_tensorrt_wheel /bin/bash /workspace/TensorRT/py/ci/build_whl.sh
+ #include <vector>
++#include <cstdint>
  
- export CXX=g++
--export CUDA_HOME=/usr/local/cuda-12.4
-+export CUDA_HOME=/usr/local/cuda
- export PROJECT_DIR=/workspace/TensorRT
- 
- rm -rf /usr/local/cuda
- 
--if [[ $CUDA_HOME == "/usr/local/cuda-12.4" ]]; then
-+if [[ $CUDA_HOME == "/usr/local/cuda" ]]; then
-     cp -r /usr/local/cuda-11.8 /usr/local/cuda
-     cp -r /usr/local/cuda-12.0/ /usr/local/cuda/
--    rsync -a /usr/local/cuda-12.4/ /usr/local/cuda/
-+    rsync -a /usr/local/cuda/ /usr/local/cuda/
-     export CUDA_HOME=/usr/local/cuda
- else
-     ln -s $CUDA_HOME /usr/local/cuda
+ // Simplified version of the c10 Exception infrastructure
+ // https://github.com/pytorch/pytorch/blob/master/c10/util/Exception.h
 diff --git a/py/torch_tensorrt/__init__.py b/py/torch_tensorrt/__init__.py
-index d7f5e7ba5..0cb0cc2ed 100644
+index d7f5e7ba5..31d10a105 100644
 --- a/py/torch_tensorrt/__init__.py
 +++ b/py/torch_tensorrt/__init__.py
 @@ -56,7 +56,7 @@ except ImportError:
@@ -162,14 +160,29 @@ index d7f5e7ba5..0cb0cc2ed 100644
  
      elif sys.platform.startswith("linux"):
 -        LINUX_PATHS = ["/usr/local/cuda-12.4/lib64", "/usr/lib", "/usr/lib64"]
-+        LINUX_PATHS = ["/usr/local/cuda/lib", "/usr/lib", "/usr/lib64"]
++        LINUX_PATHS = ["/usr/local/cuda/lib64", "/usr/lib", "/usr/lib64"]
          if "LD_LIBRARY_PATH" in os.environ:
              LINUX_PATHS += os.environ["LD_LIBRARY_PATH"].split(os.path.pathsep)
  
 diff --git a/third_party/tensorrt/local/BUILD b/third_party/tensorrt/local/BUILD
-index 5b7bd17c8..e52eaa7ae 100644
+index 5b7bd17c8..040e4298c 100644
 --- a/third_party/tensorrt/local/BUILD
 +++ b/third_party/tensorrt/local/BUILD
+@@ -31,11 +31,11 @@ cc_library(
+     hdrs = select({
+         ":aarch64_linux": glob(
+             [
+-                "include/aarch64-linux-gnu/NvInfer*.h",
++                "include/NvInfer*.h",
+             ],
+             exclude = [
+-                "include/aarch64-linux-gnu/NvInferPlugin.h",
+-                "include/aarch64-linux-gnu/NvInferPluginUtils.h",
++                "include/NvInferPlugin.h",
++                "include/NvInferPluginUtils.h",
+             ],
+         ),
+         ":ci_rhel_x86_64_linux": glob(
 @@ -58,11 +58,11 @@ cc_library(
          ),
          "//conditions:default": glob(
@@ -194,8 +207,12 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      visibility = ["//visibility:private"],
  )
-@@ -81,7 +81,7 @@ cc_import(
-         ":aarch64_linux": "lib/aarch64-linux-gnu/libnvinfer_static.a",
+@@ -78,10 +78,10 @@ cc_library(
+ cc_import(
+     name = "nvinfer_static_lib",
+     static_library = select({
+-        ":aarch64_linux": "lib/aarch64-linux-gnu/libnvinfer_static.a",
++        ":aarch64_linux": "lib/libnvinfer_static.a",
          ":ci_rhel_x86_64_linux": "lib64/libnvinfer_static.a",
          ":windows": "lib/nvinfer_10.lib",
 -        "//conditions:default": "lib/x86_64-linux-gnu/libnvinfer_static.a",
@@ -203,8 +220,12 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      visibility = ["//visibility:private"],
  )
-@@ -92,7 +92,7 @@ cc_import(
-         ":aarch64_linux": "lib/aarch64-linux-gnu/libnvinfer.so",
+@@ -89,10 +89,10 @@ cc_import(
+ cc_import(
+     name = "nvinfer_lib",
+     shared_library = select({
+-        ":aarch64_linux": "lib/aarch64-linux-gnu/libnvinfer.so",
++        ":aarch64_linux": "lib/libnvinfer.so",
          ":ci_rhel_x86_64_linux": "lib64/libnvinfer.so",
          ":windows": "lib/nvinfer_10.dll",
 -        "//conditions:default": "lib/x86_64-linux-gnu/libnvinfer.so",
@@ -212,8 +233,12 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      visibility = ["//visibility:private"],
  )
-@@ -117,7 +117,7 @@ cc_import(
-         ":aarch64_linux": "lib/aarch64-linux-gnu/libnvparsers.so",
+@@ -114,10 +114,10 @@ cc_library(
+ cc_import(
+     name = "nvparsers_lib",
+     shared_library = select({
+-        ":aarch64_linux": "lib/aarch64-linux-gnu/libnvparsers.so",
++        ":aarch64_linux": "lib/libnvparsers.so",
          ":ci_rhel_x86_64_linux": "lib64/libnvparsers.so",
          ":windows": "lib/nvparsers.dll",
 -        "//conditions:default": "lib/x86_64-linux-gnu/libnvparsers.so",
@@ -221,6 +246,23 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      visibility = ["//visibility:private"],
  )
+@@ -126,11 +126,11 @@ cc_library(
+     name = "nvparsers_headers",
+     hdrs = select({
+         ":aarch64_linux": [
+-            "include/aarch64-linux-gnu/NvCaffeParser.h",
+-            "include/aarch64-linux-gnu/NvOnnxConfig.h",
+-            "include/aarch64-linux-gnu/NvOnnxParser.h",
+-            "include/aarch64-linux-gnu/NvOnnxParserRuntime.h",
+-            "include/aarch64-linux-gnu/NvUffParser.h",
++            "include/NvCaffeParser.h",
++            "include/NvOnnxConfig.h",
++            "include/NvOnnxParser.h",
++            "include/NvOnnxParserRuntime.h",
++            "include/NvUffParser.h",
+         ],
+         ":ci_rhel_x86_64_linux": [
+             "include/NvCaffeParser.h",
 @@ -147,18 +147,18 @@ cc_library(
              "include/NvUffParser.h",
          ],
@@ -246,6 +288,32 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      visibility = ["//visibility:private"],
  )
+@@ -178,10 +178,10 @@ cc_library(
+ cc_import(
+     name = "nvonnxparser_lib",
+     shared_library = select({
+-        ":aarch64_linux": "lib/aarch64-linux-gnu/libnvonnxparser.so",
++        ":aarch64_linux": "lib/libnvonnxparser.so",
+         ":ci_rhel_x86_64_linux": "lib64/libnvonnxparser.so",
+         ":windows": "lib/nvonnxparser.dll",
+-        "//conditions:default": "lib/x86_64-linux-gnu/libnvonnxparser.so",
++        "//conditions:default": "lib/libnvonnxparser.so",
+     }),
+     visibility = ["//visibility:private"],
+ )
+@@ -190,9 +190,9 @@ cc_library(
+     name = "nvonnxparser_headers",
+     hdrs = select({
+         ":aarch64_linux": [
+-            "include/aarch64-linux-gnu/NvOnnxConfig.h",
+-            "include/aarch64-linux-gnu/NvOnnxParser.h",
+-            "include/aarch64-linux-gnu/NvOnnxParserRuntime.h",
++            "include/NvOnnxConfig.h",
++            "include/NvOnnxParser.h",
++            "include/NvOnnxParserRuntime.h",
+         ],
+         ":ci_rhel_x86_64_linux": [
+             "include/NvOnnxConfig.h",
 @@ -205,16 +205,16 @@ cc_library(
              "include/NvOnnxParserRuntime.h",
          ],
@@ -267,8 +335,12 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      visibility = ["//visibility:private"],
  )
-@@ -237,7 +237,7 @@ cc_import(
-         ":aarch64_linux": "lib/x86_64-linux-gnu/libnvonnxparser_runtime.so",
+@@ -234,10 +234,10 @@ cc_library(
+ cc_import(
+     name = "nvonnxparser_runtime_lib",
+     shared_library = select({
+-        ":aarch64_linux": "lib/x86_64-linux-gnu/libnvonnxparser_runtime.so",
++        ":aarch64_linux": "lib/libnvonnxparser_runtime.so",
          ":ci_rhel_x86_64_linux": "lib64/libnvonnxparser_runtime.so",
          ":windows": "lib/nvonnxparser_runtime.dll",
 -        "//conditions:default": "lib/x86_64-linux-gnu/libnvonnxparser_runtime.so",
@@ -276,6 +348,15 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      visibility = ["//visibility:public"],
  )
+@@ -246,7 +246,7 @@ cc_library(
+     name = "nvonnxparser_runtime_header",
+     hdrs = select({
+         ":aarch64_linux": [
+-            "include/aarch64-linux-gnu/NvOnnxParserRuntime.h",
++            "include/NvOnnxParserRuntime.h",
+         ],
+         ":ci_rhel_x86_64_linux": [
+             "include/NvOnnxParserRuntime.h",
 @@ -255,14 +255,14 @@ cc_library(
              "include/NvOnnxParserRuntime.h",
          ],
@@ -293,8 +374,12 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      visibility = ["//visibility:private"],
  )
-@@ -285,7 +285,7 @@ cc_import(
-         ":aarch64_linux": "lib/aarch64-linux-gnu/libnvcaffe_parsers.so",
+@@ -282,10 +282,10 @@ cc_library(
+ cc_import(
+     name = "nvcaffeparser_lib",
+     shared_library = select({
+-        ":aarch64_linux": "lib/aarch64-linux-gnu/libnvcaffe_parsers.so",
++        ":aarch64_linux": "lib/libnvcaffe_parsers.so",
          ":ci_rhel_x86_64_linux": "lib64/libnvcaffe_parsers.so",
          ":windows": "lib/nvcaffe_parsers.dll",
 -        "//conditions:default": "lib/x86_64-linux-gnu/libnvcaffe_parsers.so",
@@ -302,6 +387,15 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      visibility = ["//visibility:private"],
  )
+@@ -294,7 +294,7 @@ cc_library(
+     name = "nvcaffeparser_headers",
+     hdrs = select({
+         ":aarch64_linux": [
+-            "include/aarch64-linux-gnu/NvCaffeParser.h",
++            "include/NvCaffeParser.h",
+         ],
+         ":ci_rhel_x86_64_linux": [
+             "include/NvOnnxParserRuntime.h",
 @@ -303,14 +303,14 @@ cc_library(
              "include/NvCaffeParser.h",
          ],
@@ -319,15 +413,20 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      visibility = ["//visibility:private"],
  )
-@@ -333,13 +333,13 @@ cc_library(
-         ":aarch64_linux": ["lib/aarch64-linux-gnu/libnvinfer_plugin.so"],
+@@ -330,25 +330,25 @@ cc_library(
+ cc_library(
+     name = "nvinferplugin",
+     srcs = select({
+-        ":aarch64_linux": ["lib/aarch64-linux-gnu/libnvinfer_plugin.so"],
++        ":aarch64_linux": ["lib/libnvinfer_plugin.so"],
          ":ci_rhel_x86_64_linux": ["lib64/libnvinfer_plugin.so"],
          ":windows": ["lib/nvinfer_plugin_10.lib"],
 -        "//conditions:default": ["lib/x86_64-linux-gnu/libnvinfer_plugin.so"],
 +        "//conditions:default": ["lib/libnvinfer_plugin.so"],
      }),
      hdrs = select({
-         ":aarch64_linux": glob(["include/aarch64-linux-gnu/NvInferPlugin*.h"]),
+-        ":aarch64_linux": glob(["include/aarch64-linux-gnu/NvInferPlugin*.h"]),
++        ":aarch64_linux": glob(["include/NvInferPlugin*.h"]),
          ":ci_rhel_x86_64_linux": glob(["include/NvInferPlugin*.h"]),
          ":windows": glob(["include/NvInferPlugin*.h"]),
 -        "//conditions:default": glob(["include/x86_64-linux-gnu/NvInferPlugin*.h"]),
@@ -335,8 +434,10 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      copts = [
          "-pthread",
-@@ -348,7 +348,7 @@ cc_library(
-         ":aarch64_linux": ["include/aarch64-linux-gnu/"],
+     ],
+     includes = select({
+-        ":aarch64_linux": ["include/aarch64-linux-gnu/"],
++        ":aarch64_linux": ["include/"],
          ":ci_rhel_x86_64_linux": ["include/"],
          ":windows": ["include/"],
 -        "//conditions:default": ["include/x86_64-linux-gnu/"],
@@ -344,29 +445,3 @@ index 5b7bd17c8..e52eaa7ae 100644
      }),
      linkopts = [
          "-lpthread",
-diff --git a/toolchains/legacy/WORKSPACE.x86_64 b/toolchains/legacy/WORKSPACE.x86_64
-index 1428ec439..0bbeaeb82 100644
---- a/toolchains/legacy/WORKSPACE.x86_64
-+++ b/toolchains/legacy/WORKSPACE.x86_64
-@@ -43,7 +43,7 @@ local_repository(
- new_local_repository(
-     name = "cuda",
-     build_file = "@//third_party/cuda:BUILD",
--    path = "/usr/local/cuda-12.4/",
-+    path = "/usr/local/cuda/",
- )
- 
- new_local_repository(
-diff --git a/toolchains/legacy/WORKSPACE.x86_64.release.ubuntu b/toolchains/legacy/WORKSPACE.x86_64.release.ubuntu
-index e7bad3d30..47b837056 100644
---- a/toolchains/legacy/WORKSPACE.x86_64.release.ubuntu
-+++ b/toolchains/legacy/WORKSPACE.x86_64.release.ubuntu
-@@ -43,7 +43,7 @@ local_repository(
- new_local_repository(
-     name = "cuda",
-     build_file = "@//third_party/cuda:BUILD",
--    path = "/usr/local/cuda-12.4",
-+    path = "/usr/local/cuda",
- )
- 
- new_local_repository(

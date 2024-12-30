@@ -1,60 +1,382 @@
-diff --git a/cpp/include/tensorrt_llm/common/mpiUtils.h b/cpp/include/tensorrt_llm/common/mpiUtils.h
-index edf3da00..6c914151 100644
---- a/cpp/include/tensorrt_llm/common/mpiUtils.h
-+++ b/cpp/include/tensorrt_llm/common/mpiUtils.h
-@@ -18,6 +18,7 @@
- 
- #include "tensorrt_llm/common/assert.h"
- #include "tensorrt_llm/runtime/utils/multiDeviceUtils.h"
-+#include <cstdint>
- #include <limits>
- 
- #ifdef ENABLE_FP8
 diff --git a/scripts/build_wheel.py b/scripts/build_wheel.py
-index 0f7e4c75..f6b4af40 100755
+index 6dd7fbde..6ce79a27 100755
 --- a/scripts/build_wheel.py
 +++ b/scripts/build_wheel.py
-@@ -82,6 +82,7 @@ def main(*,
-          cpp_only: bool = False,
-          install: bool = False,
-          skip_building_wheel: bool = False,
-+         skip_install_requirements: bool = False,
-          python_bindings: bool = True,
-          benchmarks: bool = False,
-          micro_benchmarks: bool = False,
-@@ -94,7 +95,8 @@ def main(*,
-         build_run('git submodule update --init --recursive')
+@@ -49,8 +49,7 @@ def get_source_dir():
+ 
+ def get_build_dir(build_dir, build_type):
+     if build_dir is None:
+-        build_dir = get_source_dir() / ("build" if build_type == "Release" else
+-                                        f"build_{build_type}")
++        build_dir = get_source_dir() / ("build" if build_type == "Release" else f"build_{build_type}")
+     else:
+         build_dir = Path(build_dir)
+     return build_dir
+@@ -65,29 +64,31 @@ def clear_folder(folder_path):
+             os.remove(item_path)
+ 
+ 
+-def main(*,
+-         build_type: str = "Release",
+-         build_dir: Path = None,
+-         dist_dir: Path = None,
+-         cuda_architectures: str = None,
+-         job_count: int = None,
+-         extra_cmake_vars: List[str] = list(),
+-         extra_make_targets: str = "",
+-         trt_root: str = None,
+-         nccl_root: str = None,
+-         clean: bool = False,
+-         clean_wheel: bool = False,
+-         configure_cmake: bool = False,
+-         use_ccache: bool = False,
+-         fast_build: bool = False,
+-         cpp_only: bool = False,
+-         install: bool = False,
+-         skip_building_wheel: bool = False,
+-         python_bindings: bool = True,
+-         benchmarks: bool = False,
+-         micro_benchmarks: bool = False,
+-         nvtx: bool = False):
+-
++def main(
++    *,
++    build_type: str = "Release",
++    build_dir: Path = None,
++    dist_dir: Path = None,
++    cuda_architectures: str = None,
++    job_count: int = None,
++    extra_cmake_vars: List[str] = list(),
++    extra_make_targets: str = "",
++    trt_root: str = None,
++    nccl_root: str = None,
++    clean: bool = False,
++    clean_wheel: bool = False,
++    configure_cmake: bool = False,
++    use_ccache: bool = False,
++    fast_build: bool = False,
++    cpp_only: bool = False,
++    install: bool = False,
++    skip_building_wheel: bool = False,
++    skip_install_requirements: bool = False,
++    python_bindings: bool = True,
++    benchmarks: bool = False,
++    micro_benchmarks: bool = False,
++    nvtx: bool = False,
++):
+     if clean:
+         clean_wheel = True
+ 
+@@ -98,16 +99,13 @@ def main(*,
+     # Get all submodules and check their folder exists. If not,
+     # invoke git submodule update
+     with open(project_dir / ".gitmodules", "r") as submodules_f:
+-        submodules = [
+-            l.split("=")[1].strip() for l in submodules_f.readlines()
+-            if "path = " in l
+-        ]
+-    if any(not (project_dir / submodule / ".git").exists()
+-           for submodule in submodules):
+-        build_run('git submodule update --init --recursive')
++        submodules = [l.split("=")[1].strip() for l in submodules_f.readlines() if "path = " in l]
++    if any(not (project_dir / submodule / ".git").exists() for submodule in submodules):
++        build_run("git submodule update --init --recursive")
      on_windows = platform.system() == "Windows"
      requirements_filename = "requirements-dev-windows.txt" if on_windows else "requirements-dev.txt"
 -    build_run(f"\"{sys.executable}\" -m pip install -r {requirements_filename}")
 +    if not skip_install_requirements:
-+        build_run(f"\"{sys.executable}\" -m pip install -r {requirements_filename}")
++        build_run(f'"{sys.executable}" -m pip install -r {requirements_filename}')
      # Ensure TRT is installed on windows to prevent surprises.
      reqs = check_output([sys.executable, "-m", "pip", "freeze"])
      installed_packages = [r.decode().split("==")[0] for r in reqs.split()]
-@@ -291,7 +293,7 @@ def main(*,
+@@ -128,8 +126,8 @@ def main(*,
+             raise RuntimeError("Volta architecture is deprecated support.")
+ 
+     cmake_cuda_architectures = (
+-        f'"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}"'
+-        if cuda_architectures is not None else "")
++        f'"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}"' if cuda_architectures is not None else ""
++    )
+ 
+     cmake_def_args = []
+     cmake_generator = ""
+@@ -154,18 +152,15 @@ def main(*,
+         for var in extra_cmake_vars:
+             expanded_args += var.split(";")
+ 
+-        extra_cmake_vars = ["\"-D{}\"".format(var) for var in expanded_args]
++        extra_cmake_vars = ['"-D{}"'.format(var) for var in expanded_args]
+         # Don't include duplicate conditions
+         cmake_def_args.extend(set(extra_cmake_vars))
+ 
+     if trt_root is not None:
+         trt_root = trt_root.replace("\\", "/")
+-        trt_lib_dir_candidates = (
+-            f"{trt_root}/targets/{hardware_arch}-linux-gnu/lib",
+-            f"{trt_root}/lib")
++        trt_lib_dir_candidates = (f"{trt_root}/targets/{hardware_arch}-linux-gnu/lib", f"{trt_root}/lib")
+         try:
+-            trt_lib_dir = next(
+-                filter(lambda x: Path(x).exists(), trt_lib_dir_candidates))
++            trt_lib_dir = next(filter(lambda x: Path(x).exists(), trt_lib_dir_candidates))
+         except StopIteration:
+             trt_lib_dir = trt_lib_dir_candidates[0]
+         cmake_def_args.append(f"-DTRT_LIB_DIR={trt_lib_dir}")
+@@ -183,9 +178,7 @@ def main(*,
+     build_dir.mkdir(parents=True, exist_ok=True)
+ 
+     if use_ccache:
+-        cmake_def_args.append(
+-            f"-DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache"
+-        )
++        cmake_def_args.append(f"-DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache")
+ 
+     if fast_build:
+         cmake_def_args.append(f"-DFAST_BUILD=ON")
+@@ -226,38 +219,37 @@ def main(*,
+         clear_folder(lib_dir)
+     lib_dir.mkdir(parents=True, exist_ok=True)
+     if on_windows:
+-        copy(build_dir / "tensorrt_llm/tensorrt_llm.dll",
+-             lib_dir / "tensorrt_llm.dll")
+-        copy(build_dir / f"tensorrt_llm/thop/th_common.dll",
+-             lib_dir / "th_common.dll")
++        copy(build_dir / "tensorrt_llm/tensorrt_llm.dll", lib_dir / "tensorrt_llm.dll")
++        copy(build_dir / f"tensorrt_llm/thop/th_common.dll", lib_dir / "th_common.dll")
+         copy(
+             build_dir / f"tensorrt_llm/plugins/nvinfer_plugin_tensorrt_llm.dll",
+-            lib_dir / "nvinfer_plugin_tensorrt_llm.dll")
++            lib_dir / "nvinfer_plugin_tensorrt_llm.dll",
++        )
+         copy(
+-            build_dir /
+-            "tensorrt_llm/kernels/decoderMaskedMultiheadAttention/decoderXQAImplJIT/nvrtcWrapper/tensorrt_llm_nvrtc_wrapper.dll",
+-            lib_dir / "tensorrt_llm_nvrtc_wrapper.dll")
++            build_dir
++            / "tensorrt_llm/kernels/decoderMaskedMultiheadAttention/decoderXQAImplJIT/nvrtcWrapper/tensorrt_llm_nvrtc_wrapper.dll",
++            lib_dir / "tensorrt_llm_nvrtc_wrapper.dll",
++        )
+     else:
+-        copy(build_dir / "tensorrt_llm/libtensorrt_llm.so",
+-             lib_dir / "libtensorrt_llm.so")
+-        copy(build_dir / "tensorrt_llm/thop/libth_common.so",
+-             lib_dir / "libth_common.so")
++        copy(build_dir / "tensorrt_llm/libtensorrt_llm.so", lib_dir / "libtensorrt_llm.so")
++        copy(build_dir / "tensorrt_llm/thop/libth_common.so", lib_dir / "libth_common.so")
+         copy(
+-            build_dir /
+-            "tensorrt_llm/plugins/libnvinfer_plugin_tensorrt_llm.so",
+-            lib_dir / "libnvinfer_plugin_tensorrt_llm.so")
++            build_dir / "tensorrt_llm/plugins/libnvinfer_plugin_tensorrt_llm.so",
++            lib_dir / "libnvinfer_plugin_tensorrt_llm.so",
++        )
+         copy(
+-            build_dir /
+-            "tensorrt_llm/kernels/decoderMaskedMultiheadAttention/decoderXQAImplJIT/nvrtcWrapper/libtensorrt_llm_nvrtc_wrapper.so",
+-            lib_dir / "libtensorrt_llm_nvrtc_wrapper.so")
++            build_dir
++            / "tensorrt_llm/kernels/decoderMaskedMultiheadAttention/decoderXQAImplJIT/nvrtcWrapper/libtensorrt_llm_nvrtc_wrapper.so",
++            lib_dir / "libtensorrt_llm_nvrtc_wrapper.so",
++        )
+         copy(
+-            build_dir /
+-            "tensorrt_llm/batch_manager/libtensorrt_llm_ucx_wrapper.so",
+-            lib_dir / "libtensorrt_llm_ucx_wrapper.so")
++            build_dir / "tensorrt_llm/batch_manager/libtensorrt_llm_ucx_wrapper.so",
++            lib_dir / "libtensorrt_llm_ucx_wrapper.so",
++        )
+         copy(
+-            build_dir /
+-            "tensorrt_llm/kernels/decoderMaskedMultiheadAttention/libdecoder_attention.so",
+-            lib_dir / "libdecoder_attention.so")
++            build_dir / "tensorrt_llm/kernels/decoderMaskedMultiheadAttention/libdecoder_attention.so",
++            lib_dir / "libdecoder_attention.so",
++        )
+ 
+     bin_dir = pkg_dir / "bin"
+     if bin_dir.exists():
+@@ -265,27 +257,24 @@ def main(*,
+     bin_dir.mkdir(parents=True, exist_ok=True)
+ 
+     if not on_windows:
+-        copy(build_dir / "tensorrt_llm/executor_worker/executorWorker",
+-             bin_dir / "executorWorker")
++        copy(build_dir / "tensorrt_llm/executor_worker/executorWorker", bin_dir / "executorWorker")
+ 
+     if not cpp_only:
+ 
+         def get_pybind_lib():
+-            pybind_build_dir = (build_dir / "tensorrt_llm" / "pybind")
++            pybind_build_dir = build_dir / "tensorrt_llm" / "pybind"
+             if on_windows:
+                 pybind_lib = list(pybind_build_dir.glob("bindings.*.pyd"))
+             else:
+                 pybind_lib = list(pybind_build_dir.glob("bindings.*.so"))
+ 
+-            assert len(
+-                pybind_lib
+-            ) == 1, f"Exactly one pybind library should be present: {pybind_lib}"
++            assert len(pybind_lib) == 1, f"Exactly one pybind library should be present: {pybind_lib}"
+             return pybind_lib[0]
+ 
+         copy(get_pybind_lib(), pkg_dir)
+ 
+         with working_directory(project_dir):
+-            build_run(f"\"{sys.executable}\" -m pip install pybind11-stubgen")
++            build_run(f'"{sys.executable}" -m pip install pybind11-stubgen')
+         with working_directory(pkg_dir):
+             if on_windows:
+                 stubgen = "stubgen.py"
+@@ -307,22 +296,19 @@ def main(*,
+                     main()
+                 """.format(lib_dir=lib_dir)
+                 (pkg_dir / stubgen).write_text(dedent(stubgen_contents))
+-                build_run(f"\"{sys.executable}\" {stubgen} -o . bindings")
++                build_run(f'"{sys.executable}" {stubgen} -o . bindings')
+                 (pkg_dir / stubgen).unlink()
              else:
                  env_ld = os.environ.copy()
  
 -                new_library_path = "/usr/local/cuda/compat/lib.real"
+-                if 'LD_LIBRARY_PATH' in env_ld:
 +                new_library_path = "/usr/local/cuda/compat"
-                 if 'LD_LIBRARY_PATH' in env_ld:
++                if "LD_LIBRARY_PATH" in env_ld:
                      new_library_path += f":{env_ld['LD_LIBRARY_PATH']}"
                  env_ld["LD_LIBRARY_PATH"] = new_library_path
-@@ -316,7 +318,7 @@ def main(*,
+                 try:
+-                    build_run(
+-                        f"\"{sys.executable}\" -m pybind11_stubgen -o . bindings --exit-code",
+-                        env=env_ld)
++                    build_run(f'"{sys.executable}" -m pybind11_stubgen -o . bindings --exit-code', env=env_ld)
+                 except CalledProcessError as ex:
+-                    print(f"Failed to build pybind11 stubgen: {ex}",
+-                          file=sys.stderr)
++                    print(f"Failed to build pybind11 stubgen: {ex}", file=sys.stderr)
+                     exit(1)
+ 
+     if not skip_building_wheel:
+@@ -343,92 +329,69 @@ def main(*,
+             clear_folder(dist_dir)
+ 
+         build_run(
+-            f'\"{sys.executable}\" -m build {project_dir} --skip-dependency-check --no-isolation --wheel --outdir "{dist_dir}"'
++            f'"{sys.executable}" -m build {project_dir} --skip-dependency-check --no-isolation --wheel --outdir "{dist_dir}"'
          )
  
      if install:
 -        build_run(f"\"{sys.executable}\" -m pip install -e .[devel]")
-+        build_run(f"\"{sys.executable}\" -m pip install --no-deps -e .[devel]")
++        build_run(f'"{sys.executable}" -m pip install --no-deps -e .[devel]')
  
  
  def add_arguments(parser: ArgumentParser):
-@@ -326,6 +328,7 @@ def add_arguments(parser: ArgumentParser):
-                         choices=["Release", "RelWithDebInfo", "Debug"])
+-    parser.add_argument("--build_type",
+-                        "-b",
+-                        default="Release",
+-                        choices=["Release", "RelWithDebInfo", "Debug"])
++    parser.add_argument("--build_type", "-b", default="Release", choices=["Release", "RelWithDebInfo", "Debug"])
      parser.add_argument("--cuda_architectures", "-a")
      parser.add_argument("--install", "-i", action="store_true")
 +    parser.add_argument("--skip_install_requirements", action="store_true")
      parser.add_argument("--clean", "-c", action="store_true")
-     parser.add_argument("--configure_cmake",
-                         action="store_true",
+-    parser.add_argument("--clean_wheel",
+-                        action="store_true",
+-                        help="Clear dist_dir folder creating wheel")
+-    parser.add_argument("--configure_cmake",
+-                        action="store_true",
+-                        help="Always configure cmake before building")
+-    parser.add_argument("--use_ccache",
+-                        "-ccache",
+-                        default=False,
+-                        action="store_true",
+-                        help="Use ccache compiler driver")
++    parser.add_argument("--clean_wheel", action="store_true", help="Clear dist_dir folder creating wheel")
++    parser.add_argument("--configure_cmake", action="store_true", help="Always configure cmake before building")
++    parser.add_argument(
++        "--use_ccache", "-ccache", default=False, action="store_true", help="Use ccache compiler driver"
++    )
+     parser.add_argument(
+         "--fast_build",
+         "-f",
+         default=False,
+         action="store_true",
+-        help=
+-        "Skip compiling some kernels to accelerate compilation -- for development only"
++        help="Skip compiling some kernels to accelerate compilation -- for development only",
+     )
+-    parser.add_argument("--job_count",
+-                        "-j",
+-                        const=cpu_count(),
+-                        nargs="?",
+-                        help="Parallel job count")
++    parser.add_argument("--job_count", "-j", const=cpu_count(), nargs="?", help="Parallel job count")
+     parser.add_argument(
+-        "--cpp_only",
+-        "-l",
+-        action="store_true",
+-        help="Only build the C++ library without Python dependencies")
++        "--cpp_only", "-l", action="store_true", help="Only build the C++ library without Python dependencies"
++    )
+     parser.add_argument(
+         "--extra-cmake-vars",
+         "-D",
+         action="append",
+-        help=
+-        "Extra cmake variable definition which can be specified multiple times, example: -D \"key1=value1\" -D \"key2=value2\"",
+-        default=[])
++        help='Extra cmake variable definition which can be specified multiple times, example: -D "key1=value1" -D "key2=value2"',
++        default=[],
++    )
+     parser.add_argument(
+         "--extra-make-targets",
+-        help="A list of additional make targets, example: \"target_1 target_2\"",
++        help='A list of additional make targets, example: "target_1 target_2"',
+         nargs="+",
+-        default=[])
+-    parser.add_argument("--trt_root",
+-                        help="Directory to find TensorRT headers/libs")
+-    parser.add_argument("--nccl_root",
+-                        help="Directory to find NCCL headers/libs")
+-    parser.add_argument("--build_dir",
+-                        type=Path,
+-                        help="Directory where cpp sources are built")
+-    parser.add_argument("--dist_dir",
+-                        type=Path,
+-                        help="Directory where python wheels are built")
++        default=[],
++    )
++    parser.add_argument("--trt_root", help="Directory to find TensorRT headers/libs")
++    parser.add_argument("--nccl_root", help="Directory to find NCCL headers/libs")
++    parser.add_argument("--build_dir", type=Path, help="Directory where cpp sources are built")
++    parser.add_argument("--dist_dir", type=Path, help="Directory where python wheels are built")
+     parser.add_argument(
+         "--skip_building_wheel",
+         "-s",
+         action="store_true",
+-        help=
+-        "Do not build the *.whl files (they are only needed for distribution).")
++        help="Do not build the *.whl files (they are only needed for distribution).",
++    )
+     parser.add_argument(
+         "--python_bindings",
+         "-p",
+         action="store_true",
+-        help="(deprecated) Build the python bindings for the C++ runtime.")
+-    parser.add_argument("--benchmarks",
+-                        action="store_true",
+-                        help="Build the benchmarks for the C++ runtime.")
+-    parser.add_argument("--micro_benchmarks",
+-                        action="store_true",
+-                        help="Build the micro benchmarks for C++ components.")
+-    parser.add_argument("--nvtx",
+-                        action="store_true",
+-                        help="Enable NVTX features.")
++        help="(deprecated) Build the python bindings for the C++ runtime.",
++    )
++    parser.add_argument("--benchmarks", action="store_true", help="Build the benchmarks for the C++ runtime.")
++    parser.add_argument(
++        "--micro_benchmarks", action="store_true", help="Build the micro benchmarks for C++ components."
++    )
++    parser.add_argument("--nvtx", action="store_true", help="Enable NVTX features.")
+ 
+ 
+ if __name__ == "__main__":
