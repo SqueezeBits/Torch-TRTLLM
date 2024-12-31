@@ -74,6 +74,10 @@ def patched_builder_build_engine(
     with open_debug_artifact("trtllm_builder_config.json", "w") as f:
         if f:
             config_dict = builder_config.to_dict()
+            if "quant_mode" in config_dict["builder_config"]:
+                config_dict["builder_config"]["quant_mode"] = [
+                    obj.to_dict() for obj in config_dict["builder_config"]["quant_mode"].objs
+                ]
             json.dump(config_dict, f, indent=2, sort_keys=True)
     save_for_debug("trt_engine", serialized_engine)
     return serialized_engine
@@ -761,7 +765,7 @@ def patched_gpt_attention(
 # Note gpt_attention patch must be done manually
 # trtllm.functional.gpt_attention = patched_gpt_attention
 
-trtllm.Network.to_dot = patched_trtllm_network_to_dot
+trtllm.Network.to_onnx = patched_trtllm_network_to_dot
 
 trtllm.Builder.build_engine = patched_builder_build_engine
 
