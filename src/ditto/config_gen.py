@@ -1,6 +1,7 @@
 from pydantic import TypeAdapter, ValidationError
 from tensorrt_llm._utils import trt_dtype_to_str
 from torch.fx import Graph, GraphModule
+from transformers import PretrainedConfig
 
 from .configs import (
     DTypeLiteral,
@@ -40,12 +41,18 @@ def generate_trtllm_pretrained_config(
     architecture: str | None = None,
 ) -> TRTLLMPretrainedConfig:
     vocab_size, hidden_size = get_embedding_weight_sizes(graph_module)
-    return generate_and_validate_configs(
+    pretrained_config = generate_and_validate_configs(
         collect_gpt_attention_plugins(graph_module.graph),
         architecture=architecture or "UnknownLanguageModel",
         vocab_size=vocab_size,
         hidden_size=hidden_size,
     )
+    if "qwen" in pretrained_config.architecture.lower() and isinstance(
+        hf_config := graph_module.meta.get("pretrained_config"), PretrainedConfig
+    ):
+        # pylint: disable-next=unsupported-assignment-operation
+        pretrained_config.extra_fields["qwen_type"] = hf_config.model_type
+    return pretrained_config
 
 
 def get_embedding_weight_sizes(graph_module: GraphModule) -> tuple[int, int]:
