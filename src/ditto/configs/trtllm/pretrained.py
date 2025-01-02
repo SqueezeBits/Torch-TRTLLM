@@ -1,4 +1,8 @@
-from pydantic import Field
+from collections.abc import Callable
+from typing import Any
+
+from pydantic import Field, model_serializer
+from typing_extensions import Self
 
 from ...types import StrictlyTyped
 from .literals import DTypeLiteral, QuantAlgoLiteral
@@ -41,3 +45,10 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
     num_key_value_heads: int
     mapping: TRTLLMMapping = Field(default_factory=TRTLLMMapping)
     quantization: TRTLLMQuantConfig | None = None
+    extra_fields: dict[str, Any] = Field(default_factory=dict, exclude=True)
+
+    @model_serializer(mode="wrap")
+    def serialize_model(self, original_serializer: Callable[[Self], dict[str, Any]]) -> dict[str, Any]:
+        data = original_serializer(self)
+        data.update(self.extra_fields)
+        return data
