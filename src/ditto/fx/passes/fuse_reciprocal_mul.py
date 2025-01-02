@@ -16,7 +16,7 @@ class FuseReciprocalMul(NodewiseOptimizationPass):
         x, div = inputs
         with graph.inserting_before(node):
             fused_div = Div.create(graph, x, div.other)
-            inject_stack_trace_from(div, to=fused_div, fusing=[x, div] if isinstance(x, Node) else None)
+            inject_stack_trace_from(*((div, x) if isinstance(x, Node) else (div,)), to=fused_div)
         return {node: ReplaceAllUses(by=fused_div.node)}
 
 

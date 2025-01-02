@@ -1,5 +1,3 @@
-from collections.abc import Sequence
-
 from torch.fx import Node
 from torch.fx.graph import _parse_stack_trace, _ParsedStackTrace
 from typing_extensions import Self
@@ -29,16 +27,15 @@ NodeOrSpecialization = Node | NodeSpecialization
 
 def inject_stack_trace_from(
     node: NodeOrSpecialization,
-    *,
+    *others: NodeOrSpecialization,
     to: NodeOrSpecialization,
-    fusing: Sequence[NodeOrSpecialization] | None = None,
 ) -> None:
     if node.stack_trace is None:
         return
     if parsed_stack_trace := StackTrace.parse(to.stack_trace):
         code = parsed_stack_trace.code
-        if fusing:
-            code = f"{code} fusing ({', '.join(n.name for n in fusing)})"
+        if others:
+            code = f"{code} fusing ({', '.join(n.name for n in (node, *others))})"
         else:
             code = f"{code} substituting {node.name}"
         to.stack_trace = f"{node.stack_trace} -> {code}"
