@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from torch.fx import Node
 from torch.fx.graph import _parse_stack_trace, _ParsedStackTrace
 from typing_extensions import Self
@@ -29,7 +31,7 @@ def inject_stack_trace_from(
     node: NodeOrSpecialization,
     *,
     to: NodeOrSpecialization,
-    fusing: list[NodeOrSpecialization] | None = None,
+    fusing: Sequence[NodeOrSpecialization] | None = None,
 ) -> None:
     if node.stack_trace is None:
         return
