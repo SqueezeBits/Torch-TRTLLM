@@ -45,7 +45,7 @@ def get_optimization_transform(
     dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
-    run_matmuls_in_fp32: bool = True,
+    run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
 ) -> Callable[[GraphModule], GraphModule]:
     """Optimize the given graph module inplace.
@@ -117,7 +117,7 @@ def get_trtllm_conversion_transform(
     dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
-    run_matmuls_in_fp32: bool = True,
+    run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
 ) -> Callable[[GraphModule], GraphModule]:
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
