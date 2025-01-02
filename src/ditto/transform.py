@@ -29,7 +29,7 @@ def transform(
     dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
-    run_matmuls_in_fp32: bool = True,
+    run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
 ) -> GraphModule:
