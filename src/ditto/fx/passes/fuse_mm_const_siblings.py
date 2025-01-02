@@ -39,7 +39,7 @@ class FuseMMConstSiblings(NodewiseOptimizationPass):
             fused_param = Cat.create(graph, get_attrs, 1)
             fused_node: Node = MM.create(graph, node, fused_param).node
             nodes_to_replace: list[Node] = [mm_const.mm.node for mm_const in mm_consts]
-            inject_stack_trace_from(mm_consts[0].mm, to=fused_node, fusing=[mm_const.mm for mm_const in mm_consts])
+            inject_stack_trace_from(*nodes_to_replace, to=fused_node)
 
             adds = [
                 add
@@ -65,7 +65,7 @@ class FuseMMConstSiblings(NodewiseOptimizationPass):
                 fused_bias_params = Cat.create(graph, bias_get_attrs)
                 fused_node = Add.create(graph, fused_node, fused_bias_params).node
                 nodes_to_replace = [add.node for add in adds]
-                inject_stack_trace_from(adds[0], to=fused_node, fusing=nodes_to_replace)
+                inject_stack_trace_from(*nodes_to_replace, to=fused_node)
 
             slices = [
                 Slice.create(graph, fused_node, -1, slice_indices[i], slice_indices[i + 1])

@@ -27,6 +27,6 @@ class FuseConsecutivePermutes(NodewiseOptimizationPass):
             dims = [permute.dims[child_permute.dims[i]] for i in range(permute.ndim)]
             with graph.inserting_after(child_node := child_permute.node):
                 fused_permute = Permute.create(graph, permute.this, dims)
-                inject_stack_trace_from(child_permute, to=fused_permute, fusing=[permute, child_permute])
+                inject_stack_trace_from(child_permute, permute, to=fused_permute)
             results[child_node] = ReplaceAllUses(by=fused_permute.node)
         return results
