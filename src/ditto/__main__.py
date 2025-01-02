@@ -76,7 +76,9 @@ def run_generation(
     )
     responses = tokenizer.batch_decode(outputs)
     return [
-        response.replace(tokenizer.pad_token, "").replace(tokenizer.eos_token, "").replace(tokenizer.bos_token, "")
+        response.replace(tokenizer.pad_token or "<pad>", "")
+        .replace(tokenizer.eos_token or "<eos>", "")
+        .replace(tokenizer.bos_token or "<bos>", "")
         for response in responses
     ]
 
