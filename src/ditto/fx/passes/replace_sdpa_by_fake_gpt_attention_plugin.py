@@ -112,6 +112,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 layer_idx=layer_idx,
                 num_heads=num_heads,
                 num_kv_heads=num_kv_heads // num_key_value_groups,
+                layer_idx_in_cache_pool=layer_idx,
                 head_size=embed_dim,
                 type_id=DataType(self.dtype).to(trt.DataType),
                 **global_rope_config.model_dump(),
@@ -135,7 +136,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                     plugin_node = ToCopy.create(graph, plugin_node, dtype=out_dtype).node
                 # See https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
                 # pylint: disable-next=invalid-name
-                N, *others, Hq, L, Ev = sdpa_out_shape  # noqa: N806
+                N, *others, Hq, _, Ev = sdpa_out_shape  # noqa: N806
                 out_reshape = Reshape.create(graph, plugin_node, [N, *others, -1, Hq, Ev])
                 dims = [*range(4 + len(others))]
                 dims[-2], dims[-3] = dims[-3], dims[-2]

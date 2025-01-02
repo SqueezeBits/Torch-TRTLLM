@@ -86,17 +86,17 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def kv_cache_block_offsets(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.batch_size, 2, self.kv_cache_block_size), dtype=torch.int32)
+        return TensorTypeHint(shape=(1, self.batch_size, 2, self.kv_cache_block_size), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def host_kv_cache_block_offsets(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.batch_size, 2, self.kv_cache_block_size), dtype=torch.int32)
+        return TensorTypeHint(shape=(1, self.batch_size, 2, self.kv_cache_block_size), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def host_kv_cache_pool_pointers(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(2,), dtype=torch.int64)
+        return TensorTypeHint(shape=(1, 2), dtype=torch.int64)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -146,3 +146,14 @@ class TRTLLMArgumentHint(StrictlyTyped):
             shape=(self.batch_size, self.beam_width, self.attention_window_size),
             dtype=torch.int32,
         )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def host_kv_cache_pool_mapping(self) -> TensorTypeHint:
+        assert self.num_attn_layers is not None, "num_attn_layers needs to be set for host_kv_cache_pool_mapping"
+        return TensorTypeHint(shape=(self.num_attn_layers,), dtype=torch.int32)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def host_context_progress(self) -> TensorTypeHint:
+        return TensorTypeHint(shape=(1,), dtype=torch.int64)

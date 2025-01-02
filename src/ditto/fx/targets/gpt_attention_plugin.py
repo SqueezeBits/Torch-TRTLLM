@@ -131,10 +131,11 @@ class GPTAttentionPluginFields(StrictlyTyped):
     vision_start: int = -1
     vision_length: int = -1
     num_kv_heads: int
+    layer_idx_in_cache_pool: int
     head_size: int  # this field is actually `hidden_size_per_head`
     unidirectional: int = 1
     q_scaling: float = 1.0
-    qk_tanh_scale: float = 0.0
+    attn_logit_softcapping_scale: float = 0.0
     position_embedding_type: PositionEmbeddingType = PositionEmbeddingType.learned_absolute
     rotary_embedding_dim: int = 0
     rotary_embedding_base: float = 10000.0
@@ -148,7 +149,6 @@ class GPTAttentionPluginFields(StrictlyTyped):
     tp_rank: int = 0
     unfuse_qkv_gemm: bool = False
     context_fmha_type: ContextFMHAType = ContextFMHAType.enabled
-    enable_xqa: bool = True
     kv_cache_quant_mode: QuantMode = QuantMode(0)
     remove_input_padding: bool = True
     mask_type: AttentionMaskType = AttentionMaskType.causal
@@ -167,10 +167,22 @@ class GPTAttentionPluginFields(StrictlyTyped):
     dense_context_fmha: bool = False
     use_paged_context_fmha: bool = False
     use_fp8_context_fmha: bool = False
+    has_full_attention_mask: bool = False
     use_cache: bool = True
     is_spec_decoding_enabled: bool = False
     spec_decoding_is_generation_length_variable: bool = False
     spec_decoding_max_generation_length: int = 1
+    is_mla_enabled: bool = False
+    q_lora_rank: int = 0
+    kv_lora_rank: int = 0
+    qk_nope_head_dim: int = 0
+    qk_rope_head_dim: int = 0
+    v_head_dim: int = 0
+    skip_attn: bool = False
+    cp_size: int = 1
+    cp_rank: int = 0
+    cp_group: int = 0
+    use_logn_scaling: bool = False
 
     def get_plugin_fields(self) -> list[trt.PluginField]:
         def convert_to_plugin_field(name: str, value: Any) -> trt.PluginField:
@@ -204,10 +216,12 @@ class GPTAttentionPluginInputs(StrictlyTyped):
     kv_cache_block_offsets: Node
     host_kv_cache_block_offsets: Node
     host_kv_cache_pool_pointers: Node
+    host_kv_cache_pool_mapping: Node
     rotary_inv_freq: Node | None = None
     rotary_cos_sin: Node | None = None
     host_context_lengths: Node
     host_runtime_perf_knobs: Node
+    host_context_progress: Node
 
     @classmethod
     def find_from(cls, graph: Graph, is_rope: bool) -> Self:
