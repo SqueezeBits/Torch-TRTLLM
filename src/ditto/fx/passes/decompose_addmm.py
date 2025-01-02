@@ -13,6 +13,6 @@ class DecomposeAddMM(NodewiseOptimizationPass):
 
         with (graph := node.graph).inserting_before(node):
             mm = MM.create(graph, addmm.mat1, addmm.mat2)
-            add = Add.create(graph, mm.node, addmm.bias)
+            add = Add.create(graph, mm.node, addmm.this)
 
         return {node: ReplaceAllUses(by=add.node)}
