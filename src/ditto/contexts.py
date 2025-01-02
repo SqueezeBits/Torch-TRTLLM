@@ -4,6 +4,8 @@ from collections.abc import Generator
 from typing import Any
 
 import torch
+import torch.jit._state as torch_jit_state
+from loguru import logger
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import log as symbolic_shape_logger
 
@@ -45,3 +47,16 @@ def ignore_symbolic_shapes_warning() -> Generator[None, None, None]:
         yield None
     finally:
         symbolic_shape_logger.setLevel(log_level)
+
+
+@contextlib.contextmanager
+def disable_torch_jit_state() -> Generator[None, None, None]:
+    if was_enabled := torch_jit_state._enabled.enabled:
+        torch_jit_state.disable()
+        logger.info("torch.jit.script disabled")
+    try:
+        yield None
+    finally:
+        if was_enabled:
+            torch_jit_state.enable()
+            logger.info("torch.jit.script enabled")
