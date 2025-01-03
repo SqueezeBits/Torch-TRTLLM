@@ -4,7 +4,6 @@ import re
 import torch
 from torch.fx import Node
 
-from ...types import Number
 from ..nodes import Binary, GetAttr
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
 
@@ -24,11 +23,11 @@ class RewriteConstantOperandsAsNodes(NodewiseOptimizationPass):
         constant_key: str
         name: str
         buffer: torch.Tensor
-        if isinstance(binary.this, Number) and isinstance(binary.other, Node):
+        if isinstance(binary.this, float) and isinstance(binary.other, Node):
             constant_key = "this"
             name = make_as_identifier(f"literal_{binary.this}")
             buffer = torch.tensor(binary.this)
-        elif isinstance(binary.other, Number) and isinstance(binary.this, Node):
+        elif isinstance(binary.other, float) and isinstance(binary.this, Node):
             constant_key = "other"
             name = make_as_identifier(f"literal_{binary.other}")
             buffer = torch.tensor(binary.other)
