@@ -34,7 +34,7 @@ PassName = Literal[
     "ReplaceSDPAByFakeGPTAttentionPlugin",
     "ReplaceViewByReshape",
     "ResetCodeGen",
-    "RewriteConstantOperandsAsNodes",
+    "RewriteFloatingPointLiteralsAsNodes",
     "RewriteReshapeAsUnsqueeze",
     "WrapRoPESubgraphs",
     "WrapSDPASubgraphs",

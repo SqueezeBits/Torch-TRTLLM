@@ -8,8 +8,8 @@ from ..nodes import Binary, GetAttr
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
 
 
-class RewriteConstantOperandsAsNodes(NodewiseOptimizationPass):
-    """Rewrite constant operands of binary nodes as nodes.
+class RewriteFloatingPointLiteralsAsNodes(NodewiseOptimizationPass):
+    """Rewrite floating point constant literals of binary nodes as nodes.
 
     This pass is required for avoiding failure in converting a constant operand into numpy array by the interpreter
     when the constant's data type is not supported by numpy (e.g. bfloat16).

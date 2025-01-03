@@ -32,7 +32,7 @@ from .passes import (
     ReplaceMMByFakeGemmPlugin,
     ReplaceSDPAByFakeGPTAttentionPlugin,
     ReplaceViewByReshape,
-    RewriteConstantOperandsAsNodes,
+    RewriteFloatingPointLiteralsAsNodes,
     RewriteReshapeAsUnsqueeze,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
@@ -109,7 +109,7 @@ LEVEL2_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     FuseConsecutiveSplitConcat,
     FuseReciprocalMul,
     DeferUnsqueeze,
-    RewriteConstantOperandsAsNodes,
+    RewriteFloatingPointLiteralsAsNodes,
     RewriteReshapeAsUnsqueeze,
 )
 
