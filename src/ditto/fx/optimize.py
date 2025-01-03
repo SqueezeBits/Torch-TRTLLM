@@ -25,7 +25,7 @@ from .passes import (
     FuseConsecutiveSplitConcat,
     FuseConsecutiveToCopys,
     FuseEquivalentNodes,
-    FuseMMConstSiblings,
+    FuseLinearSiblings,
     FuseReciprocalMul,
     HerdConstantsToTheRight,
     InsertGatherLastTokenIds,
@@ -129,7 +129,7 @@ def get_trtllm_conversion_transform(
         WrapSDPASubgraphs,
         WrapRoPESubgraphs,
         ReplaceSDPAByFakeGPTAttentionPlugin(dtype=dtype),
-        FuseMMConstSiblings,
+        FuseLinearSiblings,
         ReplaceMMByFakeGemmPlugin,
     ]
 

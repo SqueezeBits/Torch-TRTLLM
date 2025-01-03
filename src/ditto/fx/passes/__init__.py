@@ -18,7 +18,7 @@ from .fuse_consecutive_slice_concat import FuseConsecutiveSliceConcat
 from .fuse_consecutive_split_concat import FuseConsecutiveSplitConcat
 from .fuse_consecutive_to_copys import FuseConsecutiveToCopys
 from .fuse_equivalent_nodes import FuseEquivalentNodes
-from .fuse_mm_const_siblings import FuseMMConstSiblings
+from .fuse_mm_const_siblings import FuseLinearSiblings
 from .fuse_reciprocal_mul import FuseReciprocalMul
 from .herd_constants_to_the_right import HerdConstantsToTheRight
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
