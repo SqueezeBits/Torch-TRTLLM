@@ -15,11 +15,15 @@ class Subgraph(StrictlyTyped, ABC):
 
     @property
     def nodes(self) -> list[Node]:
-        return [
-            attr.node
-            for name in self.model_dump().keys()
-            if isinstance((attr := getattr(self, name, None)), NodeSpecialization)
-        ]
+        all_nodes: list[Node] = []
+        for name in self.model_dump():
+            if isinstance((attr := getattr(self, name, None)), NodeSpecialization):
+                all_nodes.append(attr.node)
+            elif isinstance(attr, Node):
+                all_nodes.append(attr)
+            elif isinstance(attr, Subgraph):
+                all_nodes.extend(attr.nodes)
+        return all_nodes
 
     def __hash__(self) -> int:
         assert (
