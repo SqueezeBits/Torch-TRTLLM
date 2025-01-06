@@ -15,6 +15,7 @@ class GemmPluginFields(StrictlyTyped):
     transb: int = 0
     pad_lda: int = 0
     pad_ldb: int = 0
+    pad_ldc: int = 0
     type_id: trt.DataType
     use_fp8: int = 0
     alpha: float = 1.0

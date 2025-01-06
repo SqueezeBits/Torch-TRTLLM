@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any
+from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
 import tensorrt as trt
@@ -9,6 +9,7 @@ import tensorrt_llm.graph_rewriting as gw
 import torch
 from loguru import logger
 from tensorrt_llm import Tensor, default_net, default_trtnet
+from tensorrt_llm._utils import QuantModeWrapper
 from tensorrt_llm.functional import (
     AttentionMaskType,
     PositionEmbeddingType,
@@ -18,6 +19,7 @@ from tensorrt_llm.functional import (
     _add_plugin_info,
     _create_tensor,
 )
+from tensorrt_llm.quantization import QuantMode
 from tensorrt_llm.runtime.generation import GenerationSession
 
 from ..debug import (
@@ -74,6 +76,10 @@ def patched_builder_build_engine(
     with open_debug_artifact("trtllm_builder_config.json", "w") as f:
         if f:
             config_dict = builder_config.to_dict()
+            if "quant_mode" in config_dict["builder_config"]:
+                config_dict["builder_config"]["quant_mode"] = [
+                    obj.to_dict() for obj in config_dict["builder_config"]["quant_mode"].objs
+                ]
             json.dump(config_dict, f, indent=2, sort_keys=True)
     save_for_debug("trt_engine", serialized_engine)
     return serialized_engine
@@ -122,24 +128,25 @@ def patched_dump_debug_buffers(self: GenerationSession, step: int) -> None:
 
 
 @gw.record_signature
-def patched_gpt_attention(
+def gpt_attention(
     *,
     qkv: Tensor,
     past_key_value: Tensor,
-    context_fmha_custom_mask: Tensor | None = None,
+    attention_mask: Optional[Tensor] = None,
+    attention_packed_mask: Optional[Tensor] = None,
     sequence_length: Tensor,
-    host_past_key_value_lengths: Tensor | None,
+    host_past_key_value_lengths: Optional[Tensor],
     host_max_attention_window_sizes: Tensor,
     host_sink_token_length: Tensor,
-    context_lengths: Tensor | None,
-    cache_indirection: Tensor | None,
+    context_lengths: Optional[Tensor],
+    cache_indirection: Optional[Tensor],
     host_request_types: Tensor,
     layer_idx: int,
     num_heads: int,
     num_kv_heads: int,
     hidden_size_per_head: int,
     q_scaling: float,
-    qk_tanh_scale: float = 0.0,
+    attn_logit_softcapping_scale: float = 0.0,
     rotary_embedding_dim: int = 0,
     rotary_embedding_base: float = 10000.0,
     rotary_embedding_scale_type: RotaryScalingType = RotaryScalingType.none,
@@ -149,43 +156,65 @@ def patched_gpt_attention(
     rotary_embedding_max_positions: int = 1024,
     rotary_embedding_original_max_positions: int = 1024,
     position_embedding_type: PositionEmbeddingType = PositionEmbeddingType.learned_absolute,
-    rotary_inv_freq: Tensor | None = None,
-    rotary_cos_sin: Tensor | None = None,
-    kv_orig_quant_scale: Tensor | None = None,
-    kv_quant_orig_scale: Tensor | None = None,
-    attention_output_orig_quant_scale: Tensor | None = None,
-    kv_cache_quant_mode: QuantMode = QuantMode(0),
-    max_context_length: int | None = None,
+    rotary_inv_freq: Optional[Tensor] = None,
+    rotary_cos_sin: Optional[Tensor] = None,
+    kv_orig_quant_scale: Optional[Tensor] = None,
+    kv_quant_orig_scale: Optional[Tensor] = None,
+    attention_output_orig_quant_scale: Optional[Tensor] = None,
+    kv_cache_quant_mode: Union[QuantModeWrapper, QuantMode] = QuantMode(0),
+    max_context_length: Optional[int] = None,
     mask_type: AttentionMaskType = AttentionMaskType.causal,
     block_sparse_block_size: int = 64,
     block_sparse_homo_head_pattern: bool = False,
     block_sparse_num_local_blocks: int = 16,
     block_sparse_vertical_stride: int = 8,
-    alibi_slopes: Tensor | None = None,
+    alibi_slopes: Optional[Tensor] = None,
     tp_size: int = 1,
     tp_rank: int = 0,
     vision_start: int = -1,
     vision_length: int = -1,
-    kv_cache_block_offsets: Tensor | None = None,
+    kv_cache_block_offsets: Optional[Tensor] = None,
     host_kv_cache_block_offsets: Tensor = None,
     host_kv_cache_pool_pointers: Tensor = None,
+    host_kv_cache_pool_mapping: Tensor = None,
     do_cross_attention: bool = False,
-    cross_qkv: Tensor | None = None,  # for cross attention
-    cross_qkv_length: Tensor | None = None,  # for cross attention
-    encoder_input_lengths: Tensor | None = None,  # for cross attention
-    relative_attention_bias: Tensor | None = None,  # for relative attention
+    cross_kv: Optional[Tensor] = None,  # for cross attention
+    cross_kv_length: Optional[Tensor] = None,  # for cross attention
+    encoder_input_lengths: Optional[Tensor] = None,  # for cross attention
+    relative_attention_bias: Optional[Tensor] = None,  # for relative attention
+    logn_scaling: Optional[Tensor] = None,  # for logn scaling
     max_distance: int = 0,  # for relative attention
-    host_context_lengths: Tensor | None = None,  # for pad-free input mode
-    qkv_bias: Tensor | None = None,
+    host_context_lengths: Optional[Tensor] = None,  # for pad-free input mode
+    qkv_bias: Optional[Tensor] = None,
     use_cache: bool = True,
     spec_decoding_is_generation_length_variable: bool = False,
     spec_decoding_max_generation_length: int = 0,
     spec_decoding_generation_lengths: Tensor = None,
     spec_decoding_position_offsets: Tensor = None,
     spec_decoding_packed_mask: Tensor = None,
-    host_runtime_perf_knobs: Tensor | None = None,
-) -> tuple[Tensor, Tensor | None]:
-    """Add an operation that performs the multi-head attention in GPT-like models.
+    long_rope_rotary_inv_freq: Optional[Tensor] = None,
+    long_rope_rotary_cos_sin: Optional[Tensor] = None,
+    mrope_rotary_sin_cos: Tensor = None,
+    mrope_position_deltas: Tensor = None,
+    host_runtime_perf_knobs: Optional[Tensor] = None,
+    host_context_progress: Tensor = None,
+    layer_idx_in_cache_pool: Optional[int] = None,
+    is_mla_enabled_flag: bool = False,
+    q_lora_rank: int = 0,
+    kv_lora_rank: int = 0,
+    qk_nope_head_dim: int = 0,
+    qk_rope_head_dim: int = 0,
+    v_head_dim: int = 0,
+    fused_q_proj: Optional[Tensor] = None,
+    q_b_proj: Optional[Tensor] = None,
+    kv_b_proj: Optional[Tensor] = None,
+    skip_attn=None,
+    cp_group: List[int] = [0],
+    cp_size: int = 1,
+    cp_rank: int = 0,
+) -> Tuple[Tensor, Optional[Tensor]]:
+    """
+    Add an operation that performs the multi-head attention in GPT-like models.
 
     The signature of the function will change in the future release - we are in
     the process of simplifying the API. The current version is still
@@ -193,27 +222,31 @@ def patched_gpt_attention(
     arguments that are likely to be removed or merged with others in the future
     release.
 
-    See docs/gpt_attention.md for the documentation of that function.
+    See docs/source/advanced/gpt-attention.md for the documentation of that function.
 
     Parameters:
         qkv: Tensor (On GPU)
             The input QKV tensor. Its shape is [batch_beam_size, max_seqlen, qkv_dim] in padded mode and [1, num_tokens, qkv_dim] in
-            packed mode. Where qkv_dim depends on using MQA, GQA, or MHA. See QKV Input in docs/gpt_attention.md,
+            packed mode. Where qkv_dim depends on using MQA, GQA, or MHA. See QKV Input in docs/source/advanced/gpt-attention.md,
 
         past_key_value: Tensor (On GPU)
             The tensor that stores KV cache data. Its shape is
             [max_batch_size * max_beam_width, 2, num_kv_heads, max_seqlen, hidden_dim_per_head]
             in contiguous mode and
             [max_blocks, 2, num_kv_heads, num_tokens_per_block, hidden_dim_per_head]
-            in paged mode. See KV Cache in docs/gpt_attention.md,
+            in paged mode. See KV Cache in docs/source/advanced/gpt-attention.md,
 
-        context_fmha_custom_mask: Tensor (On GPU)
+        attention_mask: Tensor (On GPU)
+            The tensor that stores the attention mask for unfused MHA or MMHA.
+            Its shape is [num_tokens, max_kv_seqlen].
+
+        attention_packed_mask: Tensor (On GPU)
             The tensor that stores the packed custom mask for fmha.
-            Its shape is [num_tokens, max_kv_seqlen / 32].
+            Its shape is [num_tokens, max_kv_seqlen / 32], where each bit represents one mask position.
 
         sequence_lengths: Tensor (On GPU)
             The tensor that stores the length of each sequence. Its shape is
-            [batch_size]. See QKV Input in docs/gpt_attention.md,
+            [batch_size]. See QKV Input in docs/source/advanced/gpt-attention.md,
 
         host_past_key_value_lengths: Tensor (On CPU)
             An INT32 tensor of shape [batch_size],
@@ -231,12 +264,12 @@ def patched_gpt_attention(
         cache_indirection: Tensor (On GPU)
             The tensor to reconstruct the paths when using beam-search. Its
             shape is [batch_size, beam_width, max_seqlen]. See Beam-Search in
-            docs/gpt_attention.md,
+            docs/source/advanced/gpt-attention.md,
 
         host_request_types: Tensor = None (On CPU)
             The tensor on the host that indicates if a request is in context or
             generation phase. Its shape is [batch_size]. See Inflight Batching
-            in docs/gpt_attention.md,
+            in docs/source/advanced/gpt-attention.md,
 
         layer_idx: int
             The index of this attention layer, used to access kv_cache_block_offsets,
@@ -252,11 +285,11 @@ def patched_gpt_attention(
 
         q_scaling: float
             The value used to compute the scaling factor applied to the output
-            of the Q*K^T product. See Scaling Factors in docs/gpt_attention.md,
+            of the Q*K^T product. See Scaling Factors in docs/source/advanced/gpt-attention.md,
 
-        qk_tanh_scale: float
+        attn_logit_softcapping_scale: float
             The scale * tanh(value / scale) used to compute the scaling factor applied to the output
-            of the Q*K^T product. Note this is only used by grok models.
+            of the Q*K^T product.
 
         rotary_embedding_dim: int
             The dimension to compute RoPE. Use 0 when position_embedding_type is not RoPE.
@@ -300,12 +333,12 @@ def patched_gpt_attention(
         kv_orig_quant_scale: Tensor
             The tensor to store the scaling factor for quantization to INT8/FP8
             in the KV cache. Its shape is [1]. See INT8/FP8 KV Cache in
-            docs/gpt_attention.md,
+            docs/source/advanced/gpt-attention.md,
 
         kv_quant_orig_scale: Tensor
             The tensor to store the scaling factor for dequantization from
             INT8/FP8 in the KV cache. Its shape is [1]. See INT8/FP8 KV Cache
-            in docs/gpt_attention.md,
+            in docs/source/advanced/gpt-attention.md,
 
         attention_output_orig_quant_scale: Tensor
             The tensor to store the scaling factor for quantization to FP8
@@ -316,7 +349,7 @@ def patched_gpt_attention(
 
         max_context_length: int32_t
             The length of the longest input sequence. See QKV Input in
-            docs/gpt_attention.md,
+            docs/source/advanced/gpt-attention.md,
 
         mask_type: int = 1
             The type of mask:
@@ -353,28 +386,33 @@ def patched_gpt_attention(
         kv_cache_block_offsets:
             The tensor of block offsets for the KV cache. Its shape is
             [num_layers, max_batch_size, max_beam_width, 2, max_blocks_per_sequence * 2],
-            See KV cache section in docs/gpt_attention.md, on gpu,
+            See KV cache section in docs/source/advanced/gpt-attention.md, on gpu,
 
         host_kv_cache_block_offsets:
             The same as kv_cache_block_offsets, but on cpu,
 
         host_kv_cache_pool_pointers:
-            The tensor of pool pointers for the KV cache. Its shape is [2],
-            See KV cache section in docs/gpt_attention.md, on gpu,
+            The tensor of pool pointers for the KV cache. Its shape is [num_layers, 2],
+            See KV cache section in docs/source/advanced/gpt-attention.md, on gpu,
+
+        host_kv_cache_pool_mapping:
+            The tensor of pool mapping for the different memory pools. Its shape is [num_layers,],
 
         do_cross_attention: bool = False
             Do we use this as cross attention instead of self attention,
 
-        cross_qkv: Tensor = None
-            The QKV tensor of encoder output hidden states. Its shape is [batch_size, max_seqlen, 3
-            * hidden_dim] in padded mode and [1, num_tokens, 3 * hidden_dim] in
+        cross_kv: Tensor = None
+            The KV tensor of encoder output hidden states. Its shape is [batch_size, max_seqlen, 2 * kvHeadNum * headSize] in padded mode and [1, num_tokens, 2 * kvHeadNum * headSize] in
             packed mode,
 
-        cross_qkv_length: Tensor = None
+        cross_kv_length: Tensor = None
             The length of the longest encoder output sequence,
 
         encoder_input_lengths: Tensor
             The tensor that stores the length of each encoder input sequence. Its shape is [batch_size],
+
+        logn_scaling: Tensor = None
+            The logn scaling tensor [max_position_embedding_len], which is applied to q in order to help extrapolation
 
         relative_attention_bias: Tensor = None
             The relative attention bias [num_heads, max_seq_len, max_seq_len], or The relative attention embedding table for implicit mode, [num_heads, num_buckets].
@@ -383,7 +421,7 @@ def patched_gpt_attention(
             The maximum distance of relative position in attention, for implicit mode.
             Default value is 0, meaning to use the regular mode of relative attention bias.
             Implicit mode is only enabled when passing in non-zero positive max_distance value.
-            See relative attention bias in docs/gpt_attention.md
+            See relative attention bias in docs/source/advanced/gpt-attention.md
 
         host_context_lengths: Tensor = None (On CPU)
             A host tensor that contains the lengths of the different inputs,
@@ -417,15 +455,31 @@ def patched_gpt_attention(
             remove_input_padding is True:
                 Shape: [sum(spec_decoding_generation_lengths), divUp(num_draft_tokens + 1, 32)].
 
+        long_rope_rotary_inv_freq: float Tensor
+            Additional rotary inv freq used for longer sequence lengths. Shape: [head_size / 2]
+
+        long_rope_rotary_cos_sin: float2(cos/sin) Tensor
+            Additional rotary cos/sin cache used for longer sequence lengths.
+
+        is_mla_enable: bool = False
+            Do we need to enable deepseekv2 mla?
 
         host_runtime_perf_knobs: Tensor = None,
             The runtime perf knobs bit mask, controls whether to use certain perf knob in the runtime.
 
+        host_context_progress: Tensor = None,
+            The structure used to track layer-wise progress in context phase.
+
+        skip_attn: Tensor = None,
+            A bool tensor on CPU. If it is true, don't run attention plugin, returning directly.
+
     Returns:
         The tensor produced by that layer.
     """
+
     assert host_request_types is not None
     assert (alibi_slopes is not None) == (position_embedding_type.is_alibi())
+    assert (mrope_rotary_sin_cos is not None) == (position_embedding_type.is_mrope())
     attn_plg_creator = trt.get_plugin_registry().get_plugin_creator("GPTAttention", "1", TRT_LLM_PLUGIN_NAMESPACE)
     assert attn_plg_creator is not None
     assert host_context_lengths is not None or not default_net().plugin_config.remove_input_padding
@@ -433,11 +487,23 @@ def patched_gpt_attention(
     assert host_max_attention_window_sizes is not None
     assert host_sink_token_length is not None
 
+    if layer_idx_in_cache_pool is None:
+        layer_idx_in_cache_pool = layer_idx
+
     paged_kv_cache_flag = default_net().plugin_config.paged_kv_cache
     if isinstance(qkv, list):
         is_unfuse_qkv_gemm = 1
     else:
         is_unfuse_qkv_gemm = 0
+
+    default_net().plugin_config.context_fmha_type
+    if do_cross_attention and not paged_kv_cache_flag:
+        pass
+    if logn_scaling is not None:
+        use_logn_scaling = 1
+    else:
+        use_logn_scaling = 0
+
     unfuse_qkv_gemm = trt.PluginField(
         "unfuse_qkv_gemm", np.array(np.int8(is_unfuse_qkv_gemm), dtype=np.int8), trt.PluginFieldType.INT8
     )
@@ -447,11 +513,16 @@ def patched_gpt_attention(
     vision_start = trt.PluginField("vision_start", np.array(vision_start, dtype=np.int32), trt.PluginFieldType.INT32)
     vision_length = trt.PluginField("vision_length", np.array(vision_length, dtype=np.int32), trt.PluginFieldType.INT32)
     num_kv_heads = trt.PluginField("num_kv_heads", np.array(num_kv_heads, dtype=np.int32), trt.PluginFieldType.INT32)
+    layer_idx_in_cache_pool = trt.PluginField(
+        "layer_idx_in_cache_pool", np.array(layer_idx_in_cache_pool, dtype=np.int32), trt.PluginFieldType.INT32
+    )
     head_size = trt.PluginField("head_size", np.array(hidden_size_per_head, dtype=np.int32), trt.PluginFieldType.INT32)
     unidirectional = trt.PluginField("unidirectional", np.array(1, dtype=np.int32), trt.PluginFieldType.INT32)
     q_scaling = trt.PluginField("q_scaling", np.array(q_scaling, dtype=np.float32), trt.PluginFieldType.FLOAT32)
-    qk_tanh_scale = trt.PluginField(
-        "qk_tanh_scale", np.array(qk_tanh_scale, dtype=np.float32), trt.PluginFieldType.FLOAT32
+    attn_logit_softcapping_scale = trt.PluginField(
+        "attn_logit_softcapping_scale",
+        np.array(attn_logit_softcapping_scale, dtype=np.float32),
+        trt.PluginFieldType.FLOAT32,
     )
     rotary_embedding_dim = trt.PluginField(
         "rotary_embedding_dim", np.array(rotary_embedding_dim, dtype=np.int32), trt.PluginFieldType.INT32
@@ -513,14 +584,29 @@ def patched_gpt_attention(
         np.array(spec_decoding_max_generation_length, dtype=np.int32),
         trt.PluginFieldType.INT32,
     )
+    is_mla_enabled = trt.PluginField(
+        "is_mla_enabled", np.array(is_mla_enabled_flag, dtype=np.int8), trt.PluginFieldType.INT8
+    )
+    q_lora_rank = trt.PluginField("q_lora_rank", np.array(q_lora_rank, dtype=np.int32), trt.PluginFieldType.INT32)
+    kv_lora_rank = trt.PluginField("kv_lora_rank", np.array(kv_lora_rank, dtype=np.int32), trt.PluginFieldType.INT32)
+    qk_nope_head_dim = trt.PluginField(
+        "qk_nope_head_dim", np.array(qk_nope_head_dim, dtype=np.int32), trt.PluginFieldType.INT32
+    )
+    qk_rope_head_dim = trt.PluginField(
+        "qk_rope_head_dim", np.array(qk_rope_head_dim, dtype=np.int32), trt.PluginFieldType.INT32
+    )
+    v_head_dim = trt.PluginField("v_head_dim", np.array(v_head_dim, dtype=np.int32), trt.PluginFieldType.INT32)
     p_dtype = default_net().plugin_config.gpt_attention_plugin
     pf_type = trt.PluginField(
         "type_id", np.array([int(str_dtype_to_trt(p_dtype))], np.int32), trt.PluginFieldType.INT32
     )
     # reset mask_type to custom_mask.
-    if context_fmha_custom_mask is not None:
+    if (attention_mask is not None) or (attention_packed_mask is not None):
+        # context fmha needs packed mask.
+        assert attention_packed_mask is not None
         mask_type = AttentionMaskType.custom_mask
-    mask_type = trt.PluginField("mask_type", np.array([int(mask_type)], np.int32), trt.PluginFieldType.INT32)
+
+    mask_type_filed = trt.PluginField("mask_type", np.array([int(mask_type)], np.int32), trt.PluginFieldType.INT32)
     block_sparse_block_size = trt.PluginField(
         "block_sparse_block_size", np.array([block_sparse_block_size], np.int32), trt.PluginFieldType.INT32
     )
@@ -535,11 +621,11 @@ def patched_gpt_attention(
     block_sparse_vertical_stride = trt.PluginField(
         "block_sparse_vertical_stride", np.array([block_sparse_vertical_stride], np.int32), trt.PluginFieldType.INT32
     )
-    enable_xqa = trt.PluginField(
-        "enable_xqa", np.array(np.int8(default_net().plugin_config.enable_xqa), dtype=np.int8), trt.PluginFieldType.INT8
-    )
     tp_size = trt.PluginField("tp_size", np.array(tp_size, dtype=np.int32), trt.PluginFieldType.INT32)
     tp_rank = trt.PluginField("tp_rank", np.array(tp_rank, dtype=np.int32), trt.PluginFieldType.INT32)
+    if isinstance(kv_cache_quant_mode, QuantModeWrapper):
+        # Now in TRT-LLM only use global kv_cache, so it's enough to get the first quant mode from list
+        kv_cache_quant_mode = kv_cache_quant_mode[0]
     kv_cache_quant_mode_field = trt.PluginField(
         "kv_cache_quant_mode", np.array(kv_cache_quant_mode, dtype=np.int32), trt.PluginFieldType.INT32
     )
@@ -582,7 +668,22 @@ def patched_gpt_attention(
         np.array(np.int8(default_net().plugin_config.use_fp8_context_fmha), dtype=np.int8),
         trt.PluginFieldType.INT8,
     )
+    has_full_attention_mask_field = trt.PluginField(
+        "has_full_attention_mask",
+        np.array(np.int8(attention_mask is not None), dtype=np.int8),
+        trt.PluginFieldType.INT8,
+    )
     use_cache_pf = trt.PluginField("use_cache", np.array([use_cache], dtype=np.int32), trt.PluginFieldType.INT32)
+    skip_attn_pf = trt.PluginField(
+        "skip_attn", np.array([skip_attn is not None], dtype=np.int8), trt.PluginFieldType.INT8
+    )
+    cp_size = trt.PluginField("cp_size", np.array(cp_size, dtype=np.int32), trt.PluginFieldType.INT32)
+    cp_rank = trt.PluginField("cp_rank", np.array(cp_rank, dtype=np.int32), trt.PluginFieldType.INT32)
+    cp_group = np.array(cp_group, dtype=np.int32)
+    cp_group = trt.PluginField("cp_group", cp_group, trt.PluginFieldType.INT32)
+    use_logn_scaling = trt.PluginField(
+        "use_logn_scaling", np.array(np.int8(use_logn_scaling), dtype=np.int8), trt.PluginFieldType.INT8
+    )
 
     pfc = trt.PluginFieldCollection(
         [
@@ -591,10 +692,11 @@ def patched_gpt_attention(
             vision_start,
             vision_length,
             num_kv_heads,
+            layer_idx_in_cache_pool,
             head_size,
             unidirectional,
             q_scaling,
-            qk_tanh_scale,
+            attn_logit_softcapping_scale,
             position_embedding_type,
             rotary_embedding_dim,
             rotary_embedding_base,
@@ -608,10 +710,9 @@ def patched_gpt_attention(
             tp_rank,
             unfuse_qkv_gemm,
             context_fmha_type,
-            enable_xqa,
             kv_cache_quant_mode_field,
             remove_input_padding,
-            mask_type,
+            mask_type_filed,
             block_sparse_block_size,
             block_sparse_homo_head_pattern,
             block_sparse_num_local_blocks,
@@ -627,18 +728,34 @@ def patched_gpt_attention(
             dense_context_fmha,
             use_paged_context_fmha_field,
             use_fp8_context_fmha_field,
+            has_full_attention_mask_field,
             use_cache_pf,
             is_spec_decoding_enabled,
             spec_decoding_is_generation_length_variable,
             spec_decoding_max_generation_length,
+            is_mla_enabled,
+            q_lora_rank,
+            kv_lora_rank,
+            qk_nope_head_dim,
+            qk_rope_head_dim,
+            v_head_dim,
+            skip_attn_pf,
+            cp_size,
+            cp_rank,
+            cp_group,
+            use_logn_scaling,
         ]
     )
 
     attn_plug = attn_plg_creator.create_plugin("causal_attn", pfc)
     assert attn_plug
     plug_inputs = [*qkv] if is_unfuse_qkv_gemm else [qkv]
-    if context_fmha_custom_mask is not None:
-        plug_inputs += [context_fmha_custom_mask]
+    if attention_mask is not None and mask_type == AttentionMaskType.custom_mask:
+        # useFullCustomMask
+        plug_inputs += [attention_mask]
+    if attention_packed_mask is not None:
+        # usePackedCustomMask
+        plug_inputs += [attention_packed_mask]
     if use_cache:
         plug_inputs += [
             sequence_length,
@@ -667,7 +784,15 @@ def patched_gpt_attention(
             assert (
                 host_kv_cache_pool_pointers is not None
             ), "Paged kv cache is enabled, the host_kv_cache_pool_pointers tensor shall not be None"
-            plug_inputs += [kv_cache_block_offsets, host_kv_cache_block_offsets, host_kv_cache_pool_pointers]
+            assert (
+                host_kv_cache_pool_mapping is not None
+            ), "Paged kv cache is enabled, the host_kv_cache_pool_mapping tensor shall not be None"
+            plug_inputs += [
+                kv_cache_block_offsets,
+                host_kv_cache_block_offsets,
+                host_kv_cache_pool_pointers,
+                host_kv_cache_pool_mapping,
+            ]
         else:
             plug_inputs += [past_key_value]
 
@@ -690,7 +815,7 @@ def patched_gpt_attention(
         plug_inputs += [relative_attention_bias]
 
     if do_cross_attention:
-        plug_inputs += [cross_qkv, cross_qkv_length, encoder_input_lengths]
+        plug_inputs += [cross_kv, cross_kv_length, encoder_input_lengths]
 
     if default_net().plugin_config.remove_input_padding:
         plug_inputs += [host_context_lengths]
@@ -703,8 +828,34 @@ def patched_gpt_attention(
         assert spec_decoding_position_offsets is not None
         assert spec_decoding_generation_lengths is not None
         plug_inputs += [spec_decoding_generation_lengths, spec_decoding_packed_mask, spec_decoding_position_offsets]
+
+    if long_rope_rotary_inv_freq is not None:
+        assert long_rope_rotary_cos_sin is not None
+        plug_inputs += [long_rope_rotary_inv_freq, long_rope_rotary_cos_sin]
+
+    if mrope_rotary_sin_cos is not None:
+        assert mrope_position_deltas is not None
+        plug_inputs += [
+            mrope_rotary_sin_cos,
+            mrope_position_deltas,
+        ]
     if host_runtime_perf_knobs is not None:
         plug_inputs += [host_runtime_perf_knobs]
+
+    if host_context_progress is not None:
+        plug_inputs += [host_context_progress]
+
+    if is_mla_enabled_flag:
+        assert fused_q_proj is not None
+        assert q_b_proj is not None
+        assert kv_b_proj is not None
+        plug_inputs += [fused_q_proj, q_b_proj, kv_b_proj]
+
+    if skip_attn is not None:
+        plug_inputs += [skip_attn]
+
+    if logn_scaling is not None:
+        plug_inputs += [logn_scaling]
 
     for idx, i in enumerate(plug_inputs):
         assert i is not None, f"Found None input for {idx} th item in plugin inputs {plug_inputs}"
@@ -754,6 +905,7 @@ def patched_gpt_attention(
             layer.get_input(0).set_dynamic_range(-127, 127)
             layer.get_input(1).set_dynamic_range(-127, 127)
             layer.get_output(0).set_dynamic_range(-127, 127)
+
     assert output is not None
     return output, present_key_value
 
@@ -761,7 +913,7 @@ def patched_gpt_attention(
 # Note gpt_attention patch must be done manually
 # trtllm.functional.gpt_attention = patched_gpt_attention
 
-trtllm.Network.to_dot = patched_trtllm_network_to_dot
+trtllm.Network.to_onnx = patched_trtllm_network_to_dot
 
 trtllm.Builder.build_engine = patched_builder_build_engine
 

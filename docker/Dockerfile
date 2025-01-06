@@ -1,5 +1,5 @@
 ARG BASE_IMAGE=nvcr.io/nvidia/cuda
-ARG BASE_TAG=12.6.1-cudnn-devel-ubuntu24.04
+ARG BASE_TAG=12.6.3-cudnn-devel-ubuntu24.04
 FROM ${BASE_IMAGE}:${BASE_TAG} AS base
 
 # https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html
@@ -30,25 +30,26 @@ RUN rm /usr/lib/python${PYTHON_MAJOR_VERSION}.${PYTHON_MINOR_VERSION}/EXTERNALLY
 RUN wget -q https://github.com/bazelbuild/bazelisk/releases/download/v1.17.0/bazelisk-linux-amd64 -O /usr/bin/bazel && \
     chmod a+x /usr/bin/bazel
 
-ARG PYTORCH_VERSION=2.6.0.dev20241003
+ARG PYTORCH_VERSION=2.6.0.dev20241103
 RUN mkdir -p /root/.cache/pip /root/.cache/ccache /root/.cache/bazel
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --pre torch==${PYTORCH_VERSION} torchvision 'numpy<2' \
     --extra-index-url https://download.pytorch.org/whl/nightly/cu124
 RUN pip install \
-    "accelerate>=0.25.0" "diffusers>=0.27.0" h5py==3.10.0 "nvidia-modelopt~=0.15.0" "onnx>=1.12.0" "openai==1.39.0" \
-    "pynvml>=11.5.0" "sentencepiece>=0.1.99" "transformers<=4.42.4,>=4.38.2" pillow==10.3.0 pybind11==2.6.2 \
+    "accelerate>=0.25.0" "diffusers>=0.27.0" h5py==3.12.1 "nvidia-modelopt[torch]~=0.21.0" "onnx>=1.12.0" "onnx_graphsurgeon>=0.5.2" \
+    "openai==1.54.3" "pynvml>=11.5.0" "sentencepiece>=0.1.99" "transformers<=4.45.1,>=4.38.2" pillow==10.3.0 pybind11 \
     aenum build cuda-python click click_option_group colored evaluate lark optimum pandas packaging psutil pulp \
-    pyyaml StrEnum
+    pyyaml StrEnum pyzmq fastapi==0.115.4 uvicorn httpx setuptools ordered-set
 
-ARG TRT_VER=10.4.0.26
+ARG TRT_VER=10.7.0.23
 ENV TRT_VER=${TRT_VER}
 COPY docker/scripts/install_tensorrt.sh install_tensorrt.sh
 RUN --mount=type=cache,target=/root/.cache bash ./install_tensorrt.sh && rm install_tensorrt.sh
 
-ARG TRTLLM_BRANCH=v0.13.0
+ARG TRTLLM_BRANCH=v0.16.0
 RUN git clone -b ${TRTLLM_BRANCH} --recursive https://github.com/NVIDIA/TensorRT-LLM /workspace/tensorrt_llm
-RUN git clone https://github.com/pytorch/TensorRT /workspace/torch_tensorrt
+ARG TORCH_TRT_BRANCH=v2.5.0
+RUN git clone -b ${TORCH_TRT_BRANCH} https://github.com/pytorch/TensorRT /workspace/torch_tensorrt
 
 WORKDIR /workspace/tensorrt_llm
 RUN bash ./docker/common/install_cmake.sh
@@ -56,9 +57,7 @@ RUN bash ./docker/common/install_polygraphy.sh
 RUN bash ./docker/common/install_mpi4py.sh
 
 WORKDIR /workspace/torch_tensorrt
-ARG TORCH_TENSORRT_COMMIT=52df589bb3f6e1028abd6f1d1b64606c2e7a0459
 COPY docker/scripts/torch_tensorrt.patch /workspace/torch_tensorrt.patch
-RUN git checkout $TORCH_TENSORRT_COMMIT
 RUN git apply /workspace/torch_tensorrt.patch
 RUN --mount=type=cache,target=/root/.cache/pip --mount=type=cache,target=/root/.cache/bazel \
     MAX_JOBS=4 LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8 \

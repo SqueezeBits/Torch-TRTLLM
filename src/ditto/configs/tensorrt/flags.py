@@ -79,6 +79,8 @@ with warnings.catch_warnings():
         weight_streaming: bool = False
         int4: bool = False
         refit_individual: bool = False
+        strict_nans: bool = False
+        monitor_memory: bool = False
 
         @property
         def enabled_precisions(self) -> set[dtype]:
