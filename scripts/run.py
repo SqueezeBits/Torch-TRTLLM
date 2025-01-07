@@ -31,11 +31,12 @@ import tensorrt_llm
 import tensorrt_llm.profiler
 from tensorrt_llm.logger import logger
 from tensorrt_llm.runtime import PYTHON_BINDINGS, ModelRunner
-
 import ditto.patches.trtllm
 
 if PYTHON_BINDINGS:
     from tensorrt_llm.runtime import ModelRunnerCpp
+
+from prompt_lookup.run_dtm_pld import run_dtm_pld
 
 
 def parse_arguments(args=None):
@@ -43,6 +44,11 @@ def parse_arguments(args=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--max_input_length', type=int, default=923)
     parser.add_argument('--max_output_len', type=int, required=True)
+    parser.add_argument(
+        '--draft_engine_dir',
+        type=str,
+        default=None,
+        help='Path to engine of draft model in Draft-Target-Model mode.')
     parser.add_argument(
         '--input_text',
         type=str,
@@ -57,6 +63,19 @@ def parse_arguments(args=None):
     parser.add_argument('--multimodal_input_file',
                         type=str,
                         help='Path to multimodal input file.')
+    parser.add_argument(
+        '--input_token_extra_ids',
+        type=int,
+        nargs='+',
+        help=
+        'Input token extra ids for using p-tuning and KV Cache reuse together (only available with cpp session).',
+        default=None)
+    parser.add_argument(
+        '--input_token_extra_ids_file',
+        type=str,
+        help=
+        'CSV or Numpy file containing input token extra ids file. Alternative to text input (only available with cpp session).',
+        default=None)
     parser.add_argument('--output_csv',
                         type=str,
                         help='CSV file where the tokenized output is stored.',
@@ -157,7 +176,39 @@ def parse_input(tokenizer,
     batch_input_ids = [
         torch.tensor(x, dtype=torch.int32) for x in batch_input_ids
     ]
+
+    logger.debug(f"Input token ids (batch_size = {len(batch_input_ids)}):")
+    for i, input_ids in enumerate(batch_input_ids):
+        logger.debug(f"Request {i}: {input_ids.tolist()}")
+
     return batch_input_ids
+
+
+def parse_input_token_extra_ids(prompt_table_path, kv_cache_enable_block_reuse,
+                                input_token_extra_ids,
+                                input_token_extra_ids_file, max_input_length):
+    batch_extra_ids = None
+    if prompt_table_path and kv_cache_enable_block_reuse:
+        assert input_token_extra_ids or input_token_extra_ids_file, \
+            "Input token extra ids must be provided when p-tuning and KV Cache reuse are both enabled"
+        batch_extra_ids = []
+        if input_token_extra_ids_file:
+            if input_token_extra_ids_file.endswith('.csv'):
+                with open(input_token_extra_ids_file, 'r') as csv_file:
+                    csv_reader = csv.reader(csv_file, delimiter=',')
+                    for line in csv_reader:
+                        extra_ids = [int(num) for num in line]
+                        batch_extra_ids.append(extra_ids[-max_input_length:])
+            elif input_token_extra_ids_file.endswith('.npy'):
+                inputs = np.load(input_token_extra_ids_file)
+                for extra_ids in inputs:
+                    batch_extra_ids.append(extra_ids[-max_input_length:])
+            else:
+                print('Input file format not supported.')
+                raise SystemExit
+        else:
+            batch_extra_ids.append(input_token_extra_ids)
+    return batch_extra_ids
 
 
 def print_output(tokenizer,
@@ -195,6 +246,7 @@ def print_output(tokenizer,
                              if num_return_sequences > 1 else
                              f'Text {batch_idx} Beam {beam}')
                 print(f'Output [{index_str}]: \"{output_text}\"')
+                logger.debug(str(outputs))
 
     output_ids = output_ids.reshape((-1, output_ids.size(2)))
 
@@ -323,6 +375,11 @@ def main(args):
             batch_input_ids, model_name, args.engine_dir,
             args.multimodal_input_file)
 
+    input_token_extra_ids = parse_input_token_extra_ids(
+        args.prompt_table_path, args.kv_cache_enable_block_reuse,
+        args.input_token_extra_ids, args.input_token_extra_ids_file,
+        args.max_input_length)
+
     input_lengths = [x.size(0) for x in decoder_input_ids
                      ] if is_enc_dec else [x.size(0) for x in batch_input_ids]
 
@@ -360,87 +417,117 @@ def main(args):
             "WARNING: using this option may increase network usage significantly (quadratically w.r.t output length)."
         )
         args.return_all_generated_tokens = True
-    runner_cls = ModelRunner if args.use_py_session else ModelRunnerCpp
-    runner_kwargs = dict(
-        engine_dir=args.engine_dir,
-        lora_dir=args.lora_dir,
-        rank=runtime_rank,
-        debug_mode=args.debug_mode,
-        lora_ckpt_source=args.lora_ckpt_source,
-        gpu_weights_percent=args.gpu_weights_percent,
-        max_output_len=args.max_output_len,
-    )
-    if not args.use_py_session:
-        runner_kwargs.update(is_enc_dec=is_enc_dec)
-    if args.medusa_choices is not None:
-        args.medusa_choices = ast.literal_eval(args.medusa_choices)
-        assert args.temperature == 1.0, "Medusa should use temperature == 1.0"
-        assert args.num_beams == 1, "Medusa should use num_beams == 1"
-        runner_kwargs.update(medusa_choices=args.medusa_choices)
-    if args.lookahead_config is not None:
-        args.lookahead_config = ast.literal_eval(args.lookahead_config)
-        assert len(
-            args.lookahead_config
-        ) == 3, "Lookahead needs [max_window_size, max_ngram_size, max_verification_set_size]"
-        runner_kwargs.update(lookahead_config=args.lookahead_config)
-    if not args.use_py_session:
+
+    logger.info(f"Using {'Python' if args.use_py_session else 'C++'} session")
+
+    if args.draft_target_model_config is not None or args.prompt_lookup_config is not None:
+        # Speculative-Decoding of Draft-Target-Model (DTM) and Prompt-Lookup-Decoding (PLD)
+        # If the parameters of `runner_kwargs` and `runner.generate()` in the "else" branch change, the same change should be done for `examples/prompt_lookup/run_dtm_pld.py`
+        assert args.kv_cache_enable_block_reuse, "`--kv_cache_enable_block_reuse` must be specified in speculative decoding."
+        assert not args.use_py_session, "`--use_py_session` is not supported in Speculative decoding."
+        assert not is_enc_dec, "Encoder-Decoder model is not supported in Speculative decoding."
+        assert args.num_beams == 1, "`--num_beams>1` is not supported in Speculative decoding."
+
+        outputs = run_dtm_pld(batch_input_ids, args, runtime_rank, end_id,
+                              pad_id, stop_words_list, bad_words_list,
+                              tokenizer.vocab_size)
+        if not args.streaming:  # Unpack runner from the return value in No-Streaming mode
+            outputs, runner = list(outputs)[0]
+
+    else:  # Normal run
+        runner_cls = ModelRunner if args.use_py_session else ModelRunnerCpp
+        runner_kwargs = dict(
+            engine_dir=args.engine_dir,
+            lora_dir=args.lora_dir,
+            rank=runtime_rank,
+            debug_mode=args.debug_mode,
+            lora_ckpt_source=args.lora_ckpt_source,
+            gpu_weights_percent=args.gpu_weights_percent,
+            max_output_len=args.max_output_len,
+        )
+        if args.medusa_choices is not None:
+            args.medusa_choices = ast.literal_eval(args.medusa_choices)
+            assert args.temperature == 1.0, "Medusa should use temperature == 1.0"
+            assert args.num_beams == 1, "Medusa should use num_beams == 1"
+            runner_kwargs.update(medusa_choices=args.medusa_choices)
+        if args.eagle_choices is not None or args.eagle_posterior_threshold is not None:
+            args.eagle_choices = ast.literal_eval(args.eagle_choices)
+            assert args.num_beams == 1, "Eagle should use num_beams == 1"
+            assert not args.use_py_session, "Eagle does not support py session"
+            runner_kwargs.update(eagle_choices=args.eagle_choices)
+            runner_kwargs.update(
+                eagle_posterior_threshold=args.eagle_posterior_threshold)
+        if args.lookahead_config is not None:
+            args.lookahead_config = ast.literal_eval(args.lookahead_config)
+            assert len(
+                args.lookahead_config
+            ) == 3, "Lookahead needs [max_window_size, max_ngram_size, max_verification_set_size]"
+            runner_kwargs.update(lookahead_config=args.lookahead_config)
+        if not args.use_py_session:
+            runner_kwargs.update(
+                is_enc_dec=is_enc_dec,
+                max_batch_size=len(batch_input_ids),
+                max_input_len=max(
+                    encoder_input_lengths if is_enc_dec else input_lengths),
+                max_beam_width=args.num_beams,
+                max_attention_window_size=args.max_attention_window_size,
+                sink_token_length=args.sink_token_length,
+                max_tokens_in_paged_kv_cache=args.max_tokens_in_paged_kv_cache,
+                kv_cache_enable_block_reuse=args.kv_cache_enable_block_reuse,
+                kv_cache_free_gpu_memory_fraction=args.
+                kv_cache_free_gpu_memory_fraction,
+                cross_kv_cache_fraction=args.cross_kv_cache_fraction
+                if is_enc_dec else None,
+                enable_chunked_context=args.enable_chunked_context,
+                multi_block_mode=args.multi_block_mode,
+                cuda_graph_mode=args.cuda_graph_mode)
         runner_kwargs.update(
-            max_batch_size=len(batch_input_ids),
-            max_input_len=max(
-                encoder_input_lengths if is_enc_dec else input_lengths),
-            max_beam_width=args.num_beams,
-            max_attention_window_size=args.max_attention_window_size,
-            sink_token_length=args.sink_token_length,
-            max_tokens_in_paged_kv_cache=args.max_tokens_in_paged_kv_cache,
-            kv_cache_enable_block_reuse=args.kv_cache_enable_block_reuse,
-            kv_cache_free_gpu_memory_fraction=args.
-            kv_cache_free_gpu_memory_fraction,
-            enable_chunked_context=args.enable_chunked_context,
-            multi_block_mode=args.multi_block_mode)
-    runner_kwargs.update(
-        enable_context_fmha_fp32_acc=args.enable_context_fmha_fp32_acc)
-    runner = runner_cls.from_dir(**runner_kwargs)
+            enable_context_fmha_fp32_acc=args.enable_context_fmha_fp32_acc)
+        runner = runner_cls.from_dir(**runner_kwargs)
 
-    with torch.no_grad():
-        outputs = runner.generate(
-            batch_input_ids=decoder_input_ids
-            if is_enc_dec else batch_input_ids,
-            encoder_input_ids=encoder_input_ids if is_enc_dec else None,
-            encoder_input_features=encoder_input_features
-            if is_enc_dec else None,
-            encoder_output_lengths=encoder_output_lengths
-            if is_enc_dec else None,
-            max_new_tokens=args.max_output_len,
-            max_attention_window_size=args.max_attention_window_size,
-            sink_token_length=args.sink_token_length,
-            end_id=end_id,
-            pad_id=pad_id,
-            temperature=args.temperature,
-            top_k=args.top_k,
-            top_p=args.top_p,
-            num_beams=args.num_beams,
-            num_return_sequences=args.num_return_sequences,
-            length_penalty=args.length_penalty,
-            early_stopping=args.early_stopping,
-            repetition_penalty=args.repetition_penalty,
-            presence_penalty=args.presence_penalty,
-            frequency_penalty=args.frequency_penalty,
-            stop_words_list=stop_words_list,
-            bad_words_list=bad_words_list,
-            output_cum_log_probs=(args.output_cum_log_probs_npy != None),
-            output_log_probs=(args.output_log_probs_npy != None),
-            random_seed=args.random_seed,
-            lora_uids=args.lora_task_uids,
-            prompt_table=args.prompt_table_path,
-            prompt_tasks=args.prompt_tasks,
-            streaming=args.streaming,
-            output_sequence_lengths=True,
-            no_repeat_ngram_size=args.no_repeat_ngram_size,
-            return_dict=True,
-            medusa_choices=args.medusa_choices,
-            return_all_generated_tokens=args.return_all_generated_tokens)
-        torch.cuda.synchronize()
+        with torch.no_grad():
+            outputs = runner.generate(
+                batch_input_ids=decoder_input_ids
+                if is_enc_dec else batch_input_ids,
+                encoder_input_ids=encoder_input_ids if is_enc_dec else None,
+                encoder_input_features=encoder_input_features
+                if is_enc_dec else None,
+                encoder_output_lengths=encoder_output_lengths
+                if is_enc_dec else None,
+                max_new_tokens=args.max_output_len,
+                max_attention_window_size=args.max_attention_window_size,
+                sink_token_length=args.sink_token_length,
+                end_id=end_id,
+                pad_id=pad_id,
+                temperature=args.temperature,
+                top_k=args.top_k,
+                top_p=args.top_p,
+                num_beams=args.num_beams,
+                num_return_sequences=args.num_return_sequences,
+                length_penalty=args.length_penalty,
+                early_stopping=args.early_stopping,
+                repetition_penalty=args.repetition_penalty,
+                presence_penalty=args.presence_penalty,
+                frequency_penalty=args.frequency_penalty,
+                stop_words_list=stop_words_list,
+                bad_words_list=bad_words_list,
+                output_cum_log_probs=(args.output_cum_log_probs_npy != None),
+                output_log_probs=(args.output_log_probs_npy != None),
+                random_seed=args.random_seed,
+                lora_uids=args.lora_task_uids,
+                prompt_table=args.prompt_table_path,
+                prompt_tasks=args.prompt_tasks,
+                streaming=args.streaming,
+                output_sequence_lengths=True,
+                no_repeat_ngram_size=args.no_repeat_ngram_size,
+                return_dict=True,
+                medusa_choices=args.medusa_choices,
+                eagle_choices=args.eagle_choices,
+                return_all_generated_tokens=args.return_all_generated_tokens,
+                input_token_extra_ids=input_token_extra_ids)
+            torch.cuda.synchronize()
 
+    # Receive output, print to screen or save to file
     if args.streaming:
         for curr_outputs in throttle_generator(outputs,
                                                args.streaming_interval):
@@ -494,7 +581,8 @@ def main(args):
                          output_cum_log_probs_npy=args.output_cum_log_probs_npy,
                          output_log_probs_npy=args.output_log_probs_npy)
 
-    if args.run_profiling:  # support profiling
+    # Profiling
+    if args.run_profiling:
         ite = 10
         # warmup
         for _ in range(ite):
@@ -527,8 +615,9 @@ def main(args):
                     streaming=args.streaming,
                     output_sequence_lengths=True,
                     return_dict=True,
-                    return_all_generated_tokens=args.return_all_generated_tokens
-                )
+                    return_all_generated_tokens=args.
+                    return_all_generated_tokens,
+                    input_token_extra_ids=input_token_extra_ids)
                 torch.cuda.synchronize()
 
         tensorrt_llm.profiler.start("tmp")
@@ -551,8 +640,8 @@ def main(args):
                     frequency_penalty=args.frequency_penalty,
                     stop_words_list=stop_words_list,
                     bad_words_list=bad_words_list,
-                    output_cum_log_probs=(args.output_cum_log_probs_npy !=
-                                          None),
+                    output_cum_log_probs=(args.output_cum_log_probs_npy
+                                          != None),
                     output_log_probs=(args.output_log_probs_npy != None),
                     random_seed=args.random_seed,
                     lora_uids=args.lora_task_uids,
@@ -561,8 +650,9 @@ def main(args):
                     streaming=args.streaming,
                     output_sequence_lengths=True,
                     return_dict=True,
-                    return_all_generated_tokens=args.return_all_generated_tokens
-                )
+                    return_all_generated_tokens=args.
+                    return_all_generated_tokens,
+                    input_token_extra_ids=input_token_extra_ids)
                 torch.cuda.synchronize()
         tensorrt_llm.profiler.stop("tmp")
 
