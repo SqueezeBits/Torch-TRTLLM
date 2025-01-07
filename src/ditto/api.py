@@ -29,7 +29,7 @@ from .types import BuiltInConstant, DeviceLikeType
 def trtllm_build(
     model: PreTrainedModel,
     *,
-    device: DeviceLikeType | None = None,
+    device: DeviceLikeType = DEFAULT_DEVICE,
     profile_config: TRTLLMOptimizationProfileConfig | None = None,
     lora_config: TRTLLMLoraConfig | None = None,
     plugin_config: TRTLLMPluginConfig | None = None,
@@ -39,7 +39,6 @@ def trtllm_build(
     debug_node_names: list[str] | None = None,
     engine_cache: BaseEngineCache | None = None,
 ) -> tuple[bytes, TRTLLMEngineConfig]:
-    device = _resolve_device(model, device)
     network_name = type(model).__name__
     model_dtype = model.config.torch_dtype
     plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model_dtype)
@@ -118,7 +117,7 @@ def trtllm_export(
     argument_hint: TRTLLMArgumentHint,
     dtype: torch.dtype,
     *,
-    device: DeviceLikeType | None = None,
+    device: DeviceLikeType = DEFAULT_DEVICE,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
     skipped_optimizers: list[PassName] | None = None,
@@ -126,7 +125,6 @@ def trtllm_export(
     enable_experimental_decompositions: bool = False,
 ) -> GraphModule:
     logger.debug("torch.exporting module")
-    device = _resolve_device(model, device)
     hints: dict[str, TensorTypeHint | BuiltInConstant] = {
         INPUT_IDS: argument_hint.batched_input_ids,
         "use_cache": False,
@@ -161,14 +159,3 @@ def trtllm_export(
     logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
     save_for_debug("graph_module", graph_module)
     return graph_module
-
-
-def _resolve_device(model: torch.nn.Module, device: DeviceLikeType | None) -> DeviceLikeType:
-    if device is not None:
-        model.to(device)
-        return device
-    try:
-        return next(iter(model.parameters())).device
-    except StopIteration:
-        logger.warning(f"The model has no parameter. Will set the device as {DEFAULT_DEVICE}")
-    return DEFAULT_DEVICE
