@@ -19,6 +19,7 @@ See [conda/README.md](./conda/README.md) for more details.
 
 ## Quick Start Guide
 ### 1. Install ditto
+Inside the docker container, run
 ```
 pip install /workspace/ditto
 ```
@@ -27,14 +28,15 @@ or, for editable install,
 pip install -e /workspace/ditto
 ```
 
+Similarly, if you're using a conda environment, just replace the path `/workspace/ditto` by your local repository path.
+
 ### 2. Build a TRT-LLM engine
 ```
 ditto build <model-id-or-hf-model-directory> --output-dir <engine-output-directory (optional)>
 ```
-For example,
-```
-ditto build meta-llama/Llama-2-7b-chat-hf --output-dir ./engines/meta-llama/Llama-2-7b-chat-hf
-```
+For example, the following commands are equivalent:
+* `ditto build meta-llama/Llama-2-7b-chat-hf`
+* `ditto build meta-llama/Llama-2-7b-chat-hf --output-dir ./engines/meta-llama/Llama-2-7b-chat-hf`
 
 #### Full Usage
 ```
