@@ -31,9 +31,9 @@ class UnsupportedDataTypeConversionError(TypeError):
     """Error indicating unsupported data type conversion between two different frameworks."""
 
 
-FromDataType = TypeVar("FromDataType", torch.dtype, trt.DataType, TensorProto.DataType, int)
-OtherDataType = TypeVar("OtherDataType", torch.dtype, trt.DataType, TensorProto.DataType, int)
-ToDataType = TypeVar("ToDataType", torch.dtype, trt.DataType, TensorProto.DataType, int)
+FromDataType = TypeVar("FromDataType", torch.dtype, trt.DataType, int)
+OtherDataType = TypeVar("OtherDataType", torch.dtype, trt.DataType, int)
+ToDataType = TypeVar("ToDataType", torch.dtype, trt.DataType, int)
 
 
 class DataType:
@@ -48,7 +48,7 @@ class DataType:
                 return cast(TensorProto.DataType, self.dtype)  # type: ignore[return-value]
         elif isinstance(self.dtype, data_type):
             return self.dtype
-        actual_type: type = int if data_type is TensorProto.DataType else data_type  # type: ignore[assignment]
+        actual_type: type = int if data_type is TensorProto.DataType else data_type
         assert (
             type_pair := (type(self.dtype), actual_type)
         ) in self.MAPPING, f"Conversion from {type_pair[0]} to {type_pair[1]} is not defined"
@@ -117,7 +117,7 @@ def trt_to_torch_dtype_mapping() -> dict[trt.DataType, torch.dtype]:
 
 
 @DataType.define_from
-def torch_to_onnx_dtype_mapping() -> dict[torch.dtype, TensorProto.DataType]:
+def torch_to_onnx_dtype_mapping() -> dict[torch.dtype, int]:
     """Create `torch.dtype` to `onnx.TensorProto.DataType` compatibility map.
 
     * Some of ONNX data types cannot be converted to PyTorch data types.
