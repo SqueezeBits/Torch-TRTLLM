@@ -90,7 +90,6 @@ def build(
     model_id: str,
     add_output: Annotated[list[str], Option(default_factory=list)],
     output_dir: str = "",
-    device: str = DEFAULT_DEVICE,
     dtype: str = "auto",
     verbose: bool = False,
     trust_remote_code: bool = False,
@@ -104,10 +103,10 @@ def build(
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             torch_dtype=get_model_dtype(dtype),
-            device_map=device,
+            device_map="auto",
             trust_remote_code=trust_remote_code,
         )
-    logger.info(f"device: {device} | dtype: {model.config.torch_dtype}")
+    logger.info(f"device: auto | dtype: {model.config.torch_dtype}")
 
     engine, config = trtllm_build(
         model,
