@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+from functools import partial
 from os.path import abspath, dirname
 from pathlib import Path
 from typing import List, Optional
@@ -24,7 +25,8 @@ import torch
 from transformers import AutoTokenizer, LlamaTokenizer, T5Tokenizer
 
 from tensorrt_llm._utils import supports_inflight_batching  # noqa
-from tensorrt_llm._utils import str_dtype_to_torch
+from tensorrt_llm._utils import (mpi_barrier, mpi_rank, mpi_world_size,
+                                 str_dtype_to_torch)
 from tensorrt_llm.builder import get_engine_version
 
 DEFAULT_HF_MODEL_DIRS = {
@@ -106,11 +108,12 @@ def throttle_generator(generator, stream_interval):
         yield out
 
 
-def load_tokenizer(tokenizer_dir: Optional[str] = None,
-                   vocab_file: Optional[str] = None,
-                   model_name: str = 'GPTForCausalLM',
-                   model_version: Optional[str] = None,
-                   tokenizer_type: Optional[str] = None):
+# Load tokenizer impl, it will be called in external wrapper to avoid loading tokenizer bug under MPI env.
+def _load_tokenizer(tokenizer_dir: Optional[str] = None,
+                    vocab_file: Optional[str] = None,
+                    model_name: str = 'GPTForCausalLM',
+                    model_version: Optional[str] = None,
+                    tokenizer_type: Optional[str] = None):
     if vocab_file is None:
         if 'whisper' in model_name.lower():
             tokenizer = AutoTokenizer.from_pretrained('openai/whisper-large-v3',
@@ -167,6 +170,22 @@ def load_tokenizer(tokenizer_dir: Optional[str] = None,
     return tokenizer, pad_id, end_id
 
 
+def load_tokenizer(tokenizer_dir: Optional[str] = None,
+                   vocab_file: Optional[str] = None,
+                   model_name: str = 'GPTForCausalLM',
+                   model_version: Optional[str] = None,
+                   tokenizer_type: Optional[str] = None):
+    func = partial(_load_tokenizer, tokenizer_dir, vocab_file, model_name,
+                   model_version, tokenizer_type)
+    if mpi_world_size() > 1:
+        # Under MPI env, load tokenizer will result in multiple processes to download the same file to the same folder.
+        # This will result some random bug. Force loading on rank0 to warmup the tokenizer to avoid this issue.
+        if mpi_rank() == 0:
+            func()
+        mpi_barrier()
+    return func()
+
+
 def prepare_enc_dec_inputs(batch_input_ids: List[torch.Tensor], model_name: str,
                            engine_dir: str,
                            multimodal_input_file: Optional[str]):
@@ -221,7 +240,7 @@ def add_common_args(parser):
     parser.add_argument('--num_return_sequences',
                         type=int,
                         help="Number of sequences to generate for each input.",
-                        default=1)
+                        default=None)
     parser.add_argument('--temperature', type=float, default=1.0)
     parser.add_argument('--top_k', type=int, default=1)
     parser.add_argument('--top_p', type=float, default=0.0)
@@ -289,7 +308,14 @@ def add_common_args(parser):
     parser.add_argument('--enable_context_fmha_fp32_acc',
                         action='store_true',
                         help="Enable FMHA runner FP32 accumulation.")
-    parser.add_argument('--log_level', type=str, default='info')
+    parser.add_argument('--cuda_graph_mode',
+                        action='store_true',
+                        help="Enable cuda graphs in the inference.")
+    parser.add_argument(
+        '--log_level',
+        type=str,
+        choices=['verbose', 'info', 'warning', 'error', 'internal_error'],
+        default='info')
     parser.add_argument(
         '--no_prompt_template',
         dest='use_prompt_template',
@@ -341,18 +367,47 @@ def add_common_args(parser):
         " For example, '--num_prepend_vtokens=10' will prepend the tokens"
         " [vocab_size, vocab_size + 1, ..., vocab_size + 9] to the sentence.")
     parser.add_argument(
+        '--draft_target_model_config',
+        type=str,
+        default=None,
+        help=
+        "Configuration of Draft-Target-Model decoding, see `examples/draft_target_model/README.md` for more information."
+        "   E.g.: [4, [0], [1], False] for [draft_len, draft_model_device_list, target_model_device_list, use_logits]."
+    )
+    parser.add_argument(
+        '--prompt_lookup_config',
+        type=str,
+        default=None,
+        help=
+        "Configuration of Prompt-Lookup decoding, see `examples/prompt_lookup/README.md` for more information."
+        "   E.g.: [10,2,[0]] for [prompt_lookup_num_tokens, max_matching_ngram_size, device_list].",
+    )
+    parser.add_argument(
         '--medusa_choices',
         type=str,
         default=None,
-        help="Medusa choice to use, if not none, will use Medusa decoding."
+        help="Configuration of Medusa decoding."
         "   E.g.: [[0, 0, 0, 0], [0, 1, 0], [1, 0], [1, 1]] for 9 medusa tokens."
     )
+    parser.add_argument(
+        '--eagle_choices',
+        type=str,
+        default=None,
+        help="Configuration of Eagle-1 decoding."
+        "   E.g.: [[0, 0, 0, 0], [0, 1, 0], [1, 0], [1, 1]] for 9 draft tokens."
+    )
+    parser.add_argument(
+        '--eagle_posterior_threshold',
+        type=float,
+        default=None,
+        help="Minimum token probability threshold for typical acceptance. "
+        "Enables typical acceptance in Eagle. "
+        "Corresponds to epsilon in https://arxiv.org/pdf/2401.10774.")
     parser.add_argument(
         '--lookahead_config',
         type=str,
         default=None,
-        help=
-        "executor and request lookahead config to use, if not none, will use lookahead decoding."
+        help="Configuration of executor and request lookahead decoding."
         "   E.g.: [5, 6, 7] for [max_window_size, max_ngram_size, max_verification_set_size]."
     )
     # model arguments
@@ -401,6 +456,13 @@ def add_common_args(parser):
         default=0.9,
         type=float,
         help='Specify the free gpu memory fraction.',
+    )
+    parser.add_argument(
+        '--cross_kv_cache_fraction',
+        default=0.5,
+        type=float,
+        help=
+        'Specify the kv cache fraction reserved for cross attention. Only applicable for encoder-decoder models. By default 0.5 for self and 0.5 for cross.',
     )
     parser.add_argument(
         '--enable_chunked_context',
