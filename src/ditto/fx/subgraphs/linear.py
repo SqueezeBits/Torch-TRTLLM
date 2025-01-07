@@ -82,21 +82,3 @@ class Linear(Subgraph):
         if bias_add is not None and bias_add.bias.parameter.shape[-1] != weight_matmul.weight.parameter.shape[-1]:
             bias_add = None
         return cls(weight_matmul=weight_matmul, bias_add=bias_add)
-
-    # @classmethod
-    # def configure_from(cls, node: Node) -> Self | None:
-    #     if (
-    #         (mm := MM.specialize_from(node))
-    #         and len(mm.users) == 1
-    #     ):
-    #         Add.specialize_from([*node.users][0])
-    #         return cls(
-    #             mm_const=mm_const,
-    #             input_reshape=input_reshape,
-    #             output_add_or_reshape=output_add_or_reshape,
-    #         )
-    #     return None
-
-    # @property
-    # def input_node(self) -> Node:
-    #     return self.input_reshape.this
