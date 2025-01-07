@@ -31,7 +31,7 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
 
     def create_variable(node: Node, name: str | None = None) -> gs.Variable:
         shape: tuple[int | str, ...] | None = None
-        dtype: TensorProto.DataType | None = None
+        dtype: int | None = None
         if meta := get_tensor_metadata(node):
             shape = tuple(str(s) if isinstance(s, torch.SymInt) else s for s in meta.shape)
             dtype = DataType(meta.dtype).to(TensorProto.DataType)
@@ -41,7 +41,7 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
         node: Node,
         target: str,
         *,
-        param: torch.nn.Parameter | None = None,
+        param: torch.nn.Parameter | torch.Tensor | None = None,
     ) -> gs.Tensor:
         if target in tensors:
             return tensors[target]

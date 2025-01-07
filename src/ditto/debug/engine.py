@@ -12,7 +12,7 @@ import tensorrt as trt
 import torch
 from loguru import logger
 from onnx import TensorProto
-from pydantic import model_serializer, model_validator
+from pydantic import Field, model_serializer, model_validator
 from typing_extensions import Self
 
 from ..types import DataType, StrictlyTyped
@@ -23,7 +23,7 @@ class EngineComponent(StrictlyTyped):
     model_config = {"extra": "allow"}
     KEY_MAP: ClassVar[dict[str, str]] = {}
 
-    attributes: dict[str, Any] | None = None
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
@@ -49,6 +49,8 @@ class EngineComponent(StrictlyTyped):
             ):
                 if value == "BFloat16":
                     value = "Bf16"
+                elif value == "N/A due to dynamic shapes":
+                    return _name, None
                 return _name, members[value.upper()]
             if _type is trt.Dims and isinstance(value, list):
                 return _name, trt.Dims(value)
@@ -92,22 +94,22 @@ class ETensor(NamedEngineComponent):
         "Dimensions": "shape",
     }
     shape: trt.Dims
-    dtype: trt.DataType
+    dtype: trt.DataType | None
     location: trt.TensorLocation | None = None
 
     @classmethod
     @cache
-    def get_none(cls) -> Self:
+    def make_none(cls) -> Self:
         return cls(
             name="None",
             shape=trt.Dims(),
-            dtype=trt.DataType.BOOL,
+            dtype=None,
         )
 
     @classmethod
     def from_tensor(cls, tensor: trt.ITensor | None) -> Self:
         if tensor is None:
-            return cls.get_none()
+            return cls.make_none()
         return cls(
             name=tensor.name,
             shape=tensor.shape,
@@ -117,7 +119,8 @@ class ETensor(NamedEngineComponent):
 
     def __str__(self) -> str:
         loc = f"@{self.location.name.lower()}" if self.location else ""
-        return f"{self.name}: {self.dtype.name.lower()}{[*self.shape,]}{loc}"
+        dtype = "unknown" if self.dtype is None else self.dtype.name.lower()
+        return f"{self.name}: {dtype}{[*self.shape,]}{loc}"
 
 
 class ELayer(NamedEngineComponent):
@@ -189,7 +192,7 @@ class EngineInfo(EngineComponent):
             name = get_tensor_key(t)
             tensors[name] = gs.Variable(
                 name=name,
-                dtype=DataType(t.dtype).to(TensorProto.DataType),
+                dtype=None if t.dtype is None else DataType(t.dtype).to(TensorProto.DataType),
                 shape=(*t.shape,),
             )
             if t.name in redefinition_counts:
@@ -206,11 +209,18 @@ class EngineInfo(EngineComponent):
                 redefinition_counts[t.name] = count = redefinition_counts.get(t.name, 0) + 1
                 logger.trace(f"Redefined {count} times: {t}")
             name = get_tensor_key(t)
-            tensors[name] = make_constant(
-                name,
-                shape=(*t.shape,),
-                dtype=DataType(t.dtype).to(torch.dtype),
-            )
+            if t.dtype is None:
+                tensors[name] = gs.Variable(
+                    name=name,
+                    dtype=None,
+                    shape=(*t.shape,),
+                )
+            else:
+                tensors[name] = make_constant(
+                    name,
+                    shape=(*t.shape,),
+                    dtype=DataType(t.dtype).to(torch.dtype),
+                )
 
         def add_as_node(l: ELayer) -> None:  # noqa: E741
             assert l.name not in nodes
