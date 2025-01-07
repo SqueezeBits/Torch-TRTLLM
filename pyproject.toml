@@ -20,7 +20,6 @@ version = "0.0.0"
 
 [tool.poetry.dependencies]
 python = ">=3.10"
-pycuda = ">=2024"
 pydantic = "*"
 torch = ">=2.3.0"
 transformers = ">=4.40.0"
