@@ -1,4 +1,0 @@
-pydantic
-torch>=2.3.0
-transformers>=4.40.0
-typer
