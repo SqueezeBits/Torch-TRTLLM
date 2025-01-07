@@ -50,14 +50,3 @@ def make_lazy_values(name: str, tensor: torch.Tensor) -> LazyValues:
         data_type=DataType(tensor.dtype).to(TensorProto.DataType),
     )
     return LazyValues(tensor_proto)
-
-
-def make_attribute(name: str, tensor: torch.Tensor) -> TensorProto:
-    buf = (c_char * tensor.nbytes).from_address(tensor.data_ptr())
-    return make_tensor(
-        name=name,
-        data_type=DataType(tensor.dtype).to(TensorProto.DataType),
-        dims=(*tensor.shape,),
-        vals=buf.raw,
-        raw=True,
-    )
