@@ -30,13 +30,12 @@ RUN rm /usr/lib/python${PYTHON_MAJOR_VERSION}.${PYTHON_MINOR_VERSION}/EXTERNALLY
 RUN wget -q https://github.com/bazelbuild/bazelisk/releases/download/v1.17.0/bazelisk-linux-amd64 -O /usr/bin/bazel && \
     chmod a+x /usr/bin/bazel
 
-ARG PYTORCH_VERSION="2.6.0.*"
+ARG PYTORCH_VERSION="2.5.1"
 RUN mkdir -p /root/.cache/pip /root/.cache/ccache /root/.cache/bazel
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --pre torch==${PYTORCH_VERSION} torchvision 'numpy<2' \
-    --extra-index-url https://download.pytorch.org/whl/nightly/cu126
-RUN --mount=type=cache,target=/root/.cache/pip \
     pip install \
+    --extra-index-url https://download.pytorch.org/whl/cu126 \
+    torch==${PYTORCH_VERSION} torchvision 'numpy<2' \
     "accelerate>=0.25.0" "diffusers>=0.27.0" h5py==3.12.1 "nvidia-modelopt[torch]~=0.21.0" "onnx>=1.12.0" \
     "onnx_graphsurgeon>=0.5.2" "openai==1.54.3" "pynvml>=11.5.0" "sentencepiece>=0.1.99" \
     "transformers<=4.45.1,>=4.38.2" pillow==10.3.0 pybind11 \
