@@ -13,6 +13,7 @@ from transformers import (
 from typer import Option, Typer
 
 from .api import trtllm_build
+from .configs import TRTLLMMapping
 from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
 from .contexts import disable_torch_jit_state
 from .types import trt_to_torch_dtype_mapping
@@ -91,6 +92,7 @@ def build(
     add_output: Annotated[list[str], Option(default_factory=list)],
     output_dir: str = "",
     dtype: str = "auto",
+    tp_size: int = 1,
     verbose: bool = False,
     trust_remote_code: bool = False,
     run_matmuls_in_fp32: bool = False,
@@ -110,6 +112,7 @@ def build(
 
     engine, config = trtllm_build(
         model,
+        mapping=TRTLLMMapping(tp_size=tp_size),
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         debug_node_names=add_output,
