@@ -26,7 +26,11 @@ def convert(
     output_names: list[str] | None = None,
 ) -> bytes:
     """Convert an graph module to a TensorRT engine."""
-    input_specs = tuple(tensor_type_hint.as_spec(name) for name, tensor_type_hint in argument_hint.as_dict().items())
+    input_specs = tuple(
+        tensor_type_hint.as_spec(name)
+        for name, tensor_type_hint in argument_hint.as_dict().items()
+        if tensor_type_hint is not None
+    )
     logger.opt(lazy=True).debug("input_specs:\n{x}", x=lambda: "\n".join(str(spec) for spec in input_specs))
 
     try:
