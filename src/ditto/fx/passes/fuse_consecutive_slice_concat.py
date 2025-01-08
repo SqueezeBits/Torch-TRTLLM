@@ -10,11 +10,11 @@ class FuseConsecutiveSliceConcat(NodewiseOptimizationPass):
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
-            (cat_node := Cat.specialize_from(node))
-            and (slice_nodes := [s for x in cat_node.tensors if (s := Slice.specialize_from(x))])
-            and len(slice_nodes) == len(cat_node.tensors)
-            and has_same_values(slice_nodes[0].nonnegative_dim, cat_node.nonnegative_dim)
-            and Slice.are_consecutive(slice_nodes)
+            (cat := Cat.specialize_from(node))
+            and (slices := Slice.sort([s for x in cat.tensors if (s := Slice.specialize_from(x))]))
+            and len(slices) == len(cat.tensors)
+            and has_same_values(slices[0].nonnegative_dim, cat.nonnegative_dim)
+            and Slice.are_consecutive(slices)
         ):
             return {}
-        return {cat_node.node: ReplaceAllUses(by=slice_nodes[0].this)}
+        return {cat.node: ReplaceAllUses(by=slices[0].this)}
