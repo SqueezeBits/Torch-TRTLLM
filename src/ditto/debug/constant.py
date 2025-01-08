@@ -1,10 +1,8 @@
-from ctypes import c_char
 from typing import overload
 
 import onnx_graphsurgeon as gs
 import torch
 from onnx import TensorProto
-from onnx.helper import make_tensor
 from onnx_graphsurgeon.ir.tensor import LazyValues
 
 from ..types import DataType
