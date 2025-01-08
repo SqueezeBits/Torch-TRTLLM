@@ -7,6 +7,7 @@ from .configs import (
     DTypeLiteral,
     TRTLLMBuildConfig,
     TRTLLMEngineConfig,
+    TRTLLMMapping,
     TRTLLMModelConfig,
     TRTLLMOptimizationProfileConfig,
     TRTLLMPretrainedConfig,
@@ -23,12 +24,14 @@ def generate_trtllm_engine_config(
     graph_module: GraphModule,
     profile_config: TRTLLMOptimizationProfileConfig,
     model_config: TRTLLMModelConfig,
+    mapping: TRTLLMMapping,
     *,
     architecture: str | None = None,
 ) -> TRTLLMEngineConfig:
     return TRTLLMEngineConfig(
         pretrained_config=generate_trtllm_pretrained_config(
             graph_module,
+            mapping,
             architecture=architecture,
         ),
         build_config=TRTLLMBuildConfig.merge(profile_config, model_config),
@@ -37,6 +40,7 @@ def generate_trtllm_engine_config(
 
 def generate_trtllm_pretrained_config(
     graph_module: GraphModule,
+    mapping: TRTLLMMapping,
     *,
     architecture: str | None = None,
 ) -> TRTLLMPretrainedConfig:
@@ -46,6 +50,7 @@ def generate_trtllm_pretrained_config(
         architecture=architecture or "UnknownLanguageModel",
         vocab_size=vocab_size,
         hidden_size=hidden_size,
+        mapping=mapping,
     )
     if "qwen" in pretrained_config.architecture.lower() and isinstance(
         hf_config := graph_module.meta.get("pretrained_config"), PretrainedConfig
@@ -76,6 +81,7 @@ def generate_and_validate_configs(
     vocab_size: int,
     hidden_size: int,
     architecture: str,
+    mapping: TRTLLMMapping,
 ) -> TRTLLMPretrainedConfig:
     if (num_hidden_layers := len(plugins)) == 0:
         raise PretrainedConfigGenerationError("No GPTAttentionPlugin nodes found")
@@ -88,6 +94,7 @@ def generate_and_validate_configs(
         hidden_size=hidden_size,
         architecture=architecture,
         num_hidden_layers=num_hidden_layers,
+        mapping=mapping,
     )
 
     for i, other_plugin in enumerate(other_plugins):
@@ -99,6 +106,7 @@ def generate_and_validate_configs(
             hidden_size=hidden_size,
             architecture=architecture,
             num_hidden_layers=num_hidden_layers,
+            mapping=mapping,
         )
         if config != other_config:
             raise PretrainedConfigGenerationError(
@@ -117,6 +125,7 @@ def generate_config(
     hidden_size: int,
     architecture: str,
     num_hidden_layers: int,
+    mapping: TRTLLMMapping,
 ) -> TRTLLMPretrainedConfig:
     if plugin_idx != plugin.layer_idx:
         raise PretrainedConfigGenerationError(f"Expected layer_idx={plugin_idx} but got {plugin.layer_idx=}")
@@ -136,8 +145,7 @@ def generate_config(
         num_hidden_layers=num_hidden_layers,
         num_attention_heads=plugin.num_heads,
         num_key_value_heads=plugin.num_kv_heads,
-        # TODO: fill in appropriate values in the mapping when TP and PP are supported.
-        # mapping=TRTLLMMapping(...),
+        mapping=mapping,
         # TODO: fill in appropriate values in the quantization when quantization are supported.
         # quantization=TRTLLMQuantConfig(...),
     )

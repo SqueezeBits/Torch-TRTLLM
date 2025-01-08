@@ -13,6 +13,7 @@ from .configs import (
     TensorRTConfig,
     TRTLLMEngineConfig,
     TRTLLMLoraConfig,
+    TRTLLMMapping,
     TRTLLMModelConfig,
     TRTLLMOptimizationProfileConfig,
     TRTLLMPluginConfig,
@@ -31,6 +32,7 @@ def trtllm_build(
     *,
     device: DeviceLikeType = DEFAULT_DEVICE,
     profile_config: TRTLLMOptimizationProfileConfig | None = None,
+    mapping: TRTLLMMapping | None = None,
     lora_config: TRTLLMLoraConfig | None = None,
     plugin_config: TRTLLMPluginConfig | None = None,
     trt_config: TensorRTConfig | None = None,
@@ -41,6 +43,7 @@ def trtllm_build(
 ) -> tuple[bytes, TRTLLMEngineConfig]:
     network_name = type(model).__name__
     model_dtype = model.config.torch_dtype
+    mapping = mapping or TRTLLMMapping()
     plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model_dtype)
     profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(model.config, plugin_config)
     argument_hint = TRTLLMArgumentHint.configure(profile_config)
@@ -64,6 +67,7 @@ def trtllm_build(
             lora_config=lora_config or TRTLLMLoraConfig(),
             plugin_config=plugin_config,
         ),
+        mapping,
         architecture=network_name,
     )
 
