@@ -16,9 +16,10 @@ class TRTLLMArgumentHint(StrictlyTyped):
     beam_width: DynamicDimensionType | int = Field(frozen=True, exclude=True)
     attention_window_size: DynamicDimensionType = Field(frozen=True, exclude=True)
     num_attn_layers: int | None = Field(default=None, exclude=True, ge=0)
+    tp_size: int = Field(default=1, exclude=True, gt=0)
 
     @classmethod
-    def configure(cls, profile_config: TRTLLMOptimizationProfileConfig) -> Self:
+    def configure(cls, profile_config: TRTLLMOptimizationProfileConfig, *, tp_size: int = 1) -> Self:
         batch_size = DynamicDimension(
             name="batch_size",
             min=1,
@@ -57,10 +58,11 @@ class TRTLLMArgumentHint(StrictlyTyped):
             kv_cache_block_size=kv_cache_block_size,
             beam_width=beam_width,
             attention_window_size=attention_window_size,
+            tp_size=tp_size,
         )
 
-    def as_dict(self) -> dict[str, TensorTypeHint]:
-        return TypeAdapter(dict[str, TensorTypeHint]).validate_python(self.model_dump())
+    def as_dict(self) -> dict[str, TensorTypeHint | None]:
+        return TypeAdapter(dict[str, TensorTypeHint | None]).validate_python(self.model_dump())
 
     @property
     def batched_input_ids(self) -> TensorTypeHint:
@@ -157,3 +159,13 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @property
     def host_context_progress(self) -> TensorTypeHint:
         return TensorTypeHint(shape=(1,), dtype=torch.int64)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def all_reduce_workspace(self) -> TensorTypeHint | None:
+        if self.tp_size == 1:
+            return None
+        pointers_per_rank = 7
+        pointers_of_counter = 2
+        workspace_size = pointers_per_rank * self.tp_size + pointers_of_counter
+        return TensorTypeHint(shape=(workspace_size,), dtype=torch.int64)

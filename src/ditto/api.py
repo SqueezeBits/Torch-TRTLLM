@@ -46,7 +46,7 @@ def trtllm_build(
     mapping = mapping or TRTLLMMapping()
     plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model_dtype)
     profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(model.config, plugin_config)
-    argument_hint = TRTLLMArgumentHint.configure(profile_config)
+    argument_hint = TRTLLMArgumentHint.configure(profile_config, tp_size=mapping.tp_size)
 
     logger.info("Exporting the model into graph module")
     graph_module = trtllm_export(
