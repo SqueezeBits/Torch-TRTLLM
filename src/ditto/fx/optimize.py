@@ -10,6 +10,7 @@ from .passes import (
     AddTRTLLMInputs,
     CanonicalizeCopy,
     CastMMToFP32,
+    ConstantFolding,
     DecomposeAddMM,
     DeferUnsqueeze,
     EliminateNopCatOrStack,
@@ -77,6 +78,15 @@ def get_optimization_transform(
 
 
 def compose(*transforms: Callable[[GraphModule], GraphModule]) -> Callable[[GraphModule], GraphModule]:
+    """Compose multiple transforms into a single transform.
+
+    Args:
+        *transforms: The transforms to compose
+
+    Returns:
+        A function that applies all the given transforms to a graph module
+    """
+
     def composed_transform(graph_module: GraphModule) -> GraphModule:
         for transform in transforms:
             graph_module = transform(graph_module)
@@ -101,6 +111,7 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     HerdConstantsToTheRight,
     ReplaceViewByReshape,
     DecomposeAddMM,
+    FuseLinearSiblings,
 )
 
 # passes required after the TRT-LLM conversion passes
@@ -122,14 +133,26 @@ def get_trtllm_conversion_transform(
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
 ) -> Callable[[GraphModule], GraphModule]:
+    """Create a transform that converts a graph module to TensorRT-LLM compatible format.
+
+    Args:
+        argument_hint: Type hints for TRTLLM inputs
+        dtype: Data type for plugins
+        skipped_optimizers: Names of optimization passes to skip
+        run_matmuls_in_fp32: Whether to run matrix multiplications in FP32
+        run_activations_in_model_dtype: Whether to run activations in model dtype
+
+    Returns:
+        A function that applies TRT-LLM conversion passes to a graph module
+    """
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
+        ConstantFolding,
         AddTRTLLMInputs(argument_hint=argument_hint),
         SwapUnsqueezeWithSymSizeInt,  # required for `InsertGatherLastTokenIds`
         InsertGatherLastTokenIds,
         WrapSDPASubgraphs,
         WrapRoPESubgraphs,
         ReplaceSDPAByFakeGPTAttentionPlugin(dtype=dtype),
-        FuseLinearSiblings,
         ReplaceMMByFakeGemmPlugin,
     ]
 
@@ -150,6 +173,14 @@ def get_trtllm_conversion_transform(
 def get_level1_transform(
     skipped_optimizers: list[PassName] | None = None,
 ) -> Callable[[GraphModule], GraphModule]:
+    """Create a transform that applies level 1 optimization passes.
+
+    Args:
+        skipped_optimizers: Names of optimization passes to skip
+
+    Returns:
+        A function that applies level 1 optimization passes to a graph module
+    """
     return get_transform(
         *LEVEL1_PASSES,
         skipped_optimizers=skipped_optimizers,
@@ -159,6 +190,14 @@ def get_level1_transform(
 def get_level2_transform(
     skipped_optimizers: list[PassName] | None = None,
 ) -> Callable[[GraphModule], GraphModule]:
+    """Create a transform that applies level 2 optimization passes.
+
+    Args:
+        skipped_optimizers: Names of optimization passes to skip
+
+    Returns:
+        A function that applies level 2 optimization passes to a graph module
+    """
     return get_transform(
         *LEVEL1_PASSES,
         *LEVEL2_PASSES,
