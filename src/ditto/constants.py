@@ -45,6 +45,9 @@ PassName = Literal[
 DEBUG_ARTIFACTS_DIR: str | None = os.getenv("DEBUG_ARTIFACTS_DIR", None)
 """The directory to save the debug artifacts such as graph module code."""
 
+DEBUG_TENSOR_CHUNK_SIZE: int = int(os.getenv("DEBUG_TENSOR_CHUNK_SIZE", "10"))
+"""The number of first/middle/last element values to save for each constant tensor when creating debug artifacts."""
+
 DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 """
 The default device for the PyTorch modules and tensors.
@@ -75,6 +78,7 @@ except KeyError as e:
     ) from e
 
 DISABLE_TRANSFORMER_PATCHES: bool = os.getenv("DISABLE_TRANSFORMER_PATCHES", "0") == "1"
+"""Whether to disable the patches for the transformers package."""
 
 FX_TRANSFORM_MAXIMUM_ITERATION = int(os.getenv("FX_TRANSFORM_MAXIMUM_ITERATION", "100"))
 """Maximum iteration limit for FX graph transformations."""

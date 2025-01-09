@@ -12,9 +12,10 @@ from torch._ops import OpOverload
 from torch.fx import GraphModule, Node
 from torch.fx.node import Argument, Target
 
+from ..constants import DEBUG_TENSOR_CHUNK_SIZE
 from ..fx.utils import get_tensor_metadata
 from ..types import DataType
-from .constant import make_attribute, make_constant
+from .constant import make_constant
 
 
 def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
@@ -96,21 +97,20 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
                 param = graph_module.get_buffer(target)
             tensors[target] = create_constant(node, target, param=param)
             if param is not None:
+                param = param.flatten()
                 for user in node.users:
-                    if (numel := param.numel()) > 30:
-                        param = param.flatten()
+                    if (numel := param.numel()) > 3 * DEBUG_TENSOR_CHUNK_SIZE:
                         user.meta.update(
                             {
-                                attr_name: make_attribute(attr_name, param_chunk)
-                                for attr_name, param_chunk in {
-                                    f"{node.name}_first_10_elements": param[:10],
-                                    f"{node.name}_middle_10_elements": param[numel // 2 - 5 : numel // 2 + 5],
-                                    f"{node.name}_last_10_elements": param[-10:],
-                                }.items()
+                                f"{node.name}_first": param[:DEBUG_TENSOR_CHUNK_SIZE].tolist(),
+                                f"{node.name}_middle": param[
+                                    (numel - DEBUG_TENSOR_CHUNK_SIZE) // 2:(numel + DEBUG_TENSOR_CHUNK_SIZE) // 2
+                                ].tolist(),
+                                f"{node.name}_last": param[-DEBUG_TENSOR_CHUNK_SIZE:].tolist(),
                             }
                         )
                     else:
-                        user.meta.update({node.name: make_attribute(node.name, param)})
+                        user.meta.update({node.name: param.tolist()})
         elif node.op in ("call_function", "call_module", "call_method"):
             if is_multi_output_getitem(node):
                 continue
@@ -208,10 +208,13 @@ def get_target_name(
             return target
 
 
-AllowedMetaDataType = int | float | bool | str | list[str] | TensorProto
+AllowedMetaDataType = int | float | bool | str | list[str] | list[float] | list[int] | list[bool] | TensorProto
 
 
 def process_metadata(meta: dict[str, Any]) -> dict[str, AllowedMetaDataType]:
+    def _is_homogeneous(seq: list | tuple) -> bool:
+        return len(seq) < 2 or all(type(x) is type(seq[0]) for x in seq[1:])
+
     def _impl(v: Any) -> AllowedMetaDataType:
         if isinstance(v, torch.Tensor):
             shape = (*v.shape,)
@@ -222,6 +225,8 @@ def process_metadata(meta: dict[str, Any]) -> dict[str, AllowedMetaDataType]:
         if isinstance(v, dict):
             return [f"{key}: {val}" for key, val in v.items()]
         if isinstance(v, list | tuple):
+            if _is_homogeneous(v) and v and isinstance(v[0], int | float | bool | str):
+                return list(v)
             return [str(x) for x in v]
         if isinstance(v, TensorProto):
             return v

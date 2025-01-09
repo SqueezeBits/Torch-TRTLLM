@@ -25,13 +25,24 @@ from .plugin_field_types import PLUGIN_FIELD_TYPES
 
 
 class Llama3ScalingConfig(StrictlyTyped):
+    """Configuration for Llama 3's RoPE scaling parameters.
+
+    Contains scaling factors for position embeddings used in Llama 3's attention mechanism.
+    """
+
     factor: float = 8.0
     low_freq_factor: float = 1.0
     high_freq_factor: float = 4.0
     original_max_position_embeddings: int = 8192
 
 
+# pylint: disable-next=too-many-instance-attributes
 class ROPEConfig(StrictlyTyped):
+    """Configuration for RoPE (Rotary Position Embedding) parameters.
+
+    Contains parameters for RoPE used in the attention mechanism.
+    """
+
     position_embedding_type: PositionEmbeddingType = PositionEmbeddingType.learned_absolute
     rotary_embedding_dim: int = 0
     rotary_embedding_base: float = 10000.0
@@ -45,6 +56,7 @@ class ROPEConfig(StrictlyTyped):
 
     @property
     def is_rope(self) -> bool:
+        """Check if the RoPE configuration is valid."""
         return self.position_embedding_type.is_rope() and self.rotary_embedding_dim != 0
 
     @classmethod
@@ -54,6 +66,31 @@ class ROPEConfig(StrictlyTyped):
         positional_embedding_type: PositionEmbeddingType | None = None,
         embedding_dim: int | None = None,
     ) -> Self:
+        """Create a RoPE configuration from a HuggingFace pretrained model configuration.
+
+        This method extracts RoPE (Rotary Position Embedding) parameters from a HuggingFace
+        pretrained model configuration and creates a corresponding ROPEConfig object.
+
+        Args:
+            pretrained_config: HuggingFace pretrained model configuration object. If None,
+                default values will be used.
+            positional_embedding_type: Override the position embedding type. If None, uses
+                the type from pretrained_config.
+            embedding_dim: Override the embedding dimension. If None, uses the dimension
+                from pretrained_config.
+
+        Returns:
+            A ROPEConfig object initialized with parameters from the pretrained config,
+            with any provided overrides applied.
+
+        The method extracts the following parameters if available:
+            - rope_theta: Base value for rotary embeddings
+            - max_position_embeddings: Maximum sequence length
+            - rope_scaling: Dictionary containing scaling parameters including:
+                - factor: Scaling factor for rotary embeddings
+                - type/rope_type: Type of rotary scaling to apply
+                - Additional parameters for Llama3 scaling
+        """
         rope_config = cls()
         rope_config.rotary_embedding_base = lookup_attributes(
             pretrained_config,
@@ -69,6 +106,7 @@ class ROPEConfig(StrictlyTyped):
             pretrained_config,
             "rope_scaling",
             default={},
+            not_found_ok=True,
         )
         if rope_scaling:
             rope_config.rotary_embedding_scale = rope_scaling.get("factor", rope_config.rotary_embedding_scale)
@@ -84,6 +122,13 @@ class ROPEConfig(StrictlyTyped):
         return rope_config
 
     def compute_rope_constants(self) -> tuple[np.ndarray, np.ndarray]:
+        """Compute RoPE constants for attention plugin.
+
+        Returns:
+            A tuple containing:
+            - rotary_inv_freq: Inverse frequency tensor for RoPE
+            - embed_positions: Pre-computed position embeddings
+        """
         # TODO: replace this by `Attention.create_attention_const_params`
         rotary_inv_freq, embed_positions = RopeEmbeddingUtils.create_sinusoidal_positions_for_attention_plugin(
             self.rotary_embedding_max_positions,
@@ -111,20 +156,43 @@ class ROPEConfig(StrictlyTyped):
 T = TypeVar("T")
 
 
-def lookup_attributes(pretrained_config: PretrainedConfig | None, *names: str, default: T) -> T:
+def lookup_attributes(
+    pretrained_config: PretrainedConfig | None,
+    *names: str,
+    default: T,
+    not_found_ok: bool = False,
+) -> T:
+    """Look up attributes from a pretrained config, falling back to default if not found.
+
+    Args:
+        pretrained_config: Config object to look up attributes from
+        *names: Attribute names to search for
+        default: Default value to return if attributes not found
+        not_found_ok: If True, suppress warning when attributes not found
+
+    Returns:
+        Found attribute value or default if not found
+    """
     if pretrained_config is None:
         return default
     for name in names:
         if hasattr(pretrained_config, name):
             return getattr(pretrained_config, name)
-    logger.warning(
-        "None of the following attributes are found in pretrained config. "
-        f"Will use the default value {default}: {', '.join(names)}"
-    )
+    if not not_found_ok:
+        logger.warning(
+            "None of the following attributes are found in pretrained config. "
+            f"Will use the default value {default}: {', '.join(names)}"
+        )
     return default
 
 
 class GPTAttentionPluginFields(StrictlyTyped):
+    """Configuration fields for GPT attention plugin.
+
+    Contains all the parameters needed to configure the GPT attention plugin,
+    including attention dimensions, RoPE settings, and various optimization flags.
+    """
+
     # the order of the attributes does matter!
     layer_idx: int
     num_heads: int
@@ -185,6 +253,12 @@ class GPTAttentionPluginFields(StrictlyTyped):
     use_logn_scaling: bool = False
 
     def get_plugin_fields(self) -> list[trt.PluginField]:
+        """Convert configuration fields to TensorRT plugin fields.
+
+        Returns:
+            List of TensorRT plugin fields with appropriate data types
+        """
+
         def convert_to_plugin_field(name: str, value: Any) -> trt.PluginField:
             dtype: type[np.number]
             if name in ("use_cache", "mask_type", "paged_kv_cache") or (
@@ -206,6 +280,12 @@ class GPTAttentionPluginFields(StrictlyTyped):
 
 
 class GPTAttentionPluginInputs(StrictlyTyped):
+    """Input tensors required for GPT attention plugin.
+
+    Contains all the input tensors needed to run the GPT attention plugin,
+    including sequence information, cache indices, and optional RoPE tensors.
+    """
+
     sequence_length: Node
     host_past_key_value_lengths: Node
     host_max_attention_window_sizes: Node
@@ -225,11 +305,21 @@ class GPTAttentionPluginInputs(StrictlyTyped):
 
     @classmethod
     def find_from(cls, graph: Graph, is_rope: bool) -> Self:
+        """Find plugin input nodes from a graph.
+
+        Args:
+            graph: FX graph to search for input nodes
+            is_rope: Whether RoPE inputs should be included
+
+        Returns:
+            GPTAttentionPluginInputs instance with found nodes
+        """
         existing_placeholders = {p.name: p for p in graph.find_nodes(op="placeholder")}
         get_attr_nodes = {n.name: n for n in graph.nodes if n.op == "get_attr"}
         excluded = set() if is_rope else {"rotary_inv_freq", "rotary_cos_sin"}
         nodes = {
             name: node
+            # pylint: disable-next=bad-reversed-sequence
             for name in reversed(cls.model_fields)
             if (
                 name not in excluded
@@ -243,6 +333,11 @@ class GPTAttentionPluginInputs(StrictlyTyped):
 
 
 class GPTAttentionPlugin(GPTAttentionPluginFields):
+    """TensorRT plugin implementation of GPT attention.
+
+    Implements the GPT attention mechanism as a TensorRT plugin for optimized performance.
+    """
+
     @property
     def __name__(self) -> str:
         return "gpt_attention_plugin"
@@ -260,6 +355,15 @@ class GPTAttentionPlugin(GPTAttentionPluginFields):
         qkv: torch.Tensor,
         **kwargs: Any,
     ) -> torch.Tensor:
+        """Apply GPT attention to input tensor.
+
+        Args:
+            qkv: Combined query, key and value tensor
+            **kwargs: Additional input tensors
+
+        Returns:
+            Output tensor after applying attention
+        """
         if is_in_fake_tensor_mode():
             # Note that this is merely for the fake tensor propagation
             q_size = self.num_heads * self.head_size
