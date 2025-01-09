@@ -12,7 +12,7 @@ from transformers import (
 )
 from typer import Option, Typer
 
-from .api import trtllm_build
+from .api import trtllm_build_and_save
 from .configs import TRTLLMMapping
 from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
 from .contexts import disable_torch_jit_state
@@ -110,32 +110,15 @@ def build(
         )
     logger.info(f"device: auto | dtype: {model.config.torch_dtype}")
 
-    engine, config = trtllm_build(
+    os.makedirs(output_dir, exist_ok=True)
+    trtllm_build_and_save(
         model,
+        output_dir,
         mapping=TRTLLMMapping(tp_size=tp_size),
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         debug_node_names=add_output,
     )
-
-    os.makedirs(output_dir, exist_ok=True)
-
-    def get_output_path(filename: str) -> str:
-        output_path = os.path.join(output_dir, filename)
-        assert not os.path.exists(output_path) or os.path.isfile(output_path)
-        if os.path.exists(output_path):
-            logger.warning(f"The file at {output_path} will be overwritten")
-        return output_path
-
-    engine_path = get_output_path("rank0.engine")
-    logger.info(f"Writing serialized engine at {engine_path}")
-    with open(engine_path, "wb") as engine_file:
-        engine_file.write(engine)
-
-    config_path = get_output_path("config.json")
-    logger.info(f"Writing engine config at {config_path}")
-    with open(config_path, "w") as config_file:
-        config_file.write(config.model_dump_json(indent=2))
 
 
 def get_model_dtype(dtype: str) -> torch.dtype | Literal["auto"]:

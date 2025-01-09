@@ -8,8 +8,6 @@ from .configs import (
     TRTLLMBuildConfig,
     TRTLLMEngineConfig,
     TRTLLMMapping,
-    TRTLLMModelConfig,
-    TRTLLMOptimizationProfileConfig,
     TRTLLMPretrainedConfig,
 )
 from .fx.subgraphs import TokenEmbedding
@@ -22,8 +20,7 @@ class PretrainedConfigGenerationError(RuntimeError):
 
 def generate_trtllm_engine_config(
     graph_module: GraphModule,
-    profile_config: TRTLLMOptimizationProfileConfig,
-    model_config: TRTLLMModelConfig,
+    build_config: TRTLLMBuildConfig,
     mapping: TRTLLMMapping,
     *,
     architecture: str | None = None,
@@ -34,7 +31,7 @@ def generate_trtllm_engine_config(
             mapping,
             architecture=architecture,
         ),
-        build_config=TRTLLMBuildConfig.merge(profile_config, model_config),
+        build_config=build_config,
     )
 
 

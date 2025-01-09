@@ -4,7 +4,7 @@ from .config_gen import PretrainedConfigGenerationError, generate_trtllm_engine_
 from .convert import convert
 from .export import export
 from .inline import inline
-from .api import trtllm_build, trtllm_export
+from .api import trtllm_build_and_save, trtllm_export
 from .arguments.dynamic_dim import DynamicDimension, DynamicDimensionType
 from .arguments.torch_export_arguments import TorchExportArguments
 from .configs import *
