@@ -9,7 +9,7 @@ from typing_extensions import Self
 from ...debug import save_for_debug
 from ...types import DataType, StrictlyTyped
 from ..nodes import GetAttr, Permute, Reshape, ScaledDotProductAttention, ToCopy
-from ..subgraphs import FusedLinear, Linear, TrailingReformatSequence
+from ..subgraphs import FusedLinear, Linear, ScalingReformatPath
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
 from ..utils import get_ancestors_with_depth, get_tensor_metadata
 from .infra import GraphOptimizationPass, PassResult
@@ -152,14 +152,15 @@ class MHAConfig(StrictlyTyped):
         ):
             return None
 
-        q_seq = TrailingReformatSequence.configure_from(sdpa.query)
-        k_seq = TrailingReformatSequence.configure_from(sdpa.key)
-        v_seq = TrailingReformatSequence.configure_from(sdpa.value)
+        q_seq = ScalingReformatPath.configure_from(sdpa.query)
+        k_seq = ScalingReformatPath.configure_from(sdpa.key)
+        v_seq = ScalingReformatPath.configure_from(sdpa.value)
         q_rope = q_seq.top
         k_rope = k_seq.top
-        q = TrailingReformatSequence.configure_from(q_rope.all_input_nodes[0]).top
-        k = TrailingReformatSequence.configure_from(k_rope.all_input_nodes[0]).top
+        q = ScalingReformatPath.configure_from(q_rope.all_input_nodes[0]).top
+        k = ScalingReformatPath.configure_from(k_rope.all_input_nodes[0]).top
         v = v_seq.top
+
         if not (
             q_rope.target in FAKE_ROPE_TARGETS
             and k_rope.target in FAKE_ROPE_TARGETS
@@ -168,7 +169,7 @@ class MHAConfig(StrictlyTyped):
             and (v_proj := find_nearest_linear_projection(sdpa.value))
             and q_proj.output == k_proj.output == v_proj.output
             and (fused_linear := FusedLinear.configure_from(q_proj.mm.node))
-            and tuple(s.node for s in fused_linear.slices) == (q, k, v)
+            # and tuple(s.node for s in fused_linear.slices) == (q, k, v)
             and (
                 rope_config := expect_identical(
                     q_rope.meta.get("rope_config"),

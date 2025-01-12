@@ -15,7 +15,7 @@ def export(
     *,
     strict: bool = False,
     pre_dispatch: bool = False,
-    sdp_backends: SDPBackend | list[SDPBackend] = SDPBackend.EFFICIENT_ATTENTION,
+    sdp_backend: SDPBackend | list[SDPBackend] = SDPBackend.MATH,
 ) -> ExportedProgram:
     if not model._supports_sdpa:
         logger.warning(
@@ -23,7 +23,10 @@ def export(
             "`torch.nn.functional.scaled_dot_product_attention`."
         )
 
-    with sdpa_kernel(sdp_backends):
+    if sdp_backend is SDPBackend.MATH and model.dtype in (torch.bfloat16, torch.float16):
+        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)
+
+    with sdpa_kernel(sdp_backend):
         exported_program = torch_export(
             ConstantInputFilterer(model, constant_inputs=arguments.constant_inputs),
             args=(),

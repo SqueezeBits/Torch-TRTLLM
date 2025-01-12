@@ -1,44 +1,35 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
-
-from collections.abc import Callable
+import operator
+from collections import Counter
+from functools import reduce
 from typing import TypeVar
 
+
 import torch
-from pydantic import model_validator
 from torch._ops import OpOverload
 from torch.fx import Node
 from typing_extensions import Self
 
-from ..nodes import NodeSpecialization
+from ...types import NodeCondition, Number
 from ..utils import get_tensor_metadata
-from .subgraph import Subgraph
-
-# pylint: disable-next=invalid-name
-NodeType = TypeVar("NodeType", bound=NodeSpecialization)
+from .path import Path
+from ..nodes import Mul, Div
 
 
-class TrailingReformatSequence(Subgraph):
-    node_seq: tuple[Node, ...]  # sorted from bottom to top
-
-    @property
-    def nodes(self) -> list[Node]:
-        return list(self.node_seq)
-
-    @property
-    def top(self) -> Node:
-        return self.node_seq[-1]
-
-    @property
-    def reformats(self) -> tuple[Node, ...]:
-        return self.node_seq[:-1]
-
+class ScalingReformatPath(Path):    
+    @classmethod
+    def get_scaling_targets(cls) -> tuple[OpOverload, ...]:
+        return (
+            torch.ops.aten.mul.Scalar,
+            torch.ops.aten.div.Scalar,
+        )
+    
     @classmethod
     def get_reformat_targets(cls) -> tuple[OpOverload, ...]:
         return (
             torch.ops.aten._to_copy.default,
             torch.ops.aten.clone.default,
             torch.ops.aten.expand.default,
-            torch.ops.aten.permute.default,
             torch.ops.aten.reshape.default,
             torch.ops.aten.squeeze.default,
             torch.ops.aten.squeeze.dim,
@@ -47,34 +38,34 @@ class TrailingReformatSequence(Subgraph):
         )
 
     @classmethod
-    def configure_from(cls, node: Node, *, break_if: Callable[[Node], bool] | None = None) -> Self:
-        nodes: list[Node] = []
-        top = node
-        targets = cls.get_reformat_targets()
-        while top.target in targets:
-            nodes.append(top)
-            top = top.all_input_nodes[0]
-            if break_if is not None and break_if(top):
-                break
-        nodes.append(top)
-        return cls(node_seq=tuple(nodes))
+    def configure_from(cls, node: Node, *, break_if: NodeCondition = lambda _: False, max_len = 10) -> Self:
+        targets = cls.get_scaling_targets() + cls.get_reformat_targets()
+        return super().configure_from(
+            node,
+            break_if=lambda n: n.target not in targets or break_if(n),
+            max_len=max_len
+        )
+    
+    @property
+    def scalings(self) -> tuple[Node]:
+        return tuple(node for node in self.node_seq if node.target in self.get_scaling_targets())
 
-    @model_validator(mode="after")
-    def validate_adjacency(self) -> Self:
-        assert len(self.node_seq) > 0
-        targets = self.get_reformat_targets()
-        for i in range(len(self.node_seq) - 1):
-            reformat_node = self.node_seq[i]
-            assert reformat_node.target in targets
-            next_node = self.node_seq[i + 1] if i + 1 < len(self.node_seq) else self.top
-            assert reformat_node.all_input_nodes[0] == next_node
-        return self
+    @property
+    def reformats(self) -> tuple[Node, ...]:
+        return tuple(node for node in self.node_seq if node.target in self.get_reformat_targets())
+    
+    @property
+    def scale(self) -> Number:
+        return reduce(
+            operator.truediv, [div.other for n in self.reformats if (div := Div.specialize_from(n))],
+            reduce(operator.mul, [mul.other for n in self.reformats if (mul := Mul.specialize_from(n))], 1.0)
+        )
 
     @property
     def total_expansion(self) -> int | None:
         if not self.reformats:
             return 1
-        if not ((top := get_tensor_metadata(self.top)) and (bottom := get_tensor_metadata(self.reformats[0]))):
+        if not ((top := get_tensor_metadata(self.reformats[-1])) and (bottom := get_tensor_metadata(self.reformats[0]))):
             return None
         # Note that `torch.ops.aten.expand.default` is the only target that can increase the number of elements.
         # A naive implementation would be simple:
@@ -92,19 +83,8 @@ class TrailingReformatSequence(Subgraph):
         top_ishape = torch.Size(s for s in top.shape if isinstance(s, int))
         return bottom_ishape.numel() // top_ishape.numel()
 
-    @classmethod
-    def traceback(
-        cls,
-        node_type: type[NodeType],
-        node: Node,
-        *,
-        break_if: Callable[[Node], bool] | None = None,
-    ) -> NodeType | None:
-        return node_type.specialize_from(TrailingReformatSequence.configure_from(node, break_if=break_if).top)
-
 
 T = TypeVar("T")
-
 
 def are_same_as_sets(one: list[T], another: list[T]) -> bool:
     """Check if two lists of objects consists of the same set of elements.

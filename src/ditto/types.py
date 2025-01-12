@@ -13,6 +13,7 @@ from torch.fx import Node
 
 BuiltInConstant = int | float | bool | None
 DeviceLikeType = str | torch.device | int
+NodeCondition = Callable[[Node], bool]
 Number = int | float | bool
 SymbolicInteger = int | torch.SymInt
 SymbolicShape = tuple[SymbolicInteger, ...]
