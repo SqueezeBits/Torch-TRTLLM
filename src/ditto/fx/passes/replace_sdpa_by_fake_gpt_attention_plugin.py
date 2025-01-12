@@ -73,7 +73,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 **mha.rope_config.model_dump(),
             )
             with graph.inserting_before(node):
-                qkv = qkv_proj.output
+                qkv = qkv_proj.output_node
                 if (qkv_meta := get_tensor_metadata(qkv)) and ((out_dtype := qkv_meta.dtype) != self.dtype):
                     qkv = ToCopy.create(graph, qkv, dtype=self.dtype).node
                 plugin_node = graph.call_function(
@@ -166,7 +166,7 @@ class MHAConfig(StrictlyTyped):
             and (q_proj := find_nearest_linear_projection(sdpa.query))
             and (k_proj := find_nearest_linear_projection(sdpa.key))
             and (v_proj := find_nearest_linear_projection(sdpa.value))
-            and q_proj.output == k_proj.output == v_proj.output
+            and q_proj.output_node == k_proj.output_node == v_proj.output_node
             and (fused_linear := FusedLinear.configure_from(q_proj.mm.node))
             and tuple(s.node for s in fused_linear.slices) == (q, k, v)
             and (

@@ -22,9 +22,9 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
         ):
             return PassResult(graph_module=graph_module, modified=False)
 
-        with graph.inserting_before(lm_head.output):
+        with graph.inserting_before(lm_head.output_node):
             sub = Sub.create(graph, last_token_ids, 1)
-            index_select = IndexSelect.create(graph, lm_head.input, INPUT_IDS_UNSQUEEZE_DIM, sub).node
+            index_select = IndexSelect.create(graph, lm_head.input_node, INPUT_IDS_UNSQUEEZE_DIM, sub).node
         lm_head.mm.node.replace_input_with(lm_head.mm.this, index_select)
         num_tokens_node.replace_all_uses_with(batch_size_node, delete_user_cb=lambda node: node > index_select)
         forget_all_descendant_fake_tensors(index_select)
@@ -32,6 +32,14 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
 
 
 def find_lm_head(graph: Graph) -> Linear | None:
+    """Find the last Linear subgraph in the computation graph.
+
+    Args:
+        graph (Graph): The computation graph to search in
+
+    Returns:
+        Linear | None: The last Linear subgraph if found, None otherwise
+    """
     nodes = list(graph.nodes)
     for node in nodes[::-1]:
         if subgraph := Linear.configure_from(node):
@@ -40,6 +48,16 @@ def find_lm_head(graph: Graph) -> Linear | None:
 
 
 def find_or_create_placeholder_sym_size(graph: Graph, name: str, dim: int = 0) -> Node | None:
+    """Find or create a symbolic size node for a placeholder tensor.
+
+    Args:
+        graph (Graph): The computation graph to search/modify
+        name (str): Name of the placeholder tensor
+        dim (int, optional): Dimension to get size for. Defaults to 0.
+
+    Returns:
+        Node | None: The found or created symbolic size node if successful, None if placeholder not found
+    """
     if name not in (placeholders := {node.name: node for node in graph.find_nodes(op="placeholder")}):
         logger.warning(f"No such placholder: {name}")
         return None

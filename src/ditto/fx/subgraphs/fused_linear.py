@@ -26,7 +26,7 @@ class FusedLinear(Subgraph):
     def configure_from(cls, node: Node) -> Self | None:
         if (linear := Linear.configure_from(node)) is None:
             return None
-        output = linear.reshape_out or linear.output
+        output = linear.reshape_out or linear.output_node
         if not (
             all(Slice.specialize_from(user) is not None for user in output.users)
             and Slice.are_consecutive(slices := Slice.sort([Slice._specialize_from(user) for user in output.users]))
