@@ -34,45 +34,45 @@ class Linear(Subgraph):
 
     @property
     def weight_node(self) -> Node:
-        """Get the weight parameter node."""
+        """The weight parameter node."""
         return self.mm.other
 
     @property
     def weight_tensor(self) -> FakeTensor:
-        """Get the weight parameter tensor."""
+        """The weight parameter tensor."""
         assert (weight := get_val(self.mm.other, FakeTensor)) is not None
         return weight
 
     @property
     def bias_node(self) -> Node | None:
-        """Get the bias parameter node if present."""
+        """The bias parameter node if present."""
         return self.add.other if self.add is not None else None
 
     @property
     def bias_tensor(self) -> FakeTensor | None:
-        """Get the bias parameter tensor if present."""
-        if not (self.add is not None and (bias := get_val(self.add.other, FakeTensor))):
-            return None
-        return bias
+        """The bias parameter tensor if present."""
+        if self.add is not None:
+            return get_val(self.add.other, FakeTensor)
+        return None
 
     @property
     def input_node(self) -> Node:
-        """Get the input tensor node to the linear layer."""
+        """The input tensor node to the linear layer."""
         return self.mm.this
 
     @property
     def output_node(self) -> Node:
-        """Get the output tensor node, either the bias addition or matrix multiplication result."""
+        """The output tensor node, either the bias addition or matrix multiplication result."""
         return self.add.node if self.add is not None else self.mm.node
 
     @property
     def reshape_in(self) -> Reshape | None:
-        """Get the reshape operation before the linear layer if present."""
+        """The reshape operation before the linear layer if present."""
         return Reshape.specialize_from(self.mm.this)
 
     @property
     def reshape_out(self) -> Reshape | None:
-        """Get the reshape operation after the linear layer if present."""
+        """The reshape operation after the linear layer if present."""
         if len(users := list(self.output_node.users)) != 1:
             return None
         return Reshape.specialize_from(users[0])
