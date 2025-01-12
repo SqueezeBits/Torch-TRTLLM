@@ -1,8 +1,10 @@
+# mypy: disable-error-code=misc
 import os
 from typing import Annotated, Literal
 
 import torch
 from loguru import logger
+from peft import PeftModel
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -14,7 +16,7 @@ from typer import Option, Typer
 
 from .api import trtllm_build
 from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
-from .contexts import disable_torch_jit_state
+from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
 from .types import trt_to_torch_dtype_mapping
 
 if not DISABLE_TRANSFORMER_PATCHES:
@@ -88,7 +90,8 @@ def run_generation(
 @torch.no_grad()
 def build(
     model_id: str,
-    add_output: Annotated[list[str], Option(default_factory=list)],
+    add_output: list[str] = [],  # noqa: B006
+    peft_id: str = "",
     output_dir: str = "",
     device: str = DEFAULT_DEVICE,
     dtype: str = "auto",
@@ -100,13 +103,15 @@ def build(
     output_dir = resolve_output_dir(output_dir, model_id)
     app.pretty_exceptions_show_locals = verbose
 
-    with disable_torch_jit_state():
+    with disable_torch_jit_state(), disable_modelopt_peft_patches():
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             torch_dtype=get_model_dtype(dtype),
             device_map=device,
             trust_remote_code=trust_remote_code,
         )
+        if peft_id:
+            model = PeftModel.from_pretrained(model, peft_id)
     logger.info(f"device: {device} | dtype: {model.config.torch_dtype}")
 
     engine, config = trtllm_build(
