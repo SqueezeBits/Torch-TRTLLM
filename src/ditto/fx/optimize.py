@@ -26,7 +26,7 @@ from .passes import (
     FuseConsecutiveSplitConcat,
     FuseConsecutiveToCopys,
     FuseEquivalentNodes,
-    FuseLinearSiblings,
+    FuseQKVProjection,
     FuseReciprocalMul,
     HerdConstantsToTheRight,
     InsertGatherLastTokenIds,
@@ -111,7 +111,6 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     HerdConstantsToTheRight,
     ReplaceViewByReshape,
     DecomposeAddMM,
-    FuseLinearSiblings,
 )
 
 # passes required after the TRT-LLM conversion passes
@@ -151,6 +150,7 @@ def get_trtllm_conversion_transform(
         SwapUnsqueezeWithSymSizeInt,  # required for `InsertGatherLastTokenIds`
         InsertGatherLastTokenIds,
         WrapSDPASubgraphs,
+        FuseQKVProjection,
         WrapRoPESubgraphs,
         ReplaceSDPAByFakeGPTAttentionPlugin(dtype=dtype),
         ReplaceMMByFakeGemmPlugin,
