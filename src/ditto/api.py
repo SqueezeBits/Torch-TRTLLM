@@ -7,7 +7,6 @@ from torch.fx import GraphModule
 from torch.fx.graph import CodeGen
 from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from transformers import PreTrainedModel
-from typing_extensions import Buffer
 
 from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
 from .config_gen import generate_trtllm_engine_config
@@ -84,8 +83,16 @@ def trtllm_build(
     )
     logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
 
-    save(engine, "rank0.engine", output_dir, "Writing serialized engine")
-    save(engine_config.model_dump_json(indent=2), "config.json", output_dir, message="Writing engine config")
+    for (name, filename), contents in {
+        ("serialized engine", "rank0.engine"): engine,
+        ("engine config", "config.json"): engine_config.model_dump_json(indent=2),
+    }.items():
+        output_path = os.path.join(output_dir, filename)
+        if os.path.exists(output_path):
+            logger.warning(f"The file at {output_path} will be overwritten")
+        logger.info(f"Writing {name} at {output_path}")
+        with open(output_path, "w" if isinstance(contents, str) else "wb") as f:
+            f.write(contents)
 
 
 def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
@@ -113,32 +120,6 @@ def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
         return gm
 
     return reset_output
-
-
-def save(
-    s_or_buffer: str | Buffer,
-    filename: str,
-    output_dir: str,
-    message: str = "Saving",
-) -> None:
-    def get_output_path(filename: str) -> str:
-        output_path = os.path.join(output_dir, filename)
-        assert not os.path.exists(output_path) or os.path.isfile(output_path)
-        if os.path.exists(output_path):
-            logger.warning(f"The file at {output_path} will be overwritten")
-        return output_path
-
-    if isinstance(s_or_buffer, str):
-        mode = "w"
-    elif isinstance(s_or_buffer, Buffer):
-        mode = "wb"
-    else:
-        raise RuntimeError(f"unsupported type: {type(s_or_buffer)}")
-
-    filepath = get_output_path(filename)
-    logger.info(f"{message} at {filepath}")
-    with open(filepath, mode) as f:
-        f.write(s_or_buffer)
 
 
 def trtllm_export(
