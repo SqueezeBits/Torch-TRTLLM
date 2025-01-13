@@ -21,20 +21,19 @@ from .configs import (
     TRTLLMOptimizationProfileConfig,
     TRTLLMPluginConfig,
 )
-from .constants import DEFAULT_DEVICE, INPUT_IDS, PassName
+from .constants import INPUT_IDS, PassName
 from .convert import convert
 from .debug import get_memory_footprint, save_for_debug
 from .export import export
 from .inline import inline
 from .transform import transform
-from .types import BuiltInConstant, DeviceLikeType
+from .types import BuiltInConstant
 
 
 def trtllm_build(
     model: PreTrainedModel,
     output_dir: str,
     *,
-    device: DeviceLikeType = DEFAULT_DEVICE,
     profile_config: TRTLLMOptimizationProfileConfig | None = None,
     mapping: TRTLLMMapping | None = None,
     lora_config: TRTLLMLoraConfig | None = None,
@@ -65,7 +64,6 @@ def trtllm_build(
                 plugin_config=plugin_config,
             ),
         ),
-        device=device,
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         extra_passes=[add_outputs(debug_node_names)] if debug_node_names else None,
@@ -84,7 +82,7 @@ def trtllm_build(
         network_name=network_name,
         output_names=output_names,
     )
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
 
     save(engine, "rank0.engine", output_dir, "Writing serialized engine")
     save(engine_config.model_dump_json(indent=2), "config.json", output_dir, message="Writing engine config")
@@ -150,7 +148,6 @@ def trtllm_export(
     mapping: TRTLLMMapping,
     build_config: TRTLLMBuildConfig,
     *,
-    device: DeviceLikeType = DEFAULT_DEVICE,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
     skipped_optimizers: list[PassName] | None = None,
@@ -162,13 +159,13 @@ def trtllm_export(
         INPUT_IDS: argument_hint.batched_input_ids,
         "use_cache": False,
     }
-    arguments = TorchExportArguments.from_hints(device=device, **hints)
+    arguments = TorchExportArguments.from_hints(device=model.device, **hints)
     logger.opt(lazy=True).debug("{x}", x=lambda: arguments)
     exported_program = export(model, arguments)
     save_for_debug("exported_program", exported_program)
 
     logger.debug("Lowering exported program into graph module")
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
     graph_module = inline(
         exported_program,
         class_name=type(model).__name__,
@@ -178,7 +175,7 @@ def trtllm_export(
     del exported_program
     torch.cuda.empty_cache()
 
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
     logger.info("Optimizing the graph module")
     graph_module = transform(
         graph_module,
@@ -189,7 +186,7 @@ def trtllm_export(
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         extra_passes=extra_passes,
     )
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
     save_for_debug("graph_module", graph_module)
 
     logger.info("Generating engine config from the graph module")
