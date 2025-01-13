@@ -10,7 +10,7 @@ from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses,
 
 
 class FuseQKVProjection(NodewiseOptimizationPass):
-    """Fuse a group of Linear subgraphs sharing the same input tensor."""
+    """Fuse input projection of an attention layer to a single Linear subgraph."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         graph = node.graph
