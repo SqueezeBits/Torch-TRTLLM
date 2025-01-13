@@ -142,7 +142,7 @@ def resolve_output_dir(output_dir: str, model_id: str) -> str:
         assert os.path.isdir(
             output_dir
         ), f"Invalid output directory: {output_dir} already exists, but it is not a directory."
-        logger.warning("The contents in output directory will be overwritten")
+        logger.warning("The contents in the output directory will be overwritten")
 
     return output_dir
 
