@@ -81,7 +81,7 @@ def trtllm_build(
         network_name=network_name,
         output_names=output_names,
     )
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=get_memory_footprint)
 
     for (name, filename), contents in {
         ("serialized engine", "rank0.engine"): engine,
@@ -145,8 +145,9 @@ def trtllm_export(
     exported_program = export(model, arguments)
     save_for_debug("exported_program", exported_program)
 
+    device = model.device
     logger.debug("Lowering exported program into graph module")
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
     graph_module = inline(
         exported_program,
         class_name=type(model).__name__,
@@ -156,7 +157,7 @@ def trtllm_export(
     del exported_program
     torch.cuda.empty_cache()
 
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
     logger.info("Optimizing the graph module")
     graph_module = transform(
         graph_module,
@@ -167,7 +168,7 @@ def trtllm_export(
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         extra_passes=extra_passes,
     )
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
     save_for_debug("graph_module", graph_module)
 
     logger.info("Generating engine config from the graph module")
