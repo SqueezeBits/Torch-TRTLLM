@@ -43,6 +43,21 @@ def trtllm_build(
     debug_node_names: list[str] | None = None,
     engine_cache: BaseEngineCache | None = None,
 ) -> None:
+    """Build a TensorRT-LLM engine from a PyTorch model.
+
+    Args:
+        model: The PyTorch model to convert
+        output_dir: Directory to save the engine and config files
+        profile_config: Configuration for optimization profiles
+        mapping: Configuration for tensor parallelism mapping
+        lora_config: Configuration for LoRA support
+        plugin_config: Configuration for TensorRT plugins
+        trt_config: TensorRT builder configuration
+        run_matmuls_in_fp32: Whether to run matrix multiplications in FP32
+        run_activations_in_model_dtype: Whether to run activations in model dtype
+        debug_node_names: List of node names to output for debugging
+        engine_cache: Cache for TensorRT engines
+    """
     network_name = type(model).__name__
     model_dtype = model.config.torch_dtype
     mapping = mapping or TRTLLMMapping()
@@ -96,7 +111,27 @@ def trtllm_build(
 
 
 def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
+    """Create a transform pass that adds additional outputs to the graph module.
+
+    Args:
+        names: List of node names to add as additional outputs
+
+    Returns:
+        A callable that transforms a graph module by adding the specified nodes as outputs
+    """
+
     def reset_output(gm: GraphModule) -> GraphModule:
+        """Add specified nodes as additional outputs to the graph module.
+
+        Args:
+            gm: The graph module to modify
+
+        Returns:
+            The modified graph module with additional outputs
+
+        Raises:
+            RuntimeError: If output node is not found or specified nodes don't exist
+        """
         nodes = {n.name: n for n in gm.graph.nodes}
         for node in reversed(gm.graph.nodes):
             if node.op == "output":
@@ -135,6 +170,23 @@ def trtllm_export(
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
     enable_experimental_decompositions: bool = False,
 ) -> tuple[GraphModule, TRTLLMEngineConfig]:
+    """Export a PyTorch model to a graph module and generate TensorRT-LLM engine config.
+
+    Args:
+        model: The PyTorch model to export
+        argument_hint: Configuration for input arguments
+        dtype: Data type for the model
+        mapping: Configuration for tensor parallelism mapping
+        build_config: Configuration for building the engine
+        run_matmuls_in_fp32: Whether to run matrix multiplications in FP32
+        run_activations_in_model_dtype: Whether to run activations in model dtype
+        skipped_optimizers: List of optimization passes to skip
+        extra_passes: Additional transformation passes to apply
+        enable_experimental_decompositions: Whether to enable experimental decompositions
+
+    Returns:
+        A tuple containing the transformed graph module and engine configuration
+    """
     logger.debug("torch.exporting module")
     hints: dict[str, TensorTypeHint | BuiltInConstant] = {
         INPUT_IDS: argument_hint.batched_input_ids,
