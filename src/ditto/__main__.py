@@ -12,7 +12,7 @@ from transformers import (
 )
 from typer import Option, Typer
 
-from .api import trtllm_build_and_save
+from .api import trtllm_build
 from .configs import TRTLLMMapping
 from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
 from .contexts import disable_torch_jit_state
@@ -111,7 +111,7 @@ def build(
     logger.info(f"device: auto | dtype: {model.config.torch_dtype}")
 
     os.makedirs(output_dir, exist_ok=True)
-    trtllm_build_and_save(
+    trtllm_build(
         model,
         output_dir,
         mapping=TRTLLMMapping(tp_size=tp_size),
