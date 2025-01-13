@@ -30,7 +30,7 @@ from .transform import transform
 from .types import BuiltInConstant, DeviceLikeType
 
 
-def trtllm_build_and_save(
+def trtllm_build(
     model: PreTrainedModel,
     output_dir: str,
     *,
