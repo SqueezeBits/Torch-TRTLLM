@@ -43,6 +43,21 @@ def trtllm_build(
     debug_node_names: list[str] | None = None,
     engine_cache: BaseEngineCache | None = None,
 ) -> None:
+    """Build a TensorRT-LLM engine from a PyTorch model.
+
+    Args:
+        model (PreTrainedModel): The PyTorch model to convert
+        output_dir (str): Directory to save the engine and config files
+        profile_config (TRTLLMOptimizationProfileConfig | None): Configuration for optimization profiles
+        mapping (TRTLLMMapping | None): Configuration for tensor parallelism mapping
+        lora_config (TRTLLMLoraConfig | None): Configuration for LoRA support
+        plugin_config (TRTLLMPluginConfig | None): Configuration for TensorRT plugins
+        trt_config (TensorRTConfig | None): TensorRT builder configuration
+        run_matmuls_in_fp32 (bool): Whether to run matrix multiplications in FP32
+        run_activations_in_model_dtype (bool): Whether to run activations in model dtype
+        debug_node_names (list[str] | None): List of node names to output for debugging
+        engine_cache (BaseEngineCache | None): Cache for TensorRT engines
+    """
     network_name = type(model).__name__
     model_dtype = model.config.torch_dtype
     mapping = mapping or TRTLLMMapping()
@@ -81,7 +96,7 @@ def trtllm_build(
         network_name=network_name,
         output_names=output_names,
     )
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=get_memory_footprint)
 
     for (name, filename), contents in {
         ("serialized engine", "rank0.engine"): engine,
@@ -96,7 +111,28 @@ def trtllm_build(
 
 
 def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
+    """Create a transform pass that adds additional outputs to the graph module.
+
+    Args:
+        names (list[str]): List of node names to add as additional outputs
+
+    Returns:
+        Callable[[GraphModule], GraphModule]: A callable that transforms a graph module by adding the specified nodes
+            as outputs
+    """
+
     def reset_output(gm: GraphModule) -> GraphModule:
+        """Add specified nodes as additional outputs to the graph module.
+
+        Args:
+            gm (GraphModule): The graph module to modify
+
+        Returns:
+            GraphModule: The modified graph module with additional outputs
+
+        Raises:
+            RuntimeError: If output node is not found or specified nodes don't exist
+        """
         nodes = {n.name: n for n in gm.graph.nodes}
         for node in reversed(gm.graph.nodes):
             if node.op == "output":
@@ -135,6 +171,23 @@ def trtllm_export(
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
     enable_experimental_decompositions: bool = False,
 ) -> tuple[GraphModule, TRTLLMEngineConfig]:
+    """Export a PyTorch model to a graph module and generate TensorRT-LLM engine config.
+
+    Args:
+        model (PreTrainedModel): The PyTorch model to export
+        argument_hint (TRTLLMArgumentHint): Configuration for input arguments
+        dtype (torch.dtype): Data type for the model
+        mapping (TRTLLMMapping): Configuration for tensor parallelism mapping
+        build_config (TRTLLMBuildConfig): Configuration for building the engine
+        run_matmuls_in_fp32 (bool): Whether to run matrix multiplications in FP32
+        run_activations_in_model_dtype (bool): Whether to run activations in model dtype
+        skipped_optimizers (list[PassName] | None): List of optimization passes to skip
+        extra_passes (list[Callable[[GraphModule], GraphModule]] | None): Additional transformation passes to apply
+        enable_experimental_decompositions (bool): Whether to enable experimental decompositions
+
+    Returns:
+        tuple[GraphModule, TRTLLMEngineConfig]: A tuple containing the transformed graph module and engine configuration
+    """
     logger.debug("torch.exporting module")
     hints: dict[str, TensorTypeHint | BuiltInConstant] = {
         INPUT_IDS: argument_hint.batched_input_ids,
@@ -145,8 +198,9 @@ def trtllm_export(
     exported_program = export(model, arguments)
     save_for_debug("exported_program", exported_program)
 
+    device = model.device
     logger.debug("Lowering exported program into graph module")
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
     graph_module = inline(
         exported_program,
         class_name=type(model).__name__,
@@ -156,7 +210,7 @@ def trtllm_export(
     del exported_program
     torch.cuda.empty_cache()
 
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
     logger.info("Optimizing the graph module")
     graph_module = transform(
         graph_module,
@@ -167,7 +221,7 @@ def trtllm_export(
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         extra_passes=extra_passes,
     )
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
     save_for_debug("graph_module", graph_module)
 
     logger.info("Generating engine config from the graph module")

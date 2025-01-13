@@ -1,8 +1,8 @@
 channels:
+  - pytorch
+  - nvidia
   - anaconda
   - conda-forge
-  - nvidia
-  - pytorch
 dependencies:
   - python=3.10
   - pytorch>=2.5,<2.6
@@ -13,6 +13,7 @@ dependencies:
   - pip
   - pip:
     - packaging>=23
+    - peft>=0.14.0
     - tensorrt-cu12==10.7.0
     - tensorrt-cu12-bindings==10.7.0
     - tensorrt-cu12-libs==10.7.0

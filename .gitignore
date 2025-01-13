@@ -219,6 +219,7 @@ ops
 # PyTorch model files
 *.pt
 *.pth
+*.safetensors
 
 # Text files
 *.txt

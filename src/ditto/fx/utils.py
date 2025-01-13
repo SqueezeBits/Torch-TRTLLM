@@ -1,3 +1,4 @@
+from typing import TypeVar, cast, overload
 from weakref import WeakKeyDictionary
 
 import torch
@@ -9,6 +10,15 @@ from ..contexts import detailed_sym_node_str
 
 
 def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
+    """Find the closest common ancestor node between two nodes in a graph.
+
+    Args:
+        x (Node): First node
+        y (Node): Second node
+
+    Returns:
+        Node | None: The closest common ancestor node if one exists, None otherwise
+    """
     # Get ancestors with their depths for both nodes x and y
     ancestors_x = get_ancestors_with_depth(x)
     ancestors_y = get_ancestors_with_depth(y)
@@ -35,6 +45,14 @@ def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
 
 
 def get_ancestors_with_depth(node: Node) -> dict[Node, int]:
+    """Get all ancestor nodes of a given node with their depths.
+
+    Args:
+        node (Node): The node to get ancestors for
+
+    Returns:
+        dict[Node, int]: Dictionary mapping ancestor nodes to their depths
+    """
     ancestors: dict[Node, int] = {}
     stack = [(node, 0)]  # Initialize stack with (node, depth)
 
@@ -51,6 +69,11 @@ def get_ancestors_with_depth(node: Node) -> dict[Node, int]:
 
 
 def forget_all_descendant_fake_tensors(node: Node) -> None:
+    """Remove fake tensor metadata from a node and all its descendants.
+
+    Args:
+        node (Node): The root node to start removing fake tensors from
+    """
     nodes = [node]
     while nodes:
         n = nodes.pop()
@@ -59,6 +82,14 @@ def forget_all_descendant_fake_tensors(node: Node) -> None:
 
 
 def get_tensor_metadata(node: Node) -> TensorMetadata | None:
+    """Get tensor metadata from a node if available.
+
+    Args:
+        node (Node): The node to get tensor metadata from
+
+    Returns:
+        TensorMetadata | None: The tensor metadata if available, None otherwise
+    """
     if isinstance(tensor_meta := node.meta.get("tensor_meta"), TensorMetadata):
         return tensor_meta
     if isinstance(val := node.meta.get("val"), torch.Tensor):
@@ -76,7 +107,53 @@ def get_tensor_metadata(node: Node) -> TensorMetadata | None:
     return None
 
 
+T = TypeVar("T", torch.Tensor, FakeTensor, torch.SymInt)
+
+
+@overload
+def get_val(node: Node, expected_type: type[torch.SymInt]) -> torch.SymInt | None:
+    ...
+
+
+@overload
+def get_val(node: Node, expected_type: type[torch.Tensor]) -> FakeTensor | None:
+    ...
+
+
+@overload
+def get_val(node: Node) -> torch.Tensor | torch.SymInt | None:
+    ...
+
+
+def get_val(node: Node, expected_type: type[T] | None = None) -> T | None:  # type: ignore[misc]
+    """Get the value stored in a node's metadata.
+
+    Args:
+        node (Node): The node to get the value from
+        expected_type (type[T] | None, optional): Expected type of the value. Defaults to None
+
+    Returns:
+        T | None: The value if it exists and matches the expected type, None otherwise
+    """
+    val = node.meta.get("val")
+    if expected_type is not None:
+        if isinstance(val, expected_type):
+            return val
+        return None
+    if isinstance(val, torch.Tensor | torch.SymInt):
+        return cast(T, val)
+    return None
+
+
 def get_fake_mode(graph: Graph) -> FakeTensorMode | None:
+    """Get the fake tensor mode from a graph if one exists.
+
+    Args:
+        graph (Graph): The graph to get the fake tensor mode from
+
+    Returns:
+        FakeTensorMode | None: The fake tensor mode if one exists, None otherwise
+    """
     for node in graph.nodes:
         if isinstance(val := node.meta.get("val"), FakeTensor):
             return val.fake_mode
@@ -84,6 +161,18 @@ def get_fake_mode(graph: Graph) -> FakeTensorMode | None:
 
 
 def find_sym_size_node(graph: Graph, s: torch.SymInt) -> Node:
+    """Find the node that produces a given symbolic integer in a graph.
+
+    Args:
+        graph (Graph): The graph to search in
+        s (torch.SymInt): The symbolic integer to find
+
+    Returns:
+        Node: The node that produces the symbolic integer
+
+    Raises:
+        RuntimeError: If no node is found that produces the symbolic integer
+    """
     cache: WeakKeyDictionary[Node, torch.SymInt] | None = None
     if graph_module := graph.owning_module:
         if "symint_cache" not in graph_module.meta:

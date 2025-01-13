@@ -33,11 +33,25 @@ def transform(
     run_activations_in_model_dtype: bool = True,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
 ) -> GraphModule:
+    """Transform a PyTorch GraphModule by applying a series of optimization passes.
+
+    Args:
+        graph_module (GraphModule): The input PyTorch GraphModule to transform
+        argument_hint (TRTLLMArgumentHint): Hints about the arguments for optimization
+        dtype (torch.dtype): The target data type for the transformed model
+        skipped_optimizers (list[PassName] | None, optional): List of optimizer passes to skip. Defaults to None.
+        run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
+        run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
+        extra_passes (list[Callable[[GraphModule], GraphModule]] | None, optional): Additional transformation passes to
+            apply. Defaults to None.
+
+    Returns:
+        GraphModule: The transformed PyTorch GraphModule after applying optimization passes
+    """
     post_inline_pass_manager = DynamoPassManager.build_from_passlist(
         [
             ResetCodeGen().as_transform(),
             ForgetSubmodules().as_transform(),
-            ConstantFolding().as_transform(),
             *(f for f in ATEN_POST_LOWERING_PASSES.passes if f.__name__ not in ("constant_fold", "view_to_reshape")),
             get_level1_transform(skipped_optimizers),
         ]

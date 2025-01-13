@@ -1,8 +1,11 @@
+# mypy: disable-error-code=misc
+# pylint: disable=dangerous-default-value, too-many-positional-arguments
 import os
 from typing import Annotated, Literal
 
 import torch
 from loguru import logger
+from peft import PeftModel
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -15,7 +18,7 @@ from typer import Option, Typer
 from .api import trtllm_build
 from .configs import TRTLLMMapping
 from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
-from .contexts import disable_torch_jit_state
+from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
 from .types import trt_to_torch_dtype_mapping
 
 if not DISABLE_TRANSFORMER_PATCHES:
@@ -36,6 +39,7 @@ def generate(
     trust_remote_code: bool = False,
     max_output_len: int = 100,
 ) -> None:
+    """Generate text completions for given prompts using a language model."""
     if not prompts:
         logger.info("Using default prompts")
         prompts = ["Hey, are you conscious?"]
@@ -68,6 +72,18 @@ def run_generation(
     max_new_tokens: int | None = None,
     device: str = DEFAULT_DEVICE,
 ) -> list[str]:
+    """Run text generation for a list of prompts.
+
+    Args:
+        prompts (list[str]): List of input prompts to generate completions for
+        model (PreTrainedModel): The language model to use for generation
+        tokenizer (PreTrainedTokenizer | PreTrainedTokenizerFast): Tokenizer for the model
+        max_new_tokens (int | None, optional): Maximum number of new tokens to generate. Defaults to None.
+        device (str, optional): Device to run generation on. Defaults to DEFAULT_DEVICE.
+
+    Returns:
+        list[str]: List of generated text completions with special tokens removed
+    """
     inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device=device)
     outputs = model.generate(
         **inputs,
@@ -89,7 +105,8 @@ def run_generation(
 @torch.no_grad()
 def build(
     model_id: str,
-    add_output: Annotated[list[str], Option(default_factory=list)],
+    add_output: list[str] = [],  # noqa: B006
+    peft_id: str = "",
     output_dir: str = "",
     dtype: str = "auto",
     tp_size: int = 1,
@@ -98,16 +115,19 @@ def build(
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
 ) -> None:
+    """Build a TensorRT-LLM engine from a pretrained model."""
     output_dir = resolve_output_dir(output_dir, model_id)
     app.pretty_exceptions_show_locals = verbose
 
-    with disable_torch_jit_state():
+    with disable_torch_jit_state(), disable_modelopt_peft_patches():
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             torch_dtype=get_model_dtype(dtype),
             device_map="auto",
             trust_remote_code=trust_remote_code,
         )
+        if peft_id:
+            model = PeftModel.from_pretrained(model, peft_id)
     logger.info(f"device: {model.device} | dtype: {model.config.torch_dtype}")
 
     os.makedirs(output_dir, exist_ok=True)
@@ -122,6 +142,17 @@ def build(
 
 
 def get_model_dtype(dtype: str) -> torch.dtype | Literal["auto"]:
+    """Get PyTorch dtype from string representation.
+
+    Args:
+        dtype (str): String representation of dtype or "auto"
+
+    Returns:
+        torch.dtype | Literal["auto"]: PyTorch dtype or "auto"
+
+    Raises:
+        ValueError: If dtype string is not recognized
+    """
     if dtype == "auto":
         return "auto"
     try:
@@ -134,6 +165,18 @@ def get_model_dtype(dtype: str) -> torch.dtype | Literal["auto"]:
 
 
 def resolve_output_dir(output_dir: str, model_id: str) -> str:
+    """Resolve the output directory path.
+
+    Args:
+        output_dir (str): User-specified output directory path
+        model_id (str): Model identifier used to generate default path
+
+    Returns:
+        str: Resolved output directory path
+
+    Raises:
+        AssertionError: If output_dir exists but is not a directory
+    """
     if not output_dir:
         output_dir = get_default_output_dir(model_id)
         logger.info(f"Using default output directory: {output_dir}")
@@ -148,6 +191,14 @@ def resolve_output_dir(output_dir: str, model_id: str) -> str:
 
 
 def get_default_output_dir(model_id: str) -> str:
+    """Get default output directory path based on model ID.
+
+    Args:
+        model_id (str): Model identifier or path
+
+    Returns:
+        str: Default output directory path
+    """
     if os.path.isdir(model_id):
         return os.path.join("./engines", os.path.basename(model_id))
     return os.path.join("./engines", model_id)
@@ -162,6 +213,7 @@ def compare(
     floating_point_only: bool = False,
     device: str = DEFAULT_DEVICE,
 ) -> None:
+    """Compare tensors between two PyTorch state dictionaries."""
     logger.info(f"Map location: {device}")
     tensors_x: dict[str, torch.Tensor] = torch.load(x, weights_only=True, map_location=device)
     tensors_y: dict[str, torch.Tensor] = torch.load(y, weights_only=True, map_location=device)
@@ -202,6 +254,15 @@ def compare(
 
 
 def compare_tensors(x: str, tx: torch.Tensor, y: str, ty: torch.Tensor, transpose_tx: bool = False) -> None:
+    """Compare two tensors and log their differences.
+
+    Args:
+        x (str): Name/identifier for first tensor
+        tx (torch.Tensor): First tensor
+        y (str): Name/identifier for second tensor
+        ty (torch.Tensor): Second tensor
+        transpose_tx (bool, optional): Whether to transpose first tensor before comparison. Defaults to False.
+    """
     if transpose_tx:
         tx = tx.t()
     has_same_shape = tx.shape == ty.shape
@@ -229,6 +290,15 @@ def compare_tensors(x: str, tx: torch.Tensor, y: str, ty: torch.Tensor, transpos
 
 
 def summary(t: torch.Tensor, *, precision: str = ".16e") -> str:
+    """Generate a summary of tensor statistics.
+
+    Args:
+        t (torch.Tensor): Input tensor
+        precision (str, optional): Format string for floating point values. Defaults to ".16e".
+
+    Returns:
+        str: Multi-line string containing tensor statistics
+    """
     float_value = t.float()
     return "\n".join(
         [
