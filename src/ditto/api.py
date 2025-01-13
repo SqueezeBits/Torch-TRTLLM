@@ -46,17 +46,17 @@ def trtllm_build(
     """Build a TensorRT-LLM engine from a PyTorch model.
 
     Args:
-        model: The PyTorch model to convert
-        output_dir: Directory to save the engine and config files
-        profile_config: Configuration for optimization profiles
-        mapping: Configuration for tensor parallelism mapping
-        lora_config: Configuration for LoRA support
-        plugin_config: Configuration for TensorRT plugins
-        trt_config: TensorRT builder configuration
-        run_matmuls_in_fp32: Whether to run matrix multiplications in FP32
-        run_activations_in_model_dtype: Whether to run activations in model dtype
-        debug_node_names: List of node names to output for debugging
-        engine_cache: Cache for TensorRT engines
+        model (PreTrainedModel): The PyTorch model to convert
+        output_dir (str): Directory to save the engine and config files
+        profile_config (TRTLLMOptimizationProfileConfig | None): Configuration for optimization profiles
+        mapping (TRTLLMMapping | None): Configuration for tensor parallelism mapping
+        lora_config (TRTLLMLoraConfig | None): Configuration for LoRA support
+        plugin_config (TRTLLMPluginConfig | None): Configuration for TensorRT plugins
+        trt_config (TensorRTConfig | None): TensorRT builder configuration
+        run_matmuls_in_fp32 (bool): Whether to run matrix multiplications in FP32
+        run_activations_in_model_dtype (bool): Whether to run activations in model dtype
+        debug_node_names (list[str] | None): List of node names to output for debugging
+        engine_cache (BaseEngineCache | None): Cache for TensorRT engines
     """
     network_name = type(model).__name__
     model_dtype = model.config.torch_dtype
@@ -114,20 +114,21 @@ def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
     """Create a transform pass that adds additional outputs to the graph module.
 
     Args:
-        names: List of node names to add as additional outputs
+        names (list[str]): List of node names to add as additional outputs
 
     Returns:
-        A callable that transforms a graph module by adding the specified nodes as outputs
+        Callable[[GraphModule], GraphModule]: A callable that transforms a graph module by adding the specified nodes
+            as outputs
     """
 
     def reset_output(gm: GraphModule) -> GraphModule:
         """Add specified nodes as additional outputs to the graph module.
 
         Args:
-            gm: The graph module to modify
+            gm (GraphModule): The graph module to modify
 
         Returns:
-            The modified graph module with additional outputs
+            GraphModule: The modified graph module with additional outputs
 
         Raises:
             RuntimeError: If output node is not found or specified nodes don't exist
@@ -173,19 +174,19 @@ def trtllm_export(
     """Export a PyTorch model to a graph module and generate TensorRT-LLM engine config.
 
     Args:
-        model: The PyTorch model to export
-        argument_hint: Configuration for input arguments
-        dtype: Data type for the model
-        mapping: Configuration for tensor parallelism mapping
-        build_config: Configuration for building the engine
-        run_matmuls_in_fp32: Whether to run matrix multiplications in FP32
-        run_activations_in_model_dtype: Whether to run activations in model dtype
-        skipped_optimizers: List of optimization passes to skip
-        extra_passes: Additional transformation passes to apply
-        enable_experimental_decompositions: Whether to enable experimental decompositions
+        model (PreTrainedModel): The PyTorch model to export
+        argument_hint (TRTLLMArgumentHint): Configuration for input arguments
+        dtype (torch.dtype): Data type for the model
+        mapping (TRTLLMMapping): Configuration for tensor parallelism mapping
+        build_config (TRTLLMBuildConfig): Configuration for building the engine
+        run_matmuls_in_fp32 (bool): Whether to run matrix multiplications in FP32
+        run_activations_in_model_dtype (bool): Whether to run activations in model dtype
+        skipped_optimizers (list[PassName] | None): List of optimization passes to skip
+        extra_passes (list[Callable[[GraphModule], GraphModule]] | None): Additional transformation passes to apply
+        enable_experimental_decompositions (bool): Whether to enable experimental decompositions
 
     Returns:
-        A tuple containing the transformed graph module and engine configuration
+        tuple[GraphModule, TRTLLMEngineConfig]: A tuple containing the transformed graph module and engine configuration
     """
     logger.debug("torch.exporting module")
     hints: dict[str, TensorTypeHint | BuiltInConstant] = {
