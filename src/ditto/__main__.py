@@ -108,7 +108,7 @@ def build(
             device_map="auto",
             trust_remote_code=trust_remote_code,
         )
-    logger.info(f"device: auto | dtype: {model.config.torch_dtype}")
+    logger.info(f"device: {model.device} | dtype: {model.config.torch_dtype}")
 
     os.makedirs(output_dir, exist_ok=True)
     trtllm_build(
