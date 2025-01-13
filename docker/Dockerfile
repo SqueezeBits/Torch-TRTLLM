@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     torch==${PYTORCH_VERSION} torchvision 'numpy<2' \
     "accelerate>=0.25.0" "diffusers>=0.27.0" h5py==3.12.1 "nvidia-modelopt[torch]~=0.21.0" "onnx>=1.12.0" \
     "onnx_graphsurgeon>=0.5.2" "openai==1.54.3" "pynvml>=11.5.0" "sentencepiece>=0.1.99" \
-    "transformers<=4.45.1,>=4.38.2" pillow==10.3.0 pybind11 \
+    "transformers<=4.45.1,>=4.38.2" peft>=0.14.0 pillow==10.3.0 pybind11 \
     aenum build cuda-python click click_option_group colored evaluate lark optimum pandas packaging psutil pulp \
     pyyaml StrEnum pyzmq fastapi==0.115.4 uvicorn httpx setuptools ordered-set
 

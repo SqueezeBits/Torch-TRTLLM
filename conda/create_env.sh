@@ -23,12 +23,13 @@ get_script_directory() {
 main() {
     local name=${1:ditto}
     local script_dir
+    shift
     script_dir=`get_script_directory`
     CONDA=${CONDA:-conda}
     echo "Using `realpath ${CONDA}` to create environment named ${name}"
-    $CONDA env create -f ${script_dir}/environment.yml -n ${name}
+    $CONDA env create -f ${script_dir}/environment.yml -n ${name} $@ || (echo "Failed to create environment" && exit 1)
     echo "Installing Torch-TensorRT ..."
-    $CONDA run -n ${name} pip install torch-tensorrt==2.5.0 --no-deps
+    $CONDA run -n ${name} pip install torch-tensorrt==2.5.0 --no-deps || (echo "Failed to install Torch-TensorRT" && exit 1)
 }
 
 main $@
