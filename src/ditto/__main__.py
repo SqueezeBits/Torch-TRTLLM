@@ -16,6 +16,7 @@ from transformers import (
 from typer import Option, Typer
 
 from .api import trtllm_build
+from .configs import TRTLLMMapping
 from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
 from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
 from .types import trt_to_torch_dtype_mapping
@@ -107,8 +108,8 @@ def build(
     add_output: list[str] = [],  # noqa: B006
     peft_id: str = "",
     output_dir: str = "",
-    device: str = DEFAULT_DEVICE,
     dtype: str = "auto",
+    tp_size: int = 1,
     verbose: bool = False,
     trust_remote_code: bool = False,
     run_matmuls_in_fp32: bool = False,
@@ -122,38 +123,22 @@ def build(
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             torch_dtype=get_model_dtype(dtype),
-            device_map=device,
+            device_map="auto",
             trust_remote_code=trust_remote_code,
         )
         if peft_id:
             model = PeftModel.from_pretrained(model, peft_id)
-    logger.info(f"device: {device} | dtype: {model.config.torch_dtype}")
+    logger.info(f"device: {model.device} | dtype: {model.config.torch_dtype}")
 
-    engine, config = trtllm_build(
+    os.makedirs(output_dir, exist_ok=True)
+    trtllm_build(
         model,
+        output_dir,
+        mapping=TRTLLMMapping(tp_size=tp_size),
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         debug_node_names=add_output,
     )
-
-    os.makedirs(output_dir, exist_ok=True)
-
-    def get_output_path(filename: str) -> str:
-        output_path = os.path.join(output_dir, filename)
-        assert not os.path.exists(output_path) or os.path.isfile(output_path)
-        if os.path.exists(output_path):
-            logger.warning(f"The file at {output_path} will be overwritten")
-        return output_path
-
-    engine_path = get_output_path("rank0.engine")
-    logger.info(f"Writing serialized engine at {engine_path}")
-    with open(engine_path, "wb") as engine_file:
-        engine_file.write(engine)
-
-    config_path = get_output_path("config.json")
-    logger.info(f"Writing engine config at {config_path}")
-    with open(config_path, "w") as config_file:
-        config_file.write(config.model_dump_json(indent=2))
 
 
 def get_model_dtype(dtype: str) -> torch.dtype | Literal["auto"]:
@@ -200,7 +185,7 @@ def resolve_output_dir(output_dir: str, model_id: str) -> str:
         assert os.path.isdir(
             output_dir
         ), f"Invalid output directory: {output_dir} already exists, but it is not a directory."
-        logger.warning("The contents in output directory will be overwritten")
+        logger.warning("The contents in the output directory will be overwritten")
 
     return output_dir
 

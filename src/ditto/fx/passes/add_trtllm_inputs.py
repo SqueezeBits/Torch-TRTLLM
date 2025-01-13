@@ -25,6 +25,8 @@ class AddTRTLLMInputs(GraphOptimizationPass):
         modified = False
         input_ids_unsqueezed = False
         for name, hint in reversed(self.argument_hint.as_dict().items()):
+            if hint is None:
+                continue
             if name in placeholders:
                 if name != INPUT_IDS:
                     continue
