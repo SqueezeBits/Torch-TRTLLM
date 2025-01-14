@@ -9,8 +9,8 @@ from ..utils import get_ancestors_with_depth
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
 
 
-class FuseQKVProjection(NodewiseOptimizationPass):
-    """Fuse input projection of an attention layer to a single Linear subgraph."""
+class FuseQKVProjections(NodewiseOptimizationPass):
+    """Fuse input projections of an attention layer to a single Linear subgraph."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         graph = node.graph

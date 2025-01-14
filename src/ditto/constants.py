@@ -26,7 +26,7 @@ PassName = Literal[
     "FuseConsecutiveSplitConcat",
     "FuseConsecutiveToCopys",
     "FuseEquivalentNodes",
-    "FuseQKVProjection",
+    "FuseQKVProjections",
     "FuseReciprocalMul",
     "InsertGatherLastTokenIds",
     "HerdConstantsToTheRight",
@@ -98,6 +98,6 @@ This constant determines in which dimension should the `input_ids` be expanded.
 MATMUL_FUSION_MAX_OUTPUT_SIZE: int = int(os.getenv("MATMUL_FUSION_MAX_OUTPUT_SIZE", "-1"))
 """
 If there are fusible matmul siblings with the total output dimention size larger than this number,
-they will not be fused by the pass `FuseQKVProjection`.
+they will not be fused by the pass `FuseQKVProjections`.
 If this value is negative, all matmul siblings will be fused.
 """

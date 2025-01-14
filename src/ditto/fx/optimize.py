@@ -26,7 +26,7 @@ from .passes import (
     FuseConsecutiveSplitConcat,
     FuseConsecutiveToCopys,
     FuseEquivalentNodes,
-    FuseQKVProjection,
+    FuseQKVProjections,
     FuseReciprocalMul,
     HerdConstantsToTheRight,
     InsertGatherLastTokenIds,
@@ -150,7 +150,7 @@ def get_trtllm_conversion_transform(
         SwapUnsqueezeWithSymSizeInt,  # required for `InsertGatherLastTokenIds`
         InsertGatherLastTokenIds,
         WrapSDPASubgraphs,
-        FuseQKVProjection,
+        FuseQKVProjections,
         WrapRoPESubgraphs,
         ReplaceSDPAByFakeGPTAttentionPlugin(dtype=dtype),
         ReplaceMMByFakeGemmPlugin,
