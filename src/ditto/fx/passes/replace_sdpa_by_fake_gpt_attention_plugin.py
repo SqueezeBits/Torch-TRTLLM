@@ -7,7 +7,7 @@ from torch.fx import GraphModule, Node
 from typing_extensions import Self
 
 from ...debug import save_for_debug
-from ...types import DataType, StrictlyTyped
+from ...types import DataType, StrictlyTyped, SymbolicShape
 from ..nodes import GetAttr, Permute, Reshape, ScaledDotProductAttention, ToCopy
 from ..subgraphs import FusedLinear, Linear, TrailingReformatSequence
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
@@ -103,7 +103,7 @@ class MHAConfig(StrictlyTyped):
     num_heads: int
     embed_dim: int
     num_kv_heads: int
-    output_shape: tuple[int, ...]
+    output_shape: SymbolicShape
 
     @property
     def num_kv_heads_per_group(self) -> int:
