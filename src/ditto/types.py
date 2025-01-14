@@ -14,8 +14,8 @@ from torch.fx import Node
 BuiltInConstant = int | float | bool | None
 DeviceLikeType = str | torch.device | int
 Number = int | float | bool
-SymbolicInteger = int | torch.SymInt
-SymbolicShape = tuple[SymbolicInteger, ...]
+SymbolicInteger = torch.SymInt | int
+SymbolicShape = tuple[SymbolicInteger, ...]  # type: ignore[valid-type]
 ShapeArg = list[int | Node]
 
 
@@ -45,7 +45,7 @@ class DataType:
     def to(self, data_type: type[ToDataType]) -> ToDataType:
         if data_type is TensorProto.DataType:  # TensorProto.DataType is not actually a type
             if isinstance(self.dtype, int):
-                return cast(TensorProto.DataType, self.dtype)  # type: ignore[return-value]
+                return cast(TensorProto.DataType, self.dtype)
         elif isinstance(self.dtype, data_type):
             return self.dtype
         actual_type: type = int if data_type is TensorProto.DataType else data_type
