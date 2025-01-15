@@ -87,6 +87,7 @@ def trtllm_build(
             engine_cache=engine_cache,
             network_name=network_name,
             output_names=output_names,
+            rank=rank,
         )
         logger.opt(lazy=True).debug("Memory Footprint: {m}", m=get_memory_footprint)
         save(engine, f"rank{rank}.engine", output_dir, "Writing serialized engine")
@@ -162,6 +163,15 @@ def save(
     output_dir: str,
     message: str = "Saving",
 ) -> None:
+    """Save the contents to the specified file.
+
+    Args:
+        contents (str | Buffer): The contents to save
+        filename (str): The name of the file to save
+        output_dir (str): The directory to save the file
+        message (str): The message to log
+    """
+
     def get_output_path(filename: str) -> str:
         output_path = os.path.join(output_dir, filename)
         assert not os.path.exists(output_path) or os.path.isfile(output_path)
@@ -203,7 +213,8 @@ def trtllm_export(
         enable_experimental_decompositions (bool): Whether to enable experimental decompositions
 
     Returns:
-        Generator[tuple[int, GraphModule], None, None]: A generator that yields tuples of rank and the transformed graph module
+        Generator[tuple[int, GraphModule], None, None]:
+            A generator that yields tuples of rank and the transformed graph module
     """
     logger.debug("torch.exporting module")
     hints: dict[str, TensorTypeHint | BuiltInConstant] = {
@@ -238,9 +249,9 @@ def trtllm_export(
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         extra_passes=extra_passes,
     )
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
 
     for rank, parallelized_graph_module in parallelize(graph_module, mapping):
-        logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
+        logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
         save_for_debug(f"graph_module_rank{rank}", parallelized_graph_module)
         yield rank, parallelized_graph_module
