@@ -10,6 +10,7 @@ from torch_tensorrt.dynamo.conversion._ConversionContext import ConversionContex
 from torch_tensorrt.dynamo.conversion._ConverterRegistry import dynamo_tensorrt_converter
 from torch_tensorrt.dynamo.conversion.converter_utils import get_trt_tensor
 
+from ..debug import enable_plugin_debug_info_hook
 from ..fx.targets import GemmPlugin, GPTAttentionPlugin, Plugin
 
 
@@ -17,6 +18,7 @@ from ..fx.targets import GemmPlugin, GPTAttentionPlugin, Plugin
     GemmPlugin,
     supports_dynamic_shapes=True,
 )
+@enable_plugin_debug_info_hook
 def convert_gemm_plugin(
     ctx: ConversionContext,
     target: Target,
@@ -51,6 +53,7 @@ def convert_gemm_plugin(
     GPTAttentionPlugin,
     supports_dynamic_shapes=True,
 )
+@enable_plugin_debug_info_hook
 def convert_gpt_attention_plugin(
     ctx: ConversionContext,
     target: Target,

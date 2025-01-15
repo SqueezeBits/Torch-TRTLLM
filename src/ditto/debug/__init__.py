@@ -9,3 +9,4 @@ from .io import (
 )
 from .memory import get_device_memory_footprint, get_host_memory_footprint, get_memory_footprint
 from .network import builder_config_as_dict, get_human_readable_flags
+from .plugin import enable_plugin_debug_info_hook, plugin_debug_info_hook
