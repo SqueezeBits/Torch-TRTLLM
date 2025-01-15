@@ -46,6 +46,15 @@ class Plugin(StrictlyTyped, ABC):
             return np.int32
         if isinstance(value, float):
             return np.float32
+        if isinstance(value, list | tuple):
+            if not value:
+                raise ValueError("Empty sequence for field {name} of {cls.__name__}")
+            first_dtype = cls.get_field_dtype(name, value[0])
+            if not all(cls.get_field_dtype(name, v) == first_dtype for v in value[1:]):
+                raise ValueError(
+                    f"All elements in sequence for field {name} of {cls.__name__} must have the same dtype"
+                )
+            return first_dtype
         raise ValueError(f"Cannot infer dtype for field {name} of {cls.__name__}: {type(value)}")
 
     @classmethod  # pylint: disable-next=unused-argument
