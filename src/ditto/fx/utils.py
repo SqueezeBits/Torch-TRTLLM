@@ -68,6 +68,24 @@ def get_ancestors_with_depth(node: Node) -> dict[Node, int]:
     return ancestors
 
 
+def find_closest_common_descendant(x: Node, y: Node) -> Node | None:
+    """Find the closest common descendant node between two nodes in a graph.
+
+    Args:
+        x (Node): First node
+        y (Node): Second node
+
+    Returns:
+        Node | None: The closest common descendant node if one exists, None otherwise
+    """
+    descendants_x = get_descendants_with_depth(x)
+    descendants_y = get_descendants_with_depth(y)
+    common_descendants = set(descendants_x.keys()).intersection(descendants_y.keys())
+    if not common_descendants:
+        return None
+    return min(common_descendants, key=lambda d: descendants_x[d] + descendants_y[d])
+
+
 def get_descendants_with_depth(node: Node) -> dict[Node, int]:
     """Get all descendant nodes of a given node with their depths.
 
