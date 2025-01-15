@@ -37,19 +37,27 @@ class RewriteFloatingPointLiteralsAsNodes(NodewiseOptimizationPass):
         with graph.inserting_before(node):
             constant = GetAttr.create(graph, name, buffer)
             args_, kwargs_ = binary.args_kwargs(**{constant_key: constant})
-            if replacement := Binary.may_create(
+            if replacement := Binary.create_from_overloadpacket(
                 graph,
-                # the binary op might need to specialize as different overload in the same packet
-                binary.target.overloadpacket,
-                *args_,
-                **kwargs_,
+                args=args_,
+                kwargs=kwargs_,
+                overloadpacket=binary.target.overloadpacket,
             ):
                 inject_stack_trace_from(node, to=replacement)
                 return {node: ReplaceAllUses(by=replacement.node)}
+        graph.erase_node(constant.node)
         return {}
 
 
 def make_as_identifier(s: str) -> str:
+    """Convert a string into a valid Python identifier.
+
+    Args:
+        s (str): The input string to convert
+
+    Returns:
+        str: A valid Python identifier derived from the input string
+    """
     # Remove invalid characters and replace them with underscores
     s = re.sub(r"\W|^(?=\d)", "_", s)
 
