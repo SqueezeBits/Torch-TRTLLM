@@ -19,6 +19,7 @@ from .passes import (
     EliminateNopSlice,
     EliminateUnsqueezeSqueeze,
     FixActivationPrecision,
+    FixBinaryElementwiseOpOverloads,
     FixSliceRanges,
     FuseConsecutivePermutes,
     FuseConsecutiveReshapes,
@@ -66,6 +67,7 @@ def get_optimization_transform(
         Callable[[GraphModule], GraphModule]: the function that applies FX optimization passes to the given graph module
     """
     return compose(
+        FixBinaryElementwiseOpOverloads().as_transform(),
         get_trtllm_conversion_transform(
             argument_hint,
             dtype,
@@ -74,6 +76,7 @@ def get_optimization_transform(
             run_activations_in_model_dtype=run_activations_in_model_dtype,
         ),
         get_level2_transform(skipped_optimizers),
+        ConstantFolding().as_transform(),
     )
 
 
@@ -145,7 +148,6 @@ def get_trtllm_conversion_transform(
         A function that applies TRT-LLM conversion passes to a graph module
     """
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
-        ConstantFolding,
         AddTRTLLMInputs(argument_hint=argument_hint),
         SwapUnsqueezeWithSymSizeInt,  # required for `InsertGatherLastTokenIds`
         InsertGatherLastTokenIds,
