@@ -5,15 +5,8 @@ from typing_extensions import Self
 
 from ditto.fx.utils import get_val
 
-from ..nodes import MM, Add, Reshape
+from ..nodes import MM, AddTensorTensor, Reshape
 from .subgraph import Subgraph
-
-
-class AddTensor(Add):
-    """Add node with both operands being tensors."""
-
-    this: Node
-    other: Node
 
 
 class Linear(Subgraph):
@@ -30,7 +23,7 @@ class Linear(Subgraph):
     """
 
     mm: MM
-    add: AddTensor | None
+    add: AddTensorTensor | None
 
     @property
     def weight_node(self) -> Node:
@@ -82,7 +75,7 @@ class Linear(Subgraph):
         if not ((mm := MM.specialize_from(node)) and (weight := get_val(mm.other, torch.Tensor)) is not None):
             return None
 
-        add = AddTensor.specialize_from(users[0]) if len(users := list(mm.users)) == 1 else None
+        add = AddTensorTensor.specialize_from(users[0]) if len(users := list(mm.users)) == 1 else None
         if add is not None and not (
             add.this == mm.node
             and (bias := get_val(add.other, torch.Tensor)) is not None

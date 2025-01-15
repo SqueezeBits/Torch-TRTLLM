@@ -1,9 +1,10 @@
 from itertools import accumulate
 
-from torch.fx import Node
+from torch.fx import GraphModule, Node
 
 from ...constants import MATMUL_FUSION_MAX_OUTPUT_SIZE
-from ..nodes import MM, Add, Cat, ScaledDotProductAttention, Slice
+from ...debug import save_for_debug
+from ..nodes import MM, AddTensor, Cat, ScaledDotProductAttention, Slice
 from ..subgraphs import Linear
 from ..utils import get_ancestors_with_depth
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
@@ -11,6 +12,10 @@ from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses,
 
 class FuseQKVProjections(NodewiseOptimizationPass):
     """Fuse input projections of an attention layer to a single Linear subgraph."""
+
+    def preprocess(self, graph_module: GraphModule) -> None:
+        super().preprocess(graph_module)
+        save_for_debug("before_qkv_fusion", graph_module)
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         graph = node.graph
@@ -61,7 +66,7 @@ class FuseQKVProjections(NodewiseOptimizationPass):
                     if (n := linear.bias_node) is not None
                 ]
                 fused_bias_params = Cat.create(graph, bias_nodes)
-                fused_node = Add.create(graph, fused_node, fused_bias_params).node
+                fused_node = AddTensor.create(graph, fused_node, fused_bias_params).node
                 nodes_to_replace = [linear.add.node for linear in linears if linear.add is not None]
                 inject_stack_trace_from(*nodes_to_replace, to=fused_node)
 

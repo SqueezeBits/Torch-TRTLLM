@@ -2,7 +2,7 @@ from loguru import logger
 from torch.fx import Graph, GraphModule, Node
 
 from ...constants import INPUT_IDS_UNSQUEEZE_DIM
-from ..nodes import IndexSelect, Sub, SymSizeInt
+from ..nodes import IndexSelect, SubScalar, SymSizeInt
 from ..subgraphs import Linear
 from ..utils import forget_all_descendant_fake_tensors
 from .infra import GraphOptimizationPass, PassResult
@@ -23,7 +23,7 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
             return PassResult(graph_module=graph_module, modified=False)
 
         with graph.inserting_before(lm_head.output_node):
-            sub = Sub.create(graph, last_token_ids, 1)
+            sub = SubScalar.create(graph, last_token_ids, 1)
             index_select = IndexSelect.create(graph, lm_head.input_node, INPUT_IDS_UNSQUEEZE_DIM, sub).node
         lm_head.mm.node.replace_input_with(lm_head.mm.this, index_select)
         num_tokens_node.replace_all_uses_with(batch_size_node, delete_user_cb=lambda node: node > index_select)

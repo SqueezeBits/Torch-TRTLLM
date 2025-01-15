@@ -11,6 +11,13 @@ from .binary import Binary
 
 @Binary.register(torch.ops.aten.mm.default)
 class MM(Binary, FinalATenOp):
+    """The final specialization of `torch.ops.aten.mm.default`.
+
+    Attributes:
+        this (Node): The first tensor operand
+        other (Node): The second tensor operand
+    """
+
     this: Node
     other: Node
 
@@ -21,6 +28,13 @@ class MM(Binary, FinalATenOp):
 
 @Binary.register(torch.ops.aten.bmm.default)
 class BMM(Binary, FinalATenOp):
+    """The final specialization of `torch.ops.aten.bmm.default`.
+
+    Attributes:
+        this (Node): The first tensor operand
+        other (Node): The second tensor operand
+    """
+
     this: Node
     other: Node
 
