@@ -54,18 +54,40 @@ def get_ancestors_with_depth(node: Node) -> dict[Node, int]:
         dict[Node, int]: Dictionary mapping ancestor nodes to their depths
     """
     ancestors: dict[Node, int] = {}
-    stack = [(node, 0)]  # Initialize stack with (node, depth)
+    queue = [(node, 0)]  # Initialize queue with (node, depth)
 
-    while stack:
-        current, depth = stack.pop()
+    while queue:
+        current, depth = queue.pop(0)
         # If node is not visited or found at a greater depth
-        if current not in ancestors or depth < ancestors[current]:
+        if current not in ancestors or depth > ancestors[current]:
             ancestors[current] = depth
             # Traverse input nodes and increase the depth by 1
             for input_node in current.all_input_nodes:
-                stack.append((input_node, depth + 1))
+                queue.append((input_node, depth + 1))
 
     return ancestors
+
+
+def get_descendants_with_depth(node: Node) -> dict[Node, int]:
+    """Get all descendant nodes of a given node with their depths.
+
+    Args:
+        node (Node): The node to get descendants for
+
+    Returns:
+        dict[Node, int]: Dictionary mapping descendant nodes to their depths
+    """
+    descendants: dict[Node, int] = {}
+    queue = [(node, 0)]
+
+    while queue:
+        current, depth = queue.pop(0)
+        if current not in descendants or depth > descendants[current]:
+            descendants[current] = depth
+            for user in current.users:
+                queue.append((user, depth + 1))
+
+    return descendants
 
 
 def forget_all_descendant_fake_tensors(node: Node) -> None:
