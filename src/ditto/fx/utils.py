@@ -114,11 +114,9 @@ def forget_all_descendant_fake_tensors(node: Node) -> None:
     Args:
         node (Node): The root node to start removing fake tensors from
     """
-    nodes = [node]
-    while nodes:
-        n = nodes.pop()
+    _ = node.meta.pop("val", None)
+    for n in get_descendants_with_depth(node):
         _ = n.meta.pop("val", None)
-        nodes.extend(n.users)
 
 
 def get_tensor_metadata(node: Node) -> TensorMetadata | None:
@@ -130,8 +128,6 @@ def get_tensor_metadata(node: Node) -> TensorMetadata | None:
     Returns:
         TensorMetadata | None: The tensor metadata if available, None otherwise
     """
-    if isinstance(tensor_meta := node.meta.get("tensor_meta"), TensorMetadata):
-        return tensor_meta
     if isinstance(val := node.meta.get("val"), torch.Tensor):
         return _extract_tensor_metadata(val)
     if isinstance(val, torch.SymInt) or node.target is torch.ops.aten.sym_size.int:
