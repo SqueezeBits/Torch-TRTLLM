@@ -56,6 +56,7 @@ def open_debug_artifact(filename: str, mode: str = "w") -> IO[Any] | nullcontext
     """
     if d := get_debug_artifacts_dir():
         path = os.path.join(d, filename)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         actions = {
             "w": "Writing",
             "a": "Appending",
