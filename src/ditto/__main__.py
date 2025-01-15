@@ -120,6 +120,7 @@ def build(
     app.pretty_exceptions_show_locals = verbose
 
     with disable_torch_jit_state(), disable_modelopt_peft_patches():
+        logger.info(f"Loading model {model_id}")
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             torch_dtype=get_model_dtype(dtype),
@@ -127,6 +128,7 @@ def build(
             trust_remote_code=trust_remote_code,
         )
         if peft_id:
+            logger.info(f"Loading PEFT adapter {peft_id}")
             model = PeftModel.from_pretrained(model, peft_id)
     logger.info(f"device: {model.device} | dtype: {model.config.torch_dtype}")
 
