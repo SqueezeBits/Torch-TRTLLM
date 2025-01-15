@@ -4,70 +4,115 @@ from collections.abc import Sequence
 
 import numpy as np
 import tensorrt as trt
-from tensorrt_llm.functional import PluginInfo, set_plugin_info
 from tensorrt_llm.plugin import TRT_LLM_PLUGIN_NAMESPACE
 from torch.fx.node import Argument, Target
-from torch_tensorrt.dynamo._SourceIR import SourceIR
 from torch_tensorrt.dynamo.conversion._ConversionContext import ConversionContext
 from torch_tensorrt.dynamo.conversion._ConverterRegistry import dynamo_tensorrt_converter
-from torch_tensorrt.dynamo.conversion.converter_utils import (
-    get_trt_tensor,
-    set_layer_name,
-)
+from torch_tensorrt.dynamo.conversion.converter_utils import get_trt_tensor
 
-from ..debug import open_debug_artifact
-from ..fx.targets import GemmPlugin, GPTAttentionPlugin
+from ..fx.targets import GemmPlugin, GPTAttentionPlugin, Plugin
 
 
 @dynamo_tensorrt_converter(
     GemmPlugin,
     supports_dynamic_shapes=True,
 )
-def convert_fake_gemm_plugin(
+def convert_gemm_plugin(
     ctx: ConversionContext,
     target: Target,
     args: tuple[Argument, ...],
     kwargs: dict[str, Argument],
     name: str,
 ) -> trt.ITensor | Sequence[trt.ITensor]:
-    assert isinstance(target, GemmPlugin)
-    plugin_creator = trt.get_plugin_registry().get_plugin_creator("Gemm", "1", TRT_LLM_PLUGIN_NAMESPACE)
-    plugin_fields = target.get_plugin_fields()
-    pfc = trt.PluginFieldCollection(plugin_fields)
-    gemm_plugin = plugin_creator.create_plugin("gemm", pfc)
-    assert gemm_plugin is not None
-    args_kwargs = {f"arg_{i}": arg for i, arg in enumerate(args)}
-    args_kwargs.update(kwargs)
-    plugin_inputs: list[trt.ITensor] = [
-        x if isinstance(x, trt.ITensor) else get_trt_tensor(ctx, x, f"{name}_{key}")
-        for key, x in args_kwargs.items()
-        if isinstance(x, trt.ITensor | np.ndarray)
-    ]
+    """Convert a GemmPlugin target to a TensorRT plugin layer.
 
-    layer = ctx.net.add_plugin_v2(plugin_inputs, gemm_plugin)
-    plugin_info = PluginInfo(plugin_creator, "gemm", pfc)
-    set_plugin_info(ctx.net, layer.name, plugin_info)
-    set_layer_name(layer, target, name, SourceIR.UNKNOWN)
-    return layer.get_output(0)
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The GemmPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, GemmPlugin)
+    return _convert_plugin(
+        ctx,
+        target,
+        args,
+        kwargs,
+        name,
+        plugin_name="gemm",
+    )
 
 
 @dynamo_tensorrt_converter(
     GPTAttentionPlugin,
     supports_dynamic_shapes=True,
 )
-def convert_fake_gpt_attention_plugin(
+def convert_gpt_attention_plugin(
     ctx: ConversionContext,
     target: Target,
     args: tuple[Argument, ...],
     kwargs: dict[str, Argument],
     name: str,
 ) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a GPTAttentionPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The GPTAttentionPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
     assert isinstance(target, GPTAttentionPlugin)
-    plugin_creator = trt.get_plugin_registry().get_plugin_creator("GPTAttention", "1", TRT_LLM_PLUGIN_NAMESPACE)
-    plugin_fields = target.get_plugin_fields()
+    return _convert_plugin(
+        ctx,
+        target,
+        args,
+        kwargs,
+        name,
+        plugin_name="causal_attn",
+    )
+
+
+def _convert_plugin(
+    ctx: ConversionContext,
+    target: Plugin,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+    *,
+    plugin_name: str,
+    plugin_version: str = "1",
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a Plugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Plugin): The Plugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+        plugin_name (str): Name of the TensorRT plugin
+        plugin_version (str, optional): Version of the plugin. Defaults to "1".
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    creator_name = type(target).__name__.removesuffix("Plugin")
+    plugin_creator = trt.get_plugin_registry().get_plugin_creator(
+        creator_name, plugin_version, TRT_LLM_PLUGIN_NAMESPACE
+    )
+    plugin_fields = target.get_fields()
     pfc = trt.PluginFieldCollection(plugin_fields)
-    attn_plugin = plugin_creator.create_plugin("causal_attn", pfc)
-    assert attn_plugin is not None
+    plugin = plugin_creator.create_plugin(plugin_name, pfc)
+    assert plugin is not None
     args_kwargs = {f"arg_{i}": arg for i, arg in enumerate(args)}
     args_kwargs.update(kwargs)
     plugin_inputs: list[trt.ITensor] = [
@@ -76,26 +121,6 @@ def convert_fake_gpt_attention_plugin(
         if isinstance(x, trt.ITensor | np.ndarray)
     ]
 
-    if target.layer_idx == 0:
-        with open_debug_artifact("plugin.txt") as f:
-            if f:
-                f.writelines(
-                    (
-                        "plugin field collection:\n",
-                        "\n".join(
-                            f"{field.name} ({field.type}): {field.data} "
-                            f"(dtype={field.data.dtype}, shape={field.data.shape})"
-                            for field in pfc
-                        ),
-                        "\nplugin inputs:\n",
-                        "\n".join(
-                            f"ITensor(name={t.name}, dtype={t.dtype.name}, shape={t.shape})" for t in plugin_inputs
-                        ),
-                    )
-                )
-
-    layer = ctx.net.add_plugin_v2(plugin_inputs, attn_plugin)
-    plugin_info = PluginInfo(plugin_creator, "causal_attn", pfc)
-    set_plugin_info(ctx.net, layer.name, plugin_info)
-    set_layer_name(layer, target, name, SourceIR.UNKNOWN)
+    layer = ctx.net.add_plugin_v2(plugin_inputs, plugin)
+    layer.name = name
     return layer.get_output(0)
