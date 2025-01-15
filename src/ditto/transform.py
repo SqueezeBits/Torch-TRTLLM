@@ -13,7 +13,6 @@ from .constants import PassName
 from .contexts import ignore_symbolic_shapes_warning
 from .debug import save_for_debug
 from .fx import (
-    ConstantFolding,
     ForgetSubmodules,
     ResetCodeGen,
     fake_tensor_prop_on_node_creation,
@@ -73,7 +72,6 @@ def transform(
                 run_matmuls_in_fp32=run_matmuls_in_fp32,
                 run_activations_in_model_dtype=run_activations_in_model_dtype,
             ),
-            ConstantFolding().as_transform(),
             *(extra_passes or []),
         ]
     )

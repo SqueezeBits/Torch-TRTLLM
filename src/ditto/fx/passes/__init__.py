@@ -10,6 +10,7 @@ from .eliminate_nop_reshape_or_expand import EliminateNopReshapeOrExpand
 from .eliminate_nop_slice import EliminateNopSlice
 from .eliminate_unsqueeze_squeeze import EliminateUnsqueezeSqueeze
 from .fix_activation_precision import FixActivationPrecision
+from .fix_binary_elementwise_op_overloads import FixBinaryElementwiseOpOverloads
 from .fix_slice_ranges import FixSliceRanges
 from .forget_submodules import ForgetSubmodules
 from .fuse_consecutive_permutes import FuseConsecutivePermutes
