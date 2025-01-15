@@ -17,7 +17,11 @@ from ..utils import find_sym_size_node
 
 
 class NodeSpecialization(StrictlyTyped, ABC):
-    """Abstract base class for defining node whose arguments are specialized for a specific op and target(s)."""
+    """Base class for specializing FX nodes with type-safe validation.
+
+    Attributes:
+        node (Node): The underlying FX node being specialized
+    """
 
     node: Node = Field(exclude=True, frozen=True)
 
@@ -26,26 +30,31 @@ class NodeSpecialization(StrictlyTyped, ABC):
     def designated_op(
         cls,
     ) -> Literal["call_function", "call_method", "call_module", "get_attr", "placeholder", "output",]:
-        ...
+        """Get the FX operation type that this specialization is designated for."""
 
     @property
     def op(self) -> str:
+        """The operation type of the underlying node."""
         return self.node.op
 
     @property
     def target(self) -> Target:
+        """The target of the underlying node."""
         return self.node.target
 
     @property
     def users(self) -> dict[Node, None]:
+        """The users of the underlying node."""
         return self.node.users
 
     @property
     def name(self) -> str:
+        """The name of the underlying node."""
         return self.node.name
 
     @property
     def stack_trace(self) -> str | None:
+        """The stack trace of the underlying node."""
         return self.node.stack_trace
 
     @stack_trace.setter
@@ -54,6 +63,7 @@ class NodeSpecialization(StrictlyTyped, ABC):
 
     @property
     def output(self) -> FakeTensor | torch.SymInt | None:
+        """The output value of this node."""
         return self.node.meta.get("val")
 
     @output.setter
@@ -62,7 +72,7 @@ class NodeSpecialization(StrictlyTyped, ABC):
 
     @property
     def output_shape(self) -> SymbolicShape | None:
-        """The shape of the output of this node."""
+        """The shape of the output value of this node."""
         if isinstance(t := self.output, FakeTensor):
             return (*t.shape,)
         if isinstance(self.output, torch.SymInt):
@@ -71,7 +81,7 @@ class NodeSpecialization(StrictlyTyped, ABC):
 
     @property
     def output_shape_arg(self) -> ShapeArg | None:
-        """The shape of the output of this node that can be provided as an argument for creating other nodes."""
+        """The shape of the output value of this node that can be provided as an argument for creating other nodes."""
         if (shape := self.output_shape) is None:
             return None
 
@@ -84,6 +94,7 @@ class NodeSpecialization(StrictlyTyped, ABC):
 
     @property
     def output_dtype(self) -> torch.dtype | None:
+        """The dtype of the output value of this node."""
         if isinstance(t := self.output, FakeTensor):
             return t.dtype
         if isinstance(self.output, torch.SymInt):
@@ -91,6 +102,14 @@ class NodeSpecialization(StrictlyTyped, ABC):
         return None
 
     def args_kwargs(self, **hotfix: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        """Extract arguments and keyword arguments from this node's fields.
+
+        Args:
+            **hotfix: Override field values before extraction
+
+        Returns:
+            tuple: A tuple containing (args, kwargs) extracted from fields
+        """
         _args: list[Any] = []
         _kwargs: dict[str, Any] = {}
         append_in_args = True
@@ -98,6 +117,8 @@ class NodeSpecialization(StrictlyTyped, ABC):
         if hotfix:
             data.update(hotfix)
         for name, field in self.model_fields.items():
+            if append_in_args and not field.is_required():
+                append_in_args = False
             if field.exclude:
                 if name == "asterick":
                     append_in_args = False
@@ -107,8 +128,6 @@ class NodeSpecialization(StrictlyTyped, ABC):
                 _args.append(value)
             elif field.is_required() or value != field.get_default(call_default_factory=True):
                 _kwargs[name] = value
-            if append_in_args and not field.is_required():
-                append_in_args = False
         return tuple(_args), _kwargs
 
     @classmethod
@@ -140,6 +159,19 @@ class NodeSpecialization(StrictlyTyped, ABC):
 
     @classmethod
     def _specialize_from(cls, node: Node) -> Self:
+        """Specialize from the given node unsafely.
+
+        Args:
+            node (Node): The node to specialize from
+
+        Returns:
+            Self: The specialized node
+
+        Raises:
+            TypeError: If node validation fails
+            AssertionError: If this class has further validation logic
+            ValidationError: If the `node.args` and `node.kwargs` do not match the expected structure
+        """
         if not cls.validate_node(node):
             raise TypeError(f"{node.format_node()} cannot be validated as {cls.__name__}")
         arguments = {
@@ -154,11 +186,34 @@ class NodeSpecialization(StrictlyTyped, ABC):
         }
         return cls.model_validate({"node": node, **arguments})
 
+    @classmethod
+    def unwrap_specialization(
+        cls,
+        *args: "Argument | NodeSpecialization",
+        **kwargs: "Argument | NodeSpecialization",
+    ) -> tuple[tuple[Argument, ...], dict[str, Argument]]:
+        """Unwrap specialized nodes back to their underlying nodes.
+
+        Args:
+            *args: Positional arguments that may contain specialized nodes
+            **kwargs: Keyword arguments that may contain specialized nodes
+
+        Returns:
+            tuple: A tuple containing unwrapped (args, kwargs)
+        """
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+        return pytree.tree_unflatten(
+            (x.node if isinstance(x, NodeSpecialization) else x for x in flat_args),
+            spec,
+        )
+
     def __str__(self) -> str:
-        return self.node.format_node()  # type: ignore[return-value]
+        return self.node.format_node()
 
 
 class FinalSpecialization(NodeSpecialization):
+    """Base class for final node specializations that can be instantiated."""
+
     @classmethod
     @abstractmethod
     def create(
@@ -167,19 +222,16 @@ class FinalSpecialization(NodeSpecialization):
         *args: Argument | NodeSpecialization,
         **kwargs: Argument | NodeSpecialization,
     ) -> Self:
-        ...
+        """Create a new node of this specialization type.
 
-    @classmethod
-    def unwrap_specialization(
-        cls,
-        *args: Argument | NodeSpecialization,
-        **kwargs: Argument | NodeSpecialization,
-    ) -> tuple[tuple[Argument, ...], dict[str, Argument]]:
-        flat_args, spec = pytree.tree_flatten((args, kwargs))
-        return pytree.tree_unflatten(
-            (x.node if isinstance(x, NodeSpecialization) else x for x in flat_args),
-            spec,
-        )
+        Args:
+            graph (Graph): The FX graph to create the node in
+            *args: Positional arguments for the node
+            **kwargs: Keyword arguments for the node
+
+        Returns:
+            Self: The created specialized node
+        """
 
 
 DefaultValue = TypeVar("DefaultValue")
