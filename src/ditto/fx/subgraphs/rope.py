@@ -37,14 +37,18 @@ class RoPESubgraph(Subgraph):
     @property
     def cos(self) -> Node:
         """The cosine embeddings tensor node."""
-        assert isinstance(self.mul_cos.other, Node)
-        return self.mul_cos.other
+        assert isinstance(self.mul_cos.this, Node) and isinstance(self.mul_cos.other, Node)
+        if self.mul_cos.this == self.x:
+            return self.mul_cos.other
+        return self.mul_cos.this
 
     @property
     def sin(self) -> Node:
         """The sine embeddings tensor node."""
-        assert isinstance(self.mul_sin.other, Node)
-        return self.mul_sin.other
+        assert isinstance(self.mul_sin.this, Node) and isinstance(self.mul_sin.other, Node)
+        if Cat.specialize_from(self.mul_sin.this):
+            return self.mul_sin.other
+        return self.mul_sin.this
 
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
@@ -56,22 +60,40 @@ class RoPESubgraph(Subgraph):
         Returns:
             A configured RoPESubgraph instance if the pattern matches, None otherwise.
         """
-        # TODO: Consider commutative property of Binary ops
+        # fmt: off
         if not (
             (add := AddTensorTensor.specialize_from(node))
             and isinstance(add.this, Node)
             and isinstance(add.other, Node)
-            and (mul_cos := MulTensorTensor.specialize_from(add.this))
-            and (mul_sin := MulTensorTensor.specialize_from(add.other))
-            and isinstance(mul_sin.this, Node)
-            and (cat := Cat.specialize_from(mul_sin.this))
+        ):
+            return None
+
+        if not (
+            (mul_lhs := MulTensorTensor.specialize_from(add.this))
+            and (mul_rhs := MulTensorTensor.specialize_from(add.other))
+        ):
+            return None
+        # fmt: on
+
+        if Cat.specialize_from(mul_lhs):
+            mul_cos = mul_rhs
+            mul_sin = mul_lhs
+        elif Cat.specialize_from(mul_rhs):
+            mul_cos = mul_lhs
+            mul_sin = mul_rhs
+        else:
+            return None
+
+        if not (
+            (cat := Cat.specialize_from(mul_sin))
             and len(cat.tensors) == 2
             and (neg := Neg.specialize_from(cat.tensors[0]))
             and (slice_1 := Slice.specialize_from(neg.this))
             and (slice_2 := Slice.specialize_from(cat.tensors[1]))
-            and slice_1.this == slice_2.this == mul_cos.this
+            and ((slice_1.this == slice_2.this == mul_cos.this) or (slice_1.this == slice_2.this == mul_cos.other))
         ):
             return None
+
         return cls(
             add=add,
             mul_cos=mul_cos,
