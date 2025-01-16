@@ -70,6 +70,7 @@ from .split import Split
 from .sym_size import SymSizeInt
 from .unary import Unary
 from .unary_elementwise import (
+    Neg,
     Sqrt,
     UnaryElementwise,
 )
