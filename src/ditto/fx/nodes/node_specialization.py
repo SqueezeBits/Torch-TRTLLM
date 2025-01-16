@@ -1,6 +1,6 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 from abc import ABC, abstractmethod
-from typing import Any, Literal, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union, overload
 
 import torch
 import torch.utils._pytree as pytree
@@ -14,6 +14,9 @@ from typing_extensions import Self
 
 from ...types import ShapeArg, StrictlyTyped, SymbolicShape
 from ..utils import find_sym_size_node
+
+if TYPE_CHECKING:
+    from .aten import Binary
 
 
 class NodeSpecialization(StrictlyTyped, ABC):
@@ -59,6 +62,7 @@ class NodeSpecialization(StrictlyTyped, ABC):
 
     @stack_trace.setter
     def stack_trace(self, value: str | None) -> None:
+        """Set the stack trace string for this node."""
         self.node.stack_trace = value
 
     @property
@@ -68,6 +72,7 @@ class NodeSpecialization(StrictlyTyped, ABC):
 
     @output.setter
     def output(self, other: FakeTensor | torch.SymInt | None) -> None:
+        """Set the output value of this node."""
         self.node.meta["val"] = other
 
     @property
@@ -144,18 +149,44 @@ class NodeSpecialization(StrictlyTyped, ABC):
         return node.op == cls.designated_op()
 
     @classmethod
+    @overload
     def specialize_from(cls, node: Node) -> Self | None:
-        """Specialize from the given node.
+        ...
+
+    @classmethod
+    @overload  # type: ignore[overload-cannot-match]
+    def specialize_from(cls, node: "Binary") -> Self | None:
+        ...
+
+    @classmethod
+    def specialize_from(cls, node: Union[Node, "Binary"]) -> Self | None:
+        """Specialize from the given node or Binary.
 
         Args:
-            node (Node): a node
+            node (Node | Binary): a node or Binary instance
 
         Returns:
             Self | None: the specialized node if succeeded, `None` otherwise.
         """
-        try:
-            return cls._specialize_from(node)
-        except (AssertionError, TypeError, ValidationError):
+        if isinstance(node, Node):
+            try:
+                return cls._specialize_from(node)
+            except (AssertionError, TypeError, ValidationError):
+                return None
+        else:
+            from .aten import Binary  # pylint: disable=import-outside-toplevel
+
+            if isinstance(node, Binary):
+                try:
+                    if isinstance(node.this, Node) and (lhs := cls._specialize_from(node.this)):
+                        return lhs
+                except (AssertionError, TypeError, ValidationError):
+                    pass
+                try:
+                    if isinstance(node.other, Node) and (rhs := cls._specialize_from(node.other)):
+                        return rhs
+                except (AssertionError, TypeError, ValidationError):
+                    return None
             return None
 
     @classmethod
