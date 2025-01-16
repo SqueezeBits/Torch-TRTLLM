@@ -25,7 +25,7 @@ from .debug import (
     open_debug_artifact,
     save_for_debug,
 )
-from .fx.targets import GemmPlugin, GPTAttentionPlugin
+from .fx.targets import AllGatherPlugin, AllReducePlugin, GemmPlugin, GPTAttentionPlugin
 from .fx.utils import get_tensor_metadata
 from .types import DataType
 
@@ -95,7 +95,7 @@ class TRTLLMInterpreter(TRTInterpreter):
         assert self._cur_node is not None
         converter_packet = (
             DYNAMO_CONVERTERS.get_unvalidated(type(target))
-            if isinstance(target, GPTAttentionPlugin | GemmPlugin)
+            if isinstance(target, AllGatherPlugin | AllReducePlugin | GPTAttentionPlugin | GemmPlugin)
             else DYNAMO_CONVERTERS.get(self._cur_node)
         )
         if converter_packet is None:

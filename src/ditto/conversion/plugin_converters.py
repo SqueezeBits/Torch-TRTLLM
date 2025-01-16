@@ -11,7 +11,63 @@ from torch_tensorrt.dynamo.conversion._ConverterRegistry import dynamo_tensorrt_
 from torch_tensorrt.dynamo.conversion.converter_utils import get_trt_tensor
 
 from ..debug import enable_plugin_debug_info_hook
-from ..fx.targets import GemmPlugin, GPTAttentionPlugin, Plugin
+from ..fx.targets import AllGatherPlugin, AllReducePlugin, GemmPlugin, GPTAttentionPlugin, Plugin
+
+
+@dynamo_tensorrt_converter(
+    AllGatherPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_allgather_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert an AllGatherPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The AllGatherPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, AllGatherPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="allgather")
+
+
+@dynamo_tensorrt_converter(
+    AllReducePlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_allreduce_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert an AllReducePlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The AllReducePlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, AllReducePlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="allreduce")
 
 
 @dynamo_tensorrt_converter(
