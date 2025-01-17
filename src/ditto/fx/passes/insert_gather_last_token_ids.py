@@ -41,7 +41,7 @@ def find_lm_head(graph: Graph) -> Linear | None:
         Linear | None: The last Linear subgraph if found, None otherwise
     """
     nodes = list(graph.nodes)
-    for node in nodes[::-1]:
+    for node in reversed(nodes):
         if subgraph := Linear.configure_from(node):
             return subgraph
     return None

@@ -4,8 +4,8 @@ from typing_extensions import Self
 from ...constants import INPUT_IDS_UNSQUEEZE_DIM
 from ...types import ShapeArg
 from ..nodes import BMM, Add, ATenOp, Div, Permute, Reshape, ScaledDotProductAttention, Softmax
+from .path import TrailingReformatPath
 from .subgraph import Subgraph
-from .trailing_reformat_sequence import TrailingReformatSequence
 
 
 class ScaledDotProductAttentionSubgraph(Subgraph):
@@ -16,10 +16,10 @@ class ScaledDotProductAttentionSubgraph(Subgraph):
     def configure_from(cls, node: Node) -> Self | None:
         if not (
             (kv_bmm := BMM.specialize_from(node))
-            and (softmax := TrailingReformatSequence.traceback(Softmax, kv_bmm.this))
+            and (softmax := TrailingReformatPath.traceback(Softmax, kv_bmm.this))
             and (attn_weight_div := traceback_attn_weight_div(softmax))
             and isinstance(qk_t := attn_weight_div.this, Node)
-            and (qk_bmm := TrailingReformatSequence.traceback(BMM, qk_t))
+            and (qk_bmm := TrailingReformatPath.traceback(BMM, qk_t))
         ):
             return None
         return cls(qk_bmm=qk_bmm, kv_bmm=kv_bmm)
@@ -56,13 +56,13 @@ class ScaledDotProductAttentionSubgraph(Subgraph):
 
 
 def traceback_attn_weight_div(softmax: Softmax) -> Div | None:
-    if attn_mask_add := TrailingReformatSequence.traceback(Add, softmax.this):
+    if attn_mask_add := TrailingReformatPath.traceback(Add, softmax.this):
         for operand in (attn_mask_add.this, attn_mask_add.other):
-            if isinstance(operand, Node) and (div := TrailingReformatSequence.traceback(Div, operand)):
+            if isinstance(operand, Node) and (div := TrailingReformatPath.traceback(Div, operand)):
                 return div
         return None
 
-    return TrailingReformatSequence.traceback(Div, softmax.this)
+    return TrailingReformatPath.traceback(Div, softmax.this)
 
 
 def get_unsqueezed_shape(shape_arg: ShapeArg) -> ShapeArg:

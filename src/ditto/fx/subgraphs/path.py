@@ -1,6 +1,5 @@
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 
-from collections.abc import Callable
 from typing import TypeVar
 
 import torch
@@ -9,15 +8,13 @@ from torch._ops import OpOverload
 from torch.fx import Node
 from typing_extensions import Self
 
+from ...types import NodeCondition
 from ..nodes import NodeSpecialization
 from ..utils import get_tensor_metadata
 from .subgraph import Subgraph
 
-# pylint: disable-next=invalid-name
-NodeType = TypeVar("NodeType", bound=NodeSpecialization)
 
-
-class TrailingReformatSequence(Subgraph):
+class Path(Subgraph):
     node_seq: tuple[Node, ...]  # sorted from bottom to top
 
     @property
@@ -28,6 +25,48 @@ class TrailingReformatSequence(Subgraph):
     def top(self) -> Node:
         return self.node_seq[-1]
 
+    @property
+    def bottom(self) -> Node:
+        return self.node_seq[0]
+
+    @classmethod
+    def configure_from(cls, node: Node, *, break_if: NodeCondition = lambda _: False, max_len: int = 10) -> Self:
+        nodes: list[Node] = []
+        top = node
+
+        while True:
+            if top in nodes:
+                break
+
+            nodes.append(top)
+            if not all(cond(top) for cond in [has_single_parent, lambda n: not break_if(n)]) or len(nodes) == max_len:
+                break
+
+            top = top.all_input_nodes[0]
+
+        return cls(node_seq=tuple(nodes))
+
+    @model_validator(mode="after")  # type: ignore[misc]
+    def validate_adjacency(self) -> Self:
+        assert self.nodes
+        assert len(set(self.nodes)) == len(self.nodes)
+
+        for i, node in enumerate(self.nodes[:-1]):
+            assert has_single_parent(node)
+            assert self.nodes[i + 1] == node.all_input_nodes[0]
+
+        return self
+
+
+def has_single_parent(node: Node) -> bool:
+    return len([n for n in node.all_input_nodes if n.target is not torch.ops.aten.sym_size.int]) == 1
+
+
+# pylint: disable-next=invalid-name
+NodeType = TypeVar("NodeType", bound=NodeSpecialization)
+
+
+class TrailingReformatPath(Path):
     @property
     def reformats(self) -> tuple[Node, ...]:
         return self.node_seq[:-1]
@@ -47,34 +86,16 @@ class TrailingReformatSequence(Subgraph):
         )
 
     @classmethod
-    def configure_from(cls, node: Node, *, break_if: Callable[[Node], bool] | None = None) -> Self:
-        nodes: list[Node] = []
-        top = node
-        targets = cls.get_reformat_targets()
-        while top.target in targets:
-            nodes.append(top)
-            top = top.all_input_nodes[0]
-            if break_if is not None and break_if(top):
-                break
-        nodes.append(top)
-        return cls(node_seq=tuple(nodes))
-
-    @model_validator(mode="after")
-    def validate_adjacency(self) -> Self:
-        assert len(self.node_seq) > 0
-        targets = self.get_reformat_targets()
-        for i in range(len(self.node_seq) - 1):
-            reformat_node = self.node_seq[i]
-            assert reformat_node.target in targets
-            next_node = self.node_seq[i + 1] if i + 1 < len(self.node_seq) else self.top
-            assert reformat_node.all_input_nodes[0] == next_node
-        return self
+    def configure_from(cls, node: Node, *, break_if: NodeCondition = lambda _: False, max_len: int = -1) -> Self:
+        return super().configure_from(
+            node, break_if=lambda n: n.target not in cls.get_reformat_targets() or break_if(n), max_len=max_len
+        )
 
     @property
     def total_expansion(self) -> int | None:
         if not self.reformats:
             return 1
-        if not ((top := get_tensor_metadata(self.top)) and (bottom := get_tensor_metadata(self.reformats[0]))):
+        if not ((top := get_tensor_metadata(self.top)) and (bottom := get_tensor_metadata(self.bottom))):
             return None
         # Note that `torch.ops.aten.expand.default` is the only target that can increase the number of elements.
         # A naive implementation would be simple:
@@ -98,9 +119,9 @@ class TrailingReformatSequence(Subgraph):
         node_type: type[NodeType],
         node: Node,
         *,
-        break_if: Callable[[Node], bool] | None = None,
+        break_if: NodeCondition = lambda _: False,
     ) -> NodeType | None:
-        return node_type.specialize_from(TrailingReformatSequence.configure_from(node, break_if=break_if).top)
+        return node_type.specialize_from(TrailingReformatPath.configure_from(node, break_if=break_if).top)
 
 
 T = TypeVar("T")

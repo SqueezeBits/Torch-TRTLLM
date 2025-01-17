@@ -6,6 +6,7 @@ from typing_extensions import Self
 from ditto.fx.utils import get_val
 
 from ..nodes import MM, AddTensorTensor, Reshape
+from ..utils import get_ancestors_with_depth
 from .subgraph import Subgraph
 
 
@@ -83,3 +84,27 @@ class Linear(Subgraph):
         ):
             add = None
         return cls(mm=mm, add=add)
+
+
+def find_nearest_linear_projection(x: Node) -> Linear | None:
+    """Find the nearest Linear projection subgraph by traversing up the node's ancestors.
+
+    Searches through all ancestor nodes and finds the Linear projection subgraph that is closest
+    to the given node in terms of graph traversal depth. This is useful for identifying the
+    linear transformation that most directly affects the node's computation.
+
+    Args:
+        x: Starting node to search ancestors from
+
+    Returns:
+        The nearest Linear projection subgraph if one exists in the ancestors, None otherwise
+    """
+    if not (
+        ancester_linear_subgraphs := {
+            subgraph: depth
+            for node, depth in get_ancestors_with_depth(x).items()
+            if (subgraph := Linear.configure_from(node))
+        }
+    ):
+        return None
+    return min(ancester_linear_subgraphs, key=lambda subgraph: ancester_linear_subgraphs[subgraph])
