@@ -117,17 +117,18 @@ class NodeSpecialization(StrictlyTyped, ABC):
         if hotfix:
             data.update(hotfix)
         for name, field in self.model_fields.items():
-            if append_in_args and not field.is_required():
-                append_in_args = False
             if field.exclude:
                 if name == "asterick":
                     append_in_args = False
                 continue
             value = data[name]
-            if append_in_args:
-                _args.append(value)
-            elif field.is_required() or value != field.get_default(call_default_factory=True):
-                _kwargs[name] = value
+            if field.is_required() or value != field.get_default(call_default_factory=True):
+                if append_in_args:
+                    _args.append(value)
+                else:
+                    _kwargs[name] = value
+            if append_in_args and not field.is_required():
+                append_in_args = False
         return tuple(_args), _kwargs
 
     @classmethod
