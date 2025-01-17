@@ -3,10 +3,8 @@ from collections.abc import Callable
 import torch
 from tensorrt_llm.functional import PositionEmbeddingType
 
-from transformers.models.llama.modeling_llama import rotate_half
-
 RopeImplType = Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor]
-FAKE_ROPE_TARGETS: dict[RopeImplType, PositionEmbeddingType] = {}
+FAKE_ROPE_TARGETS: dict[PositionEmbeddingType, RopeImplType] = {}
 
 
 def register_rope_target(t: PositionEmbeddingType) -> Callable[[RopeImplType], RopeImplType]:
@@ -20,7 +18,7 @@ def register_rope_target(t: PositionEmbeddingType) -> Callable[[RopeImplType], R
     """
 
     def rope_target_wrapper(f: RopeImplType) -> RopeImplType:
-        FAKE_ROPE_TARGETS[f] = t
+        FAKE_ROPE_TARGETS[t] = f
         return f
 
     return rope_target_wrapper
@@ -38,4 +36,23 @@ def rope_gpt_neox(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torc
     Returns:
         torch.Tensor: Input tensor with rotary position embeddings applied
     """
+    from transformers.models.llama.modeling_llama import rotate_half  # pylint: disable=import-outside-toplevel
+
+    return (x * cos) + (rotate_half(x) * sin)
+
+
+@register_rope_target(PositionEmbeddingType.rope_gptj)
+def rope_gptj(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    """Apply gptj style rotary position embeddings to the input tensor.
+
+    Args:
+        x (torch.Tensor): Input tensor to apply RoPE to
+        cos (torch.Tensor): Cosine component of rotary embeddings
+        sin (torch.Tensor): Sine component of rotary embeddings
+
+    Returns:
+        torch.Tensor: Input tensor with rotary position embeddings applied
+    """
+    from transformers.models.cohere.modeling_cohere import rotate_half  # pylint: disable=import-outside-toplevel
+
     return (x * cos) + (rotate_half(x) * sin)

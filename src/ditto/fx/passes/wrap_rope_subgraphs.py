@@ -7,7 +7,6 @@ from ..subgraphs import RoPESubgraph
 from ..targets import (
     FAKE_ROPE_TARGETS,
     ROPEConfig,
-    rope_gpt_neox,
 )
 from ..utils import get_tensor_metadata
 from .infra import GraphOptimizationPass, PassResult
@@ -30,8 +29,9 @@ class WrapRoPESubgraphs(GraphOptimizationPass):
                 continue
 
             graph = node.graph
+            rope_target = FAKE_ROPE_TARGETS[rope.type]
             with graph.inserting_before(node):
-                wrapped_rope = graph.call_function(rope_gpt_neox, (rope.x, rope.cos, rope.sin))
+                wrapped_rope = graph.call_function(rope_target, (rope.x, rope.cos, rope.sin))
 
             if x_meta := get_tensor_metadata(rope.x):
                 embed_dim = x_meta.shape[-1]
@@ -40,7 +40,7 @@ class WrapRoPESubgraphs(GraphOptimizationPass):
                 embed_dim = None
             rope_config = ROPEConfig.from_pretrained_config(
                 pretrained_config,
-                positional_embedding_type=FAKE_ROPE_TARGETS[rope_gpt_neox],
+                positional_embedding_type=rope.type,
                 embedding_dim=embed_dim,
             )
             wrapped_rope.meta = rope.add.node.meta
