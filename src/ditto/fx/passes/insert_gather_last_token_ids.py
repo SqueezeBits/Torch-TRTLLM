@@ -3,7 +3,7 @@ from torch.fx import Graph, GraphModule, Node
 
 from ...constants import INPUT_IDS_UNSQUEEZE_DIM
 from ..nodes import IndexSelect, SubScalar, SymSizeInt
-from ..subgraphs import Linear
+from ..subgraphs.linear import find_last_linear
 from ..utils import forget_all_descendant_fake_tensors
 from .infra import GraphOptimizationPass, PassResult
 
@@ -18,7 +18,7 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
             (last_token_ids := placeholders.get("last_token_ids"))
             and (num_tokens_node := find_or_create_placeholder_sym_size(graph, "input_ids"))
             and (batch_size_node := find_or_create_placeholder_sym_size(graph, "last_token_ids"))
-            and (lm_head := find_lm_head(graph))
+            and (lm_head := find_last_linear(graph))
         ):
             return PassResult(graph_module=graph_module, modified=False)
 
@@ -29,22 +29,6 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
         num_tokens_node.replace_all_uses_with(batch_size_node, delete_user_cb=lambda node: node > index_select)
         forget_all_descendant_fake_tensors(index_select)
         return PassResult(graph_module=graph_module, modified=True, require_fake_tensor_prop=True)
-
-
-def find_lm_head(graph: Graph) -> Linear | None:
-    """Find the last Linear subgraph in the computation graph.
-
-    Args:
-        graph (Graph): The computation graph to search in
-
-    Returns:
-        Linear | None: The last Linear subgraph if found, None otherwise
-    """
-    nodes = list(graph.nodes)
-    for node in reversed(nodes):
-        if subgraph := Linear.configure_from(node):
-            return subgraph
-    return None
 
 
 def find_or_create_placeholder_sym_size(graph: Graph, name: str, dim: int = 0) -> Node | None:

@@ -1,6 +1,6 @@
 import torch
 from torch._subclasses import FakeTensor
-from torch.fx import Node
+from torch.fx import Graph, Node
 from typing_extensions import Self
 
 from ditto.fx.utils import get_val
@@ -122,3 +122,19 @@ def find_nearest_linear_projection(x: Node) -> Linear | None:
     ):
         return None
     return min(ancestor_linear_subgraphs, key=lambda subgraph: ancestor_linear_subgraphs[subgraph])
+
+
+def find_last_linear(graph: Graph) -> Linear | None:
+    """Find the last Linear subgraph in the computation graph.
+
+    Args:
+        graph (Graph): The computation graph to search in
+
+    Returns:
+        Linear | None: The last Linear subgraph if found, None otherwise
+    """
+    nodes = list(graph.nodes)
+    for node in reversed(nodes):
+        if subgraph := Linear.configure_from(node):
+            return subgraph
+    return None
