@@ -13,9 +13,10 @@ from .arguments import TRTLLMArgumentHint
 from .configs import TRTLLMMapping
 from .constants import PassName
 from .contexts import ignore_symbolic_shapes_warning
-from .debug import get_memory_footprint, save_for_debug
+from .debug import save_for_debug
 from .fx import (
     ForgetSubmodules,
+    ParallelizeTensor,
     ResetCodeGen,
     fake_tensor_prop_on_node_creation,
     get_level1_transform,
@@ -104,18 +105,14 @@ def parallelize(
             logger.debug(f"Running parallelize passes for rank {rank}")
             sub_graph_module = GraphModule(state_dict, deepcopy(graph_module.graph))
             # WIP: add parallelize graph module
-            # parallelize_pass_manager = DynamoPassManager.build_from_passlist(
-            #     [
-            #         ParallelizeGPTAttention(mapping=mapping).as_transform(),
-            #     ]
-            # )
-            # with fake_tensor_prop_on_node_creation(sub_graph_module), ignore_symbolic_shapes_warning():
-            #     sub_graph_module = parallelize_pass_manager(sub_graph_module)
-            logger.opt(lazy=True).debug(
-                "Memory footprint after calling parallelize (rank={rank}): {m}",
-                m=get_memory_footprint(),
-                rank=rank,
+            parallelize_pass_manager = DynamoPassManager.build_from_passlist(
+                [
+                    ParallelizeTensor(mapping=mapping.copy_with_rank(rank)).as_transform(),
+                ]
             )
+            with fake_tensor_prop_on_node_creation(sub_graph_module), ignore_symbolic_shapes_warning():
+                sub_graph_module = parallelize_pass_manager(sub_graph_module)
+
             yield rank, sub_graph_module
     else:
         yield 0, graph_module
