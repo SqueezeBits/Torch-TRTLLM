@@ -1,5 +1,6 @@
 # mypy: disable-error-code=misc
 from collections.abc import Callable
+from inspect import isclass
 from typing import ClassVar, TypeVar
 
 from loguru import logger
@@ -27,6 +28,8 @@ class ATenOp(CallFunction):
 
     def __init_subclass__(cls, **kwargs: Unpack[ConfigDict]) -> None:
         """Initialize a subclass of ATenOp.
+
+        Each subclass of ATenOp will have its own registry.
 
         Args:
             **kwargs: Configuration options for the subclass
@@ -106,14 +109,6 @@ class ATenOp(CallFunction):
 
     @classmethod
     def _specialize_from(cls, node: Node) -> Self:
-        """Specialize from a node, looking up the appropriate specialization in the registry.
-
-        Args:
-            node (Node): The node to specialize from
-
-        Returns:
-            Self: The specialized node
-        """
         assert cls._REGISTRY, f"{cls.__name__} does not have final specializations"
         if (
             not issubclass(cls, FinalATenOp)
@@ -173,6 +168,24 @@ class ATenOp(CallFunction):
 
 class FinalATenOp(ATenOp, FinalCallFunction):
     """Base class for final ATen operator specializations."""
+
+    def __init_subclass__(cls, **kwargs: Unpack[ConfigDict]) -> None:
+        """Initialize a subclass of `FinalATenOp`.
+
+        - A direct subclass of `FinalATenOp` will have its own registry
+            and must be registered with a unique ATen op overload using its base class's `register` method.
+        - A subclass of a subclass of `FinalATenOp` will inherit its base class's registry.
+
+        Args:
+            **kwargs: Configuration options for the subclass
+        """
+        # When the base class is already a FinalATenOp, we need to inherit its registry
+        if isclass(baseclass := cls.__base__) and issubclass(baseclass, FinalATenOp) and baseclass is not FinalATenOp:
+            # pylint: disable-next=no-member
+            cls._REGISTRY = baseclass._REGISTRY
+            logger.trace(f"{cls.__name__} is a further specialization of the final ATen op {baseclass.__name__}")
+        else:
+            super().__init_subclass__(**kwargs)
 
     @classmethod
     def designated_target(cls) -> OpOverload:
