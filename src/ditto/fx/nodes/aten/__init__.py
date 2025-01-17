@@ -22,6 +22,7 @@ from .binary_elementwise import (
     BinaryElementwise,
     Div,
     DivDefault,
+    DivScalar,
     DivScalarMode,
     DivScalarTensor,
     DivTensor,
@@ -50,6 +51,7 @@ from .binary_elementwise import (
 from .combine import Cat, Combine, Stack
 from .copy_like import Clone, ToCopy
 from .embedding import Embedding
+from .index import Index
 from .index_select_node import IndexSelect
 from .mm import BMM, MM
 from .reduction import MeanDim, Reduction, SumDimIntList

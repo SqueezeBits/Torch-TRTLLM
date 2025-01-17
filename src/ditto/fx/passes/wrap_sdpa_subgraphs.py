@@ -12,4 +12,4 @@ class WrapSDPASubgraphs(NodewiseOptimizationPass):
             (sdpa := ScaledDotProductAttentionSubgraph.configure_from(node)) and (output := sdpa.insert_fused_graph())
         ):
             return {}
-        return {sdpa.kv_bmm.node: ReplaceAllUses(by=output)}
+        return {sdpa.av_bmm.node: ReplaceAllUses(by=output)}
