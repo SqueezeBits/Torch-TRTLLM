@@ -1,7 +1,8 @@
-from typing import TypeVar, cast, overload
+from typing import Any, TypeVar, cast, overload
 from weakref import WeakKeyDictionary
 
 import torch
+import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx import Graph, Node
 from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
@@ -161,7 +162,7 @@ def get_val(node: Node) -> torch.Tensor | torch.SymInt | None:
     ...
 
 
-def get_val(node: Node, expected_type: type[T] | None = None) -> T | None:  # type: ignore[misc]
+def get_val(node: Node, expected_type: type[T] | None = None) -> T | None:
     """Get the value stored in a node's metadata.
 
     Args:
@@ -228,3 +229,31 @@ def find_sym_size_node(graph: Graph, s: torch.SymInt) -> Node:
 
     with detailed_sym_node_str():
         raise RuntimeError(f"Failed to find a node producing the symbolic integer {s}")
+
+
+def replace_all_uses_with(s: Node, replace_with: Node, exclude_nodes: list[Node] | None = None) -> Node:
+    """Replace all uses of the source node with the target node.
+
+    This function replaces the source node with the target node wherever it is used.
+    It preserves the target node's original arguments to prevent self-referencing issues.
+
+    Args:
+        s (Node): The source node to be replaced
+        replace_with (Node): The target node to replace the source node
+        exclude_nodes (list[Node] | None, optional): Nodes to exclude from the replacement. Defaults to None
+
+    Returns:
+        Node: The target node
+    """
+    preserved_nodes: dict[Node, tuple[Any, ...]] = {}
+    if exclude_nodes is not None:
+        for node in exclude_nodes:
+            preserved_nodes[node] = (node.args, node.kwargs)
+    for node in s.graph.nodes:
+        flat_inputs, _ = pytree.tree_flatten((node.args, node.kwargs))
+        if s in flat_inputs and node is replace_with:
+            preserved_nodes[node] = (node.args, node.kwargs)
+
+    s.replace_all_uses_with(replace_with)
+    for node, (args, kwargs) in preserved_nodes.items():
+        node.args, node.kwargs = args, kwargs
