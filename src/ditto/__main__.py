@@ -136,6 +136,11 @@ def build(
             logger.info(f"Loading PEFT adapter {peft_id}")
             model = PeftModel.from_pretrained(model, peft_id)
     logger.info(f"device: {model.device} | dtype: {model.config.torch_dtype}")
+    if dtype == "auto" and model.config.torch_dtype == torch.float32:
+        logger.warning(
+            "Using FP32 model might consume significant amount of memory. "
+            "Specify `--dtype float16` or `--dtype bfloat16` to reduce memory usage."
+        )
 
     os.makedirs(output_dir, exist_ok=True)
     trtllm_build(
