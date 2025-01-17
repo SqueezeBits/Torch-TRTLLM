@@ -17,8 +17,8 @@ class ReplaceIndexBySlice(NodewiseOptimizationPass):
             end = start + 1
 
             with graph.inserting_before(node):
-                identical_slice = graph.call_function(torch.ops.aten.slice.Tensor, (index.this, dim, start, end))
-                inject_stack_trace_from(node, to=identical_slice)
+                equivalent_slice = graph.call_function(torch.ops.aten.slice.Tensor, (index.this, dim, start, end))
+                inject_stack_trace_from(node, to=equivalent_slice)
 
-            return {node: ReplaceAllUses(by=identical_slice)}
+            return {node: ReplaceAllUses(by=equivalent_slice)}
         return {}

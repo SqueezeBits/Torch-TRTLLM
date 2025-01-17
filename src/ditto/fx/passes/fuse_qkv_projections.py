@@ -27,16 +27,14 @@ class FuseQKVProjections(NodewiseOptimizationPass):
         ):
             return {}
 
-        if len(linear_layers := filter_unique_linear_nodes([q_proj, k_proj, v_proj])) == 1 or not are_weights_fusible(
-            linear_layers
-        ):
+        if len(linears := remove_duplicates([q_proj, k_proj, v_proj])) == 1 or not are_weights_fusible(linears):
             return {}
 
-        output_sizes = [user.weight_tensor.shape[1] for user in linear_layers]
+        output_sizes = [user.weight_tensor.shape[1] for user in linears]
         if 0 <= MATMUL_FUSION_MAX_OUTPUT_SIZE < sum(output_sizes):
             return {}
 
-        with graph.inserting_before(linear_layers[0].mm.node):
+        with graph.inserting_before(linears[0].mm.node):
             # The existing weight nodes must be recreated in order to avoid breaking topological orders.
             weight_nodes = [
                 graph.create_node(
@@ -46,14 +44,14 @@ class FuseQKVProjections(NodewiseOptimizationPass):
                     kwargs=n.kwargs,
                     name=n.name,
                 )
-                for n in (linear.weight_node for linear in linear_layers)
+                for n in (linear.weight_node for linear in linears)
             ]
             fused_param = Cat.create(graph, weight_nodes, 1)
-            fused_node: Node = MM.create(graph, linear_layers[0].input_node, fused_param).node
-            nodes_to_replace = [linear.mm.node for linear in linear_layers]
+            fused_node: Node = MM.create(graph, linears[0].input_node, fused_param).node
+            nodes_to_replace = [linear.mm.node for linear in linears]
             inject_stack_trace_from(*nodes_to_replace, to=fused_node)
 
-            if all(linear.bias_node is not None for linear in linear_layers):
+            if all(linear.bias_node is not None for linear in linears):
                 # The existing bias nodes must be recreated in order to avoid breaking topological orders.
                 bias_nodes = [
                     graph.create_node(
@@ -63,12 +61,12 @@ class FuseQKVProjections(NodewiseOptimizationPass):
                         kwargs=n.kwargs,
                         name=n.name,
                     )
-                    for linear in linear_layers
+                    for linear in linears
                     if (n := linear.bias_node) is not None
                 ]
                 fused_bias_params = Cat.create(graph, bias_nodes)
                 fused_node = AddTensor.create(graph, fused_node, fused_bias_params).node
-                nodes_to_replace = [linear.add.node for linear in linear_layers if linear.add is not None]
+                nodes_to_replace = [linear.add.node for linear in linears if linear.add is not None]
                 inject_stack_trace_from(*nodes_to_replace, to=fused_node)
 
             slice_indices = [0, *accumulate(output_sizes)]
@@ -84,28 +82,28 @@ class FuseQKVProjections(NodewiseOptimizationPass):
         return results
 
 
-def filter_unique_linear_nodes(linear_layers: list[Linear]) -> list[Linear]:
+def remove_duplicates(linears: list[Linear]) -> list[Linear]:
     """Filter out duplicate linear layers.
 
     Args:
-        linear_layers (list[Linear]): List of linear layers to filter
+        linears (list[Linear]): List of linear layers to filter
 
     Returns:
         list[Linear]: List containing only unique linear layers
     """
-    return list({linear.mm.node: linear for linear in linear_layers}.values())
+    return list({linear.mm.node: linear for linear in linears}.values())
 
 
-def are_weights_fusible(linear_layers: list[Linear]) -> bool:
+def are_weights_fusible(linears: list[Linear]) -> bool:
     """Check if the weights of linear layers are fusible.
 
     Args:
-        linear_layers (list[Linear]): A list of linear layers to check for fusibility
+        linears (list[Linear]): A list of linear layers to check for fusibility
 
     Returns:
         bool: True if all linear layers have fusible weights, False otherwise
     """
-    first_weight, *other_weights = (linear.weight_tensor for linear in linear_layers)
+    first_weight, *other_weights = (linear.weight_tensor for linear in linears)
     return first_weight.ndim == 2 and all(
         other_weight.ndim == 2 and first_weight.shape[0] == other_weight.shape[0] for other_weight in other_weights
     )

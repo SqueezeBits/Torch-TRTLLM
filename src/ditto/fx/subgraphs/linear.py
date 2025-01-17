@@ -100,11 +100,11 @@ def find_nearest_linear_projection(x: Node) -> Linear | None:
         The nearest Linear projection subgraph if one exists in the ancestors, None otherwise
     """
     if not (
-        ancester_linear_subgraphs := {
+        ancestor_linear_subgraphs := {
             subgraph: depth
             for node, depth in get_ancestors_with_depth(x).items()
             if (subgraph := Linear.configure_from(node))
         }
     ):
         return None
-    return min(ancester_linear_subgraphs, key=lambda subgraph: ancester_linear_subgraphs[subgraph])
+    return min(ancestor_linear_subgraphs, key=lambda subgraph: ancestor_linear_subgraphs[subgraph])

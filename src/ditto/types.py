@@ -21,6 +21,13 @@ ShapeArg = list[int | Node]
 
 
 class StrictlyTyped(BaseModel):
+    """A base class for strictly typed models with enhanced validation.
+
+    This class extends `BaseModel` and enforces strict type checking and validation
+    rules for its fields. It is configured to allow arbitrary types, validate field
+    assignments, and validate default values.
+    """
+
     model_config: ClassVar[ConfigDict] = {
         "arbitrary_types_allowed": True,
         "validate_assignment": True,
@@ -38,12 +45,37 @@ ToDataType = TypeVar("ToDataType", torch.dtype, trt.DataType, int)
 
 
 class DataType:
+    """A utility class for managing and converting between data types.
+
+    This class facilitates conversions between various data types, such as PyTorch
+    `torch.dtype`, TensorRT `trt.DataType`, and `onnx.TensorProto.DataType` (`int`). It uses
+    a mapping mechanism to define conversion rules and supports both direct and
+    composed mappings.
+
+    Attributes:
+        MAPPING (ClassVar[dict[tuple[type, type], dict]]): A class-level dictionary that
+            stores mappings between data type pairs and their conversion rules
+    """
+
     MAPPING: ClassVar[dict[tuple[type, type], dict]] = {}
 
     def __init__(self, dtype: FromDataType) -> None:
         self.dtype: torch.dtype | trt.DataType | int = dtype
 
     def to(self, data_type: type[ToDataType]) -> ToDataType:
+        """Convert the stored data type to a specified target type.
+
+        Args:
+            data_type (type[ToDataType]): The target data type class.
+
+        Returns:
+            ToDataType: The converted data type.
+
+        Raises:
+            AssertionError: If a mapping for the conversion is not defined.
+            UnsupportedDataTypeConversionError: If the conversion fails due to a missing
+                specific mapping for the given value.
+        """
         if data_type is TensorProto.DataType:  # TensorProto.DataType is not actually a type
             if isinstance(self.dtype, int):
                 return cast(TensorProto.DataType, self.dtype)
@@ -63,6 +95,16 @@ class DataType:
         cls,
         dtype_mapping: Callable[[], dict[FromDataType, ToDataType]],
     ) -> Callable[[], dict[FromDataType, ToDataType]]:
+        """Register a direct mapping between two types.
+
+        Args:
+            dtype_mapping (Callable[[], dict[FromDataType, ToDataType]]): A callable that
+                generates a mapping dictionary between the source and target types.
+
+        Returns:
+            Callable[[], dict[FromDataType, ToDataType]]: The cached callable that
+                provides the mapping.
+        """
         m = dtype_mapping()
         _from, _to = next(iter(m.items()))
         type_from = type(_from)
@@ -77,6 +119,17 @@ class DataType:
         m0: dict[FromDataType, OtherDataType],
         m1: dict[OtherDataType, ToDataType],
     ) -> None:
+        """Define a mapping by composing two existing mappings.
+
+        Args:
+            m0 (dict[FromDataType, OtherDataType]): The first mapping, which connects
+                the source type to an intermediate type.
+            m1 (dict[OtherDataType, ToDataType]): The second mapping, which connects the
+                intermediate type to the target type.
+
+        Returns:
+            None
+        """
         m = {k: m1[v] for k, v in m0.items() if v in m1}
         _from = next(iter(m0.keys()))
         _to = next(iter(m1.values()))
@@ -88,6 +141,17 @@ class DataType:
         type_pair: tuple[type[FromDataType], type[ToDataType]],
         mapping: dict[FromDataType, ToDataType],
     ) -> None:
+        """Register a specific mapping between two types.
+
+        Args:
+            type_pair (tuple[type[FromDataType], type[ToDataType]]): A tuple containing
+                the source and target types.
+            mapping (dict[FromDataType, ToDataType]): A dictionary defining the
+                conversion rules between the source and target types.
+
+        Raises:
+            AssertionError: If a mapping for the given type pair is already defined.
+        """
         assert type_pair not in cls.MAPPING, (
             f"{cls.__name__}[{type_pair[0]}, {type_pair[1]}] is already defined with "
             f"mapping {cls.MAPPING[type_pair]}"
