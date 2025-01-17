@@ -53,6 +53,11 @@ def generate(
         trust_remote_code=trust_remote_code,
     )
     logger.info(f"device: {device} | dtype: {model.config.torch_dtype}")
+    if dtype == "auto" and model.config.torch_dtype == torch.float32:
+        logger.warning(
+            "Using FP32 model might consume significant amount of memory. "
+            "Specify `--dtype float16` or `--dtype bfloat16` to reduce memory usage."
+        )
 
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     tokenizer.pad_token_id = model.config.pad_token_id or 0
