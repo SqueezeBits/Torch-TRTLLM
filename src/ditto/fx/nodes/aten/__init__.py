@@ -22,6 +22,7 @@ from .binary_elementwise import (
     BinaryElementwise,
     Div,
     DivDefault,
+    DivScalar,
     DivScalarMode,
     DivScalarTensor,
     DivTensor,

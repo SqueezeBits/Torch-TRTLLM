@@ -15,7 +15,7 @@ def export(
     *,
     strict: bool = False,
     pre_dispatch: bool = False,
-    sdp_backends: SDPBackend | list[SDPBackend] = SDPBackend.EFFICIENT_ATTENTION,
+    sdp_backends: SDPBackend | list[SDPBackend] = SDPBackend.MATH,
 ) -> ExportedProgram:
     if not model._supports_sdpa:
         logger.warning(
@@ -24,6 +24,7 @@ def export(
         )
 
     with sdpa_kernel(sdp_backends):
+        torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(model.dtype in (torch.float16, torch.bfloat16))
         exported_program = torch_export(
             ConstantInputFilterer(model, constant_inputs=arguments.constant_inputs),
             args=(),

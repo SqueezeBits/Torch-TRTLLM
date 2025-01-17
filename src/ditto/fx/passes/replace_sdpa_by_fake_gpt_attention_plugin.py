@@ -3,15 +3,16 @@ from typing import Any, TypeVar, overload
 import tensorrt as trt
 import torch
 from loguru import logger
-from torch.fx import GraphModule, Node
+from torch.fx import GraphModule
 from typing_extensions import Self
 
 from ...debug import save_for_debug
 from ...types import DataType, StrictlyTyped, SymbolicShape
 from ..nodes import GetAttr, Permute, Reshape, ScaledDotProductAttention, ToCopy
-from ..subgraphs import FusedLinear, Linear, TrailingReformatSequence
+from ..subgraphs import FusedLinear, TrailingReformatPath
+from ..subgraphs.linear import Linear, find_nearest_linear_projection
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
-from ..utils import get_ancestors_with_depth, get_tensor_metadata
+from ..utils import get_tensor_metadata
 from .infra import GraphOptimizationPass, PassResult
 
 
@@ -152,13 +153,13 @@ class MHAConfig(StrictlyTyped):
         ):
             return None
 
-        q_seq = TrailingReformatSequence.configure_from(sdpa.query)
-        k_seq = TrailingReformatSequence.configure_from(sdpa.key)
-        v_seq = TrailingReformatSequence.configure_from(sdpa.value)
+        q_seq = TrailingReformatPath.configure_from(sdpa.query)
+        k_seq = TrailingReformatPath.configure_from(sdpa.key)
+        v_seq = TrailingReformatPath.configure_from(sdpa.value)
         q_rope = q_seq.top
         k_rope = k_seq.top
-        q = TrailingReformatSequence.configure_from(q_rope.all_input_nodes[0]).top
-        k = TrailingReformatSequence.configure_from(k_rope.all_input_nodes[0]).top
+        q = TrailingReformatPath.configure_from(q_rope.all_input_nodes[0]).top
+        k = TrailingReformatPath.configure_from(k_rope.all_input_nodes[0]).top
         v = v_seq.top
         if not (
             q_rope.target in FAKE_ROPE_TARGETS
@@ -189,30 +190,6 @@ class MHAConfig(StrictlyTyped):
             num_kv_heads=num_kv_heads,
             output_shape=(*query.shape[:-1], value.shape[-1]),
         )
-
-
-def find_nearest_linear_projection(x: Node) -> Linear | None:
-    """Find the nearest Linear projection subgraph by traversing up the node's ancestors.
-
-    Searches through all ancestor nodes and finds the Linear projection subgraph that is closest
-    to the given node in terms of graph traversal depth. This is useful for identifying the
-    linear transformation that most directly affects the node's computation.
-
-    Args:
-        x: Starting node to search ancestors from
-
-    Returns:
-        The nearest Linear projection subgraph if one exists in the ancestors, None otherwise
-    """
-    if not (
-        ancester_linear_subgraphs := {
-            subgraph: depth
-            for node, depth in get_ancestors_with_depth(x).items()
-            if (subgraph := Linear.configure_from(node))
-        }
-    ):
-        return None
-    return min(ancester_linear_subgraphs, key=lambda subgraph: ancester_linear_subgraphs[subgraph])
 
 
 T = TypeVar("T")

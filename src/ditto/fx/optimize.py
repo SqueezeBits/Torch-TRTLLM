@@ -115,6 +115,7 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     HerdConstantsToTheRight,
     ReplaceViewByReshape,
     DecomposeAddMM,
+    WrapSDPASubgraphs,
 )
 
 # passes required after the TRT-LLM conversion passes
@@ -152,7 +153,6 @@ def get_trtllm_conversion_transform(
         AddTRTLLMInputs(argument_hint=argument_hint),
         SwapUnsqueezeWithSymSizeInt,  # required for `InsertGatherLastTokenIds`
         InsertGatherLastTokenIds,
-        WrapSDPASubgraphs,
         FuseQKVProjections,
         WrapRoPESubgraphs,
         ReplaceIndexBySlice,

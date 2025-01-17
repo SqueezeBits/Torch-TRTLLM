@@ -26,13 +26,13 @@ class ScaledDotProductAttention(FinalCallFunction):
 
     @property
     def is_eligible_for_gpt_attention_plugin(self) -> bool:
-        embed_dim = q.shape[-1] if (q := get_tensor_metadata(self.query)) else None
-        default_scale = None if embed_dim is None else 1 / math.sqrt(embed_dim)
+        head_size = q.shape[-1] if (q := get_tensor_metadata(self.query)) else None
+        default_scale = None if head_size is None else 1 / math.sqrt(head_size)
         for name, field in self.model_fields.items():
             if field.is_required():
                 continue
             if (value := getattr(self, name)) != (default_value := field.get_default()):
-                if name == "scale" and value == default_scale:
+                if name == "scale" and default_scale and math.isclose(value, default_scale):
                     continue
                 logger.warning(
                     f"Cannot support the non-default '{name}={value}' provided to `F.scaled_dot_product_attention` "
