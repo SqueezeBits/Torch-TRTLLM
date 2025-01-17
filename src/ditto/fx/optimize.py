@@ -31,6 +31,7 @@ from .passes import (
     FuseReciprocalMul,
     HerdConstantsToTheRight,
     InsertGatherLastTokenIds,
+    ReplaceIndexBySlice,
     ReplaceMMByFakeGemmPlugin,
     ReplaceSDPAByFakeGPTAttentionPlugin,
     ReplaceViewByReshape,
@@ -154,6 +155,7 @@ def get_trtllm_conversion_transform(
         WrapSDPASubgraphs,
         FuseQKVProjections,
         WrapRoPESubgraphs,
+        ReplaceIndexBySlice,
         ReplaceSDPAByFakeGPTAttentionPlugin(dtype=dtype),
         ReplaceMMByFakeGemmPlugin,
     ]
@@ -235,7 +237,7 @@ def get_transform(
             pass_name := type(fx_pass).__name__ if isinstance(fx_pass, GraphOptimizationPass) else fx_pass.__name__
         ) in skipped_optimizers:
             logger.info(f"Skipping FX optimization pass {pass_name}")
-            _ = skipped_optimizers.pop(skipped_optimizers.index(pass_name))  # type: ignore[arg-type]
+            _ = skipped_optimizers.pop(skipped_optimizers.index(pass_name))
             continue
         pass_manager.add_pass(fx_pass)
 
