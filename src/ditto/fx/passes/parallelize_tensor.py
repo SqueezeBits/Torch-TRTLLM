@@ -4,19 +4,14 @@ import tensorrt as trt
 import torch
 from tensorrt_llm.functional import AllReduceConfig, AllReduceFusionOp, AllReduceStrategy
 from torch.fx import Graph, GraphModule, Node
-from typing_extensions import Self
 
 from ...configs.trtllm.pretrained import TRTLLMMapping
-from ...types import DataType, StrictlyTyped
+from ...types import DataType
 from ..nodes import GetAttr, Permute, Reshape
-from ..subgraphs.linear import Linear, find_last_linear, find_nearest_linear_projection
-from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs, GPTAttentionPlugin
-from ..utils import (
-    find_closest_common_descendant,
-    forget_all_descendant_fake_tensors,
-    get_descendants_with_depth,
-    get_val,
-)
+from ..subgraphs import DecoderLayer
+from ..subgraphs.linear import Linear, find_last_linear
+from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs
+from ..utils import forget_all_descendant_fake_tensors, get_val
 from .infra import (
     GraphOptimizationPass,
     PassResult,
@@ -40,25 +35,35 @@ class ParallelizeTensor(GraphOptimizationPass):
     def call(self, graph_module: GraphModule) -> PassResult:
         overall_modified = False
         for node in graph_module.graph.nodes:
-            if not (pattern := DecoderPattern.extract_from(node)):
+            if not (decoder_layer := DecoderLayer.configure_from(node)):
                 continue
             assert (
-                pattern.plugin.num_heads % self.mapping.tp_size == 0
+                decoder_layer.gpt_attn_plugin.target.num_heads % self.mapping.tp_size == 0
             ), "num_attention_heads must be divisible by tp_size"
 
-            if self.first_node_rewritten is None:
-                self.first_node_rewritten = pattern.attn_qkv.input_node
+            # Note: We need to copy the plugin node's target to avoid modifying the original.
+            # This is because GraphModule's deepcopy method creates new nodes rather than copying existing ones.
+            # It doesn't copy the target of the node, but the plugin node's target is a class instance,
+            # so it needs to be copied.
+            node.target = copy(node.target)
 
-            hidden_size = pattern.plugin.head_size * pattern.plugin.num_heads
-            attention_head_size = hidden_size // pattern.plugin.num_heads
-            num_attention_heads = pattern.plugin.num_heads // self.mapping.tp_size
-            num_attention_kv_heads = (pattern.plugin.num_kv_heads + self.mapping.tp_size - 1) // self.mapping.tp_size
+            if self.first_node_rewritten is None:
+                self.first_node_rewritten = decoder_layer.attn_qkv.input_node
+
+            hidden_size = (
+                decoder_layer.gpt_attn_plugin.target.head_size * decoder_layer.gpt_attn_plugin.target.num_heads
+            )
+            attention_head_size = hidden_size // decoder_layer.gpt_attn_plugin.target.num_heads
+            num_attention_heads = decoder_layer.gpt_attn_plugin.target.num_heads // self.mapping.tp_size
+            num_attention_kv_heads = (
+                decoder_layer.gpt_attn_plugin.target.num_kv_heads + self.mapping.tp_size - 1
+            ) // self.mapping.tp_size
 
             # update plugin's fields and val's shape
-            pattern.plugin.num_heads = num_attention_heads
-            pattern.plugin.num_kv_heads = num_attention_kv_heads
-            pattern.plugin.tp_size = self.mapping.tp_size
-            pattern.plugin.tp_rank = self.mapping.tp_rank
+            decoder_layer.gpt_attn_plugin.target.num_heads = num_attention_heads
+            decoder_layer.gpt_attn_plugin.target.num_kv_heads = num_attention_kv_heads
+            decoder_layer.gpt_attn_plugin.target.tp_size = self.mapping.tp_size
+            decoder_layer.gpt_attn_plugin.target.tp_rank = self.mapping.tp_rank
 
             # parallelize the qkv linear
             in_features = hidden_size
@@ -67,7 +72,7 @@ class ParallelizeTensor(GraphOptimizationPass):
             out_features = q_dim + (2 * kv_dim)
             self.parallelize_column_linear(
                 graph_module.graph,
-                pattern.attn_qkv,
+                decoder_layer.attn_qkv,
                 in_features,
                 out_features,
                 gather_output=False,
@@ -81,18 +86,18 @@ class ParallelizeTensor(GraphOptimizationPass):
             out_features = hidden_size
             self.parallelize_row_linear(
                 graph_module.graph,
-                pattern.attn_dense,
+                decoder_layer.attn_dense,
                 in_features,
                 out_features,
             )
 
             # parallelize the mlp gate linear
-            ffn_hidden_size = get_val(pattern.mlp_gate.output_node).shape[-1]
+            ffn_hidden_size = get_val(decoder_layer.mlp_gate.output_node).shape[-1]
             in_features = hidden_size
             out_features = ffn_hidden_size
             self.parallelize_column_linear(
                 graph_module.graph,
-                pattern.mlp_gate,
+                decoder_layer.mlp_gate,
                 in_features,
                 out_features,
                 gather_output=False,
@@ -105,7 +110,7 @@ class ParallelizeTensor(GraphOptimizationPass):
             )
             self.parallelize_column_linear(
                 graph_module.graph,
-                pattern.mlp_up_proj,
+                decoder_layer.mlp_up_proj,
                 in_features,
                 out_features,
                 gather_output=False,
@@ -116,7 +121,7 @@ class ParallelizeTensor(GraphOptimizationPass):
             out_features = hidden_size
             self.parallelize_row_linear(
                 graph_module.graph,
-                pattern.mlp_down_proj,
+                decoder_layer.mlp_down_proj,
                 in_features,
                 out_features,
             )
@@ -386,101 +391,3 @@ def insert_allreduce_plugin(
             plugin_inputs.model_dump(),
         )
     to.replace_all_uses_with(allreduce, delete_user_cb=lambda user: user is not allreduce)
-
-
-class DecoderPattern(StrictlyTyped):
-    """A pattern representing a decoder layer of GPT model.
-
-    This pattern is used to extract the linear subgraphs based on the GPT attention plugin node.
-    1) Find the GPTAttentionPlugin node
-    2) Find the nearest linear subgraph to the GPTAttentionPlugin node
-       by using find_nearest_linear_projection (QKV linear)
-    3) Find the descendant linear subgraphs by using find_descendant_linears
-       (Dense linear, MLP gate, MLP up-projection, MLP down-projection)
-
-    Attributes:
-        plugin (GPTAttentionPlugin): The GPT attention plugin node
-        attn_qkv (Linear): The QKV linear layer
-        attn_dense (Linear): The dense linear layer
-        mlp_gate (Linear): The MLP gate linear layer
-        mlp_up_proj (Linear): The MLP up-projection linear layer
-        mlp_down_proj (Linear): The MLP down-projection linear layer
-    """
-
-    plugin: GPTAttentionPlugin
-    attn_qkv: Linear
-    attn_dense: Linear
-    mlp_gate: Linear
-    mlp_up_proj: Linear  # Note: mlp_gate and mlp_up_proj may be fused in the future
-    mlp_down_proj: Linear
-
-    @classmethod
-    def extract_from(cls, node: Node) -> Self | None:
-        """Extract configuration from a GPT attention plugin node.
-
-        Recursively analyzes the plugin node's ancestors and predecessors to find the associated
-        linear/gemm operations for attention and feed forward network.
-
-        Args:
-            node: Node expected to be a GPTAttentionPlugin
-
-        Returns:
-            DecoderPattern if successfully extracted, None otherwise
-        """
-        if not isinstance(node.target, GPTAttentionPlugin):
-            return None
-        # Note: We need to copy the plugin node's target to avoid modifying the original.
-        # This is because GraphModule's deepcopy method creates new nodes rather than copying existing ones.
-        node.target = plugin = copy(node.target)
-        attn_qkv = find_nearest_linear_projection(node)
-        if (found_linears := find_descendant_linears(node)) is None:
-            raise RuntimeError("Failed to find all linear subgraphs associated with GPTAttentionPlugin")
-        attn_dense, maybe_mlp_gate, maybe_mlp_up_proj, mlp_down_proj = found_linears
-        assert (
-            attn_qkv and attn_dense and maybe_mlp_gate and maybe_mlp_up_proj and mlp_down_proj
-        ), "Failed to find all linear subgraphs"
-
-        mlp_common_descendant = find_closest_common_descendant(maybe_mlp_gate.input_node, maybe_mlp_up_proj.input_node)
-        assert mlp_common_descendant, "Failed to find common descendant"
-
-        expected_common_descendant = list(maybe_mlp_gate.output_node.users)[0]
-        if expected_common_descendant == mlp_common_descendant:
-            mlp_gate, mlp_up_proj = maybe_mlp_gate, maybe_mlp_up_proj
-        else:
-            mlp_gate, mlp_up_proj = maybe_mlp_up_proj, maybe_mlp_gate
-
-        return cls(
-            plugin=plugin,
-            attn_qkv=attn_qkv,
-            attn_dense=attn_dense,
-            mlp_gate=mlp_gate,
-            mlp_up_proj=mlp_up_proj,
-            mlp_down_proj=mlp_down_proj,
-        )
-
-
-def find_descendant_linears(node: Node) -> tuple[Linear, Linear, Linear, Linear] | None:
-    """Find the descendant linear subgraphs from GPT attention plugin node.
-
-    The layers found are expected to be a dense linear of attention layer and
-    3 layers(gate, up-projection, down-projection) of feed forward network layer.
-
-    Args:
-        node: The node expected to be a GPTAttentionPlugin node for searching the descendant linear subgraphs
-
-    Returns:
-        The descendant linear subgraphs
-    """
-    if (
-        not (
-            descendant_linear_subgraphs := {
-                subgraph: depth
-                for node, depth in get_descendants_with_depth(node).items()
-                if (subgraph := Linear.configure_from(node))
-            }
-        )
-        and len(descendant_linear_subgraphs) < 4
-    ):
-        return None
-    sorted_subgraphs = sorted(descendant_linear_subgraphs, key=lambda subgraph: descendant_linear_subgraphs[subgraph])
-    return tuple(sorted_subgraphs[0:4])
