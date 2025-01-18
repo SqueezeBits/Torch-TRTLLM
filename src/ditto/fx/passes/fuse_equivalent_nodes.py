@@ -1,36 +1,13 @@
-from torch.fx import GraphModule, Node
+from torch.fx import Node
 
-from ..nodes import GetAttr
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class FuseEquivalentNodes(NodewiseOptimizationPass):
     """Fuse nodes performing identical operations for the same input node."""
 
-    nodes: dict[Node, int] | None = None
-
-    def preprocess(self, graph_module: GraphModule) -> None:
-        self.nodes = {n: i for i, n in enumerate(graph_module.graph.nodes)}
-
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
-        if (
-            (get_attr := GetAttr.specialize_from(node))
-            and (
-                same_get_attrs := [
-                    n
-                    for n in node.graph.nodes
-                    if ((other := GetAttr.specialize_from(n)) and other.target == get_attr.target)
-                ]
-            )
-            and same_get_attrs[0] == node
-        ):
-            return {same_get_attr: ReplaceAllUses(by=node) for same_get_attr in same_get_attrs[1:]}
-
-        if not (
-            groups := [
-                group for group in group_users(node) if len(group) > 1 and self.get_closest_input_node(group[0]) == node
-            ]
-        ):
+        if not (groups := [group for group in group_users(node) if len(group) > 1]):
             return {}
 
         results: dict[Node, NodewisePassResult] = {}
@@ -39,15 +16,17 @@ class FuseEquivalentNodes(NodewiseOptimizationPass):
             results.update({user: ReplaceAllUses(by=rep) for user in group[1:]})
         return results
 
-    def postprocess(self, graph_module: GraphModule) -> None:
-        self.nodes = None
-
-    def get_closest_input_node(self, n: Node) -> Node:
-        assert (nodes := self.nodes) is not None
-        return max(n.all_input_nodes, key=lambda x: nodes.get(x, -1))
-
 
 def group_users(node: Node) -> list[list[Node]]:
+    """Group users of a node that perform equivalent operations.
+
+    Args:
+        node (Node): The node whose users should be grouped
+
+    Returns:
+        list[list[Node]]: A list of groups, where each group is a list of equivalent nodes.
+        The first node in each group is considered the representative node.
+    """
     users = [*node.users.keys()]
     groups: list[list[Node]] = []
     while users:
@@ -59,4 +38,13 @@ def group_users(node: Node) -> list[list[Node]]:
 
 
 def are_equivalent(x: Node, y: Node) -> bool:
+    """Check if two nodes perform equivalent operations.
+
+    Args:
+        x (Node): First node to compare
+        y (Node): Second node to compare
+
+    Returns:
+        bool: True if the nodes have identical operation, target, arguments and keyword arguments
+    """
     return x.op == y.op and x.target == y.target and x.args == y.args and x.kwargs == y.kwargs
