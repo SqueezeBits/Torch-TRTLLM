@@ -51,7 +51,11 @@ def transform(
         [
             ResetCodeGen().as_transform(),
             ForgetSubmodules().as_transform(),
-            *(f for f in ATEN_POST_LOWERING_PASSES.passes if f.__name__ not in ("constant_fold", "view_to_reshape")),
+            *(
+                f
+                for f in ATEN_POST_LOWERING_PASSES.passes
+                if f.__name__ not in ("constant_fold", "lower_linear", "view_to_reshape")
+            ),
             get_level1_transform(skipped_optimizers),
         ]
     )
