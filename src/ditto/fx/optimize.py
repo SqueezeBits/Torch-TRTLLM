@@ -68,7 +68,6 @@ def get_optimization_transform(
         Callable[[GraphModule], GraphModule]: the function that applies FX optimization passes to the given graph module
     """
     return compose(
-        FixBinaryElementwiseOpOverloads().as_transform(),
         get_trtllm_conversion_transform(
             argument_hint,
             dtype,
@@ -104,6 +103,7 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     EliminateNopCatOrStack,
     CanonicalizeCopy,
     EliminateNopSlice,
+    FixBinaryElementwiseOpOverloads,
     FixSliceRanges,
     FuseConsecutiveReshapes,
     FuseConsecutivePermutes,
