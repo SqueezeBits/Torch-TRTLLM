@@ -131,10 +131,10 @@ class ParallelizeTensor(GraphOptimizationPass):
             and (len(lm_head_weight.tensor.shape) == 2)
         ):
             in_features = (
-                lm_head_weight.tensor.shape[1] if lm_head.is_transposed_weight else lm_head_weight.tensor.shape[0]
+                lm_head_weight.tensor.shape[1] if lm_head.has_transposed_weight else lm_head_weight.tensor.shape[0]
             )
             out_features = (
-                lm_head_weight.tensor.shape[0] if lm_head.is_transposed_weight else lm_head_weight.tensor.shape[1]
+                lm_head_weight.tensor.shape[0] if lm_head.has_transposed_weight else lm_head_weight.tensor.shape[1]
             )
             self.parallelize_column_linear(
                 graph_module.graph,
@@ -193,7 +193,7 @@ class ParallelizeTensor(GraphOptimizationPass):
             ), "q_dim and kv_dim must be divisible by tp_size"
             q_slice_size = q_dim // self.mapping.tp_size
             kv_slice_size = kv_dim // self.mapping.tp_size
-            if linear.is_transposed_weight:
+            if linear.has_transposed_weight:
                 q = weight.tensor[:q_dim, :]
                 q_slices = [q[q_slice_size * i : q_slice_size * (i + 1), :] for i in range(self.mapping.tp_size)]
                 k = weight.tensor[q_dim : q_dim + kv_dim, :]
@@ -219,7 +219,7 @@ class ParallelizeTensor(GraphOptimizationPass):
                 )
         else:
             slice_size = local_out_features
-            if linear.is_transposed_weight:
+            if linear.has_transposed_weight:
                 parallelized_weight_tensor = weight.tensor[
                     slice_size * self.mapping.tp_rank : slice_size * (self.mapping.tp_rank + 1), :
                 ]
@@ -229,8 +229,8 @@ class ParallelizeTensor(GraphOptimizationPass):
                 ]
 
         assert parallelized_weight_tensor.ndim == 2 and tuple(parallelized_weight_tensor.shape) == (
-            local_out_features if linear.is_transposed_weight else in_features,
-            in_features if linear.is_transposed_weight else local_out_features,
+            local_out_features if linear.has_transposed_weight else in_features,
+            in_features if linear.has_transposed_weight else local_out_features,
         ), "unexpected shape of parallelized qkv weight"
 
         with graph.inserting_before(weight.node):
@@ -284,7 +284,7 @@ class ParallelizeTensor(GraphOptimizationPass):
         weight = GetAttr.specialize_from(linear.weight_node)
         local_in_features = in_features // self.mapping.tp_size
         slice_size = local_in_features
-        if linear.is_transposed_weight:
+        if linear.has_transposed_weight:
             parallelized_weight_tensor = weight.tensor[
                 :, slice_size * self.mapping.tp_rank : slice_size * (self.mapping.tp_rank + 1)
             ]
@@ -294,8 +294,8 @@ class ParallelizeTensor(GraphOptimizationPass):
             ]
 
         assert parallelized_weight_tensor.ndim == 2 and tuple(parallelized_weight_tensor.shape) == (
-            out_features if linear.is_transposed_weight else local_in_features,
-            local_in_features if linear.is_transposed_weight else out_features,
+            out_features if linear.has_transposed_weight else local_in_features,
+            local_in_features if linear.has_transposed_weight else out_features,
         ), "unexpected shape of parallelized qkv weight"
 
         with graph.inserting_before(weight.node):

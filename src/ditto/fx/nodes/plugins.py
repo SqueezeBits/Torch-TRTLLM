@@ -20,7 +20,7 @@ class Gemm(CallFunction):
 
     @classmethod
     def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
-        raise NotImplementedError("This method is never called")
+        return ()
 
     @classmethod
     def validate_node(cls, node: Node) -> bool:

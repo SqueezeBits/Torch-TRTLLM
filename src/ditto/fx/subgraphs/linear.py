@@ -6,7 +6,7 @@ from typing_extensions import Self
 from ditto.fx.utils import get_val
 
 from ..nodes import MM, AddTensorTensor, Reshape
-from ..nodes.plugin_specialization import Gemm
+from ..nodes.plugins import Gemm
 from ..utils import get_ancestors_with_depth
 from .subgraph import Subgraph
 
@@ -40,7 +40,7 @@ class Linear(Subgraph):
         return weight
 
     @property
-    def is_transposed_weight(self) -> bool:
+    def has_transposed_weight(self) -> bool:
         """Whether the weight is transposed."""
         if isinstance(self.mm, Gemm):
             return self.mm.target.transb
@@ -82,13 +82,11 @@ class Linear(Subgraph):
 
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
-        mm = MM.specialize_from(node)
-        if mm and ((weight := get_val(mm.other, torch.Tensor)) is not None):
-            pass
-        else:
-            mm = Gemm.specialize_from(node)
-            if not (mm and ((weight := get_val(mm.other, torch.Tensor)) is not None)):
-                return None
+        if not (
+            (mm := MM.specialize_from(node) or Gemm.specialize_from(node))
+            and (weight := get_val(mm.other, torch.Tensor)) is not None
+        ):
+            return None
 
         add = AddTensorTensor.specialize_from(users[0]) if len(users := list(mm.users)) == 1 else None
         if add is not None and not (
