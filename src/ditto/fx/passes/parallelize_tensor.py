@@ -16,7 +16,6 @@ from ..utils import (
     forget_all_descendant_fake_tensors,
     get_descendants_with_depth,
     get_val,
-    replace_all_uses_with,
 )
 from .infra import (
     GraphOptimizationPass,
@@ -343,7 +342,7 @@ def insert_allgather_plugin(graph: Graph, to: Node, group: list[int], gather_dim
     with graph.inserting_after(permute.node):
         reshape_2 = Reshape.create(graph, permute, (-1, input_tensor.shape[-1]))
 
-    replace_all_uses_with(to, reshape_2.node, exclude_nodes=[allgather])
+    to.replace_all_uses_with(reshape_2.node, delete_user_cb=lambda user: user not in (reshape_2.node, allgather))
 
 
 def insert_allreduce_plugin(
@@ -386,7 +385,7 @@ def insert_allreduce_plugin(
             (to,),
             plugin_inputs.model_dump(),
         )
-    replace_all_uses_with(to, allreduce)
+    to.replace_all_uses_with(allreduce, delete_user_cb=lambda user: user is not allreduce)
 
 
 class DecoderPattern(StrictlyTyped):
