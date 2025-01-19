@@ -3,6 +3,9 @@ from collections.abc import Callable
 import torch
 from tensorrt_llm.functional import PositionEmbeddingType
 
+from transformers.models.cohere.modeling_cohere import rotate_half as rotate_half_gptj
+from transformers.models.llama.modeling_llama import rotate_half as rotate_half_gpt_neox
+
 RopeImplType = Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor]
 FAKE_ROPE_TARGETS: dict[PositionEmbeddingType, RopeImplType] = {}
 
@@ -36,9 +39,7 @@ def rope_gpt_neox(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torc
     Returns:
         torch.Tensor: Input tensor with rotary position embeddings applied
     """
-    from transformers.models.llama.modeling_llama import rotate_half  # pylint: disable=import-outside-toplevel
-
-    return (x * cos) + (rotate_half(x) * sin)
+    return (x * cos) + (rotate_half_gpt_neox(x) * sin)
 
 
 @register_rope_target(PositionEmbeddingType.rope_gptj)
@@ -53,6 +54,4 @@ def rope_gptj(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Te
     Returns:
         torch.Tensor: Input tensor with rotary position embeddings applied
     """
-    from transformers.models.cohere.modeling_cohere import rotate_half  # pylint: disable=import-outside-toplevel
-
-    return (x * cos) + (rotate_half(x) * sin)
+    return (x * cos) + (rotate_half_gptj(x) * sin)
