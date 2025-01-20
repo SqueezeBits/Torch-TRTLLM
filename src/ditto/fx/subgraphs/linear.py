@@ -5,7 +5,7 @@ from typing_extensions import Self
 
 from ditto.fx.utils import get_val
 
-from ..nodes import MM, AddTensorTensor, Reshape
+from ..nodes import MM, AddTensorTensor, Permute, Reshape
 from ..nodes.plugins import Gemm
 from ..utils import get_ancestors_with_depth
 from .subgraph import Subgraph
@@ -59,8 +59,21 @@ class Linear(Subgraph):
         return None
 
     @property
+    def has_transposed_input(self) -> bool:
+        """Whether the input is transposed."""
+        if isinstance(self.mm, Gemm):
+            return self.mm.target.transa
+        return False
+
+    @property
     def input_node(self) -> Node:
         """The input tensor node to the linear layer."""
+        if (
+            isinstance(self.mm, Gemm)
+            and self.has_transposed_input
+            and (permute := Permute.specialize_from(self.mm.this)) is not None
+        ):
+            return permute.this
         return self.mm.this
 
     @property
@@ -89,10 +102,11 @@ class Linear(Subgraph):
             return None
 
         add = AddTensorTensor.specialize_from(users[0]) if len(users := list(mm.users)) == 1 else None
+        has_transposed_weight = isinstance(mm, Gemm) and mm.node.target.transb
         if add is not None and not (
             add.this == mm.node
             and (bias := get_val(add.other, torch.Tensor)) is not None
-            and bias.shape[-1] == weight.shape[-1]
+            and bias.shape[-1] == weight.shape[0 if has_transposed_weight else -1]
         ):
             add = None
         return cls(mm=mm, add=add)
