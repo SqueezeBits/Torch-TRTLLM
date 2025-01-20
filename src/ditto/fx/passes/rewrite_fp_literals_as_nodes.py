@@ -35,7 +35,11 @@ class RewriteFloatingPointLiteralsAsNodes(NodewiseOptimizationPass):
             return {}
 
         with graph.inserting_before(node):
-            constant = GetAttr.create(graph, name, buffer)
+            constant = (
+                GetAttr._specialize_from(candidates[0])
+                if (candidates := list(graph.find_nodes(op="get_attr", target=name)))
+                else GetAttr.create(graph, name, buffer)
+            )
             args_, kwargs_ = binary.args_kwargs(**{constant_key: constant})
             if replacement := Binary.create_from_overloadpacket(
                 graph,
