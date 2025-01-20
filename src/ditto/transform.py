@@ -108,7 +108,7 @@ def parallelize(
         for rank in range(mapping.world_size):
             logger.debug(f"Running parallelize passes for rank {rank}")
             sub_graph_module = GraphModule(state_dict, deepcopy(graph_module.graph))
-            # WIP: add parallelize graph module
+            sub_graph_module.meta.update(graph_module.meta)
             parallelize_pass_manager = DynamoPassManager.build_from_passlist(
                 [
                     ParallelizeTensor(mapping=mapping.copy_with_rank(rank)).as_transform(),

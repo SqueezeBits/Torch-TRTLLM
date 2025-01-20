@@ -26,7 +26,7 @@ class ParallelizeTensor(GraphOptimizationPass):
 
     Attributes:
         mapping (TRTLLMMapping): The mapping of the model
-        first_node_rewritten (Node | None): The first node that is rewritten
+        first_node_rewritten (Node | None): The first node that is rewritten.
     """
 
     mapping: TRTLLMMapping
@@ -163,7 +163,7 @@ class ParallelizeTensor(GraphOptimizationPass):
         """
         return f"{from_name}_rank{self.mapping.tp_rank}"
 
-    # pylint: disable-next=too-many-locals
+    # pylint: disable-next=too-many-locals,too-many-statements
     def parallelize_column_linear(
         self,
         graph: Graph,
@@ -183,10 +183,10 @@ class ParallelizeTensor(GraphOptimizationPass):
             linear (Linear): The linear subgraph to be parallelized
             in_features (int): The input feature size
             out_features (int): The output feature size
-            gather_output (bool): Whether to gather the output
-            is_qkv (bool): Whether the linear subgraph is a QKV linear
-            q_dim (int): The dimension of the query
-            kv_dim (int): The dimension of the key/value
+            gather_output (bool, optional): Whether to gather the output. Defaults to True.
+            is_qkv (bool, optional): Whether the linear subgraph is a QKV linear. Defaults to False.
+            q_dim (int, optional): The dimension of the query. Defaults to -1.
+            kv_dim (int, optional): The dimension of the key/value. Defaults to -1.
         """
         weight = GetAttr.specialize_from(linear.weight_node)
         local_out_features = out_features // self.mapping.tp_size
@@ -247,10 +247,30 @@ class ParallelizeTensor(GraphOptimizationPass):
 
         if linear.bias_node is not None:
             bias = GetAttr.specialize_from(linear.bias_node)
-            slice_size = local_out_features
-            parallelized_bias_tensor = bias.tensor[
-                slice_size * self.mapping.tp_rank : slice_size * (self.mapping.tp_rank + 1)
-            ]
+            if is_qkv:
+                q_bias = bias.tensor[:q_dim]
+                q_bias_slices = [q_bias[q_slice_size * i : q_slice_size * (i + 1)] for i in range(self.mapping.tp_size)]
+                k_bias = bias.tensor[q_dim : q_dim + kv_dim]
+                k_bias_slices = [
+                    k_bias[kv_slice_size * i : kv_slice_size * (i + 1)] for i in range(self.mapping.tp_size)
+                ]
+                v_bias = bias.tensor[q_dim + kv_dim :]
+                v_bias_slices = [
+                    v_bias[kv_slice_size * i : kv_slice_size * (i + 1)] for i in range(self.mapping.tp_size)
+                ]
+
+                parallelized_bias_tensor = torch.cat(
+                    [
+                        q_bias_slices[self.mapping.tp_rank],
+                        k_bias_slices[self.mapping.tp_rank],
+                        v_bias_slices[self.mapping.tp_rank],
+                    ],
+                )
+            else:
+                slice_size = local_out_features
+                parallelized_bias_tensor = bias.tensor[
+                    slice_size * self.mapping.tp_rank : slice_size * (self.mapping.tp_rank + 1)
+                ]
 
             with graph.inserting_before(bias.node):
                 parallelized_bias = GetAttr.create(graph, self.get_name_of_attr(bias.target), parallelized_bias_tensor)
@@ -280,10 +300,12 @@ class ParallelizeTensor(GraphOptimizationPass):
             linear (Linear): The linear subgraph to be parallelized
             in_features (int): The input feature size
             out_features (int): The output feature size
-            strategy (AllReduceStrategy): The strategy of the allreduce plugin
-            config (AllReduceConfig): The config of the allreduce plugin
-            fusion_op (AllReduceFusionOp): The fusion operation of the allreduce plugin
-            eps (float): The epsilon value of the allreduce plugin
+            strategy (AllReduceStrategy, optional): The strategy of the allreduce plugin.
+                Defaults to AllReduceStrategy.AUTO.
+            config (AllReduceConfig, optional): The config of the allreduce plugin. Defaults to AllReduceConfig(0).
+            fusion_op (AllReduceFusionOp, optional): The fusion operation of the allreduce plugin.
+                Defaults to AllReduceFusionOp.NONE.
+            eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
         """
         weight = GetAttr.specialize_from(linear.weight_node)
         local_in_features = in_features // self.mapping.tp_size
@@ -330,7 +352,7 @@ def insert_allgather_plugin(graph: Graph, to: Node, group: list[int], gather_dim
         graph (Graph): The graph to insert the allgather plugin node into
         to (Node): The source node to be replaced
         group (list[int]): The group of the allgather plugin
-        gather_dim (int): The dimension to gather
+        gather_dim (int, optional): The dimension to gather. Defaults to 0.
     """
     group_size = len(group)
     input_tensor = get_val(to, torch.Tensor)
@@ -366,10 +388,12 @@ def insert_allreduce_plugin(
         graph (Graph): The graph to insert the allreduce plugin node into
         to (Node): The source node to be replaced
         group (list[int]): The group of the allreduce plugin
-        strategy (AllReduceStrategy): The strategy of the allreduce plugin
-        config (AllReduceConfig): The config of the allreduce plugin
-        fusion_op (AllReduceFusionOp): The fusion operation of the allreduce plugin
-        eps (float): The epsilon value of the allreduce plugin
+        strategy (AllReduceStrategy, optional): The strategy of the allreduce plugin.
+            Defaults to AllReduceStrategy.AUTO.
+        config (AllReduceConfig, optional): The config of the allreduce plugin. Defaults to AllReduceConfig(0).
+        fusion_op (AllReduceFusionOp, optional): The fusion operation of the allreduce plugin.
+            Defaults to AllReduceFusionOp.NONE.
+        eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
 
     Returns:
         Node: The allreduce plugin node
