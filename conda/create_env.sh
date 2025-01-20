@@ -21,7 +21,7 @@ get_script_directory() {
 }
 
 main() {
-    local name=${1:ditto}
+    local name=${1:-ditto}
     local script_dir
     shift
     script_dir=`get_script_directory`
