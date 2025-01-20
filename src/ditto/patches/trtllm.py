@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -21,8 +22,11 @@ from ..debug import (
 )
 
 
-def patched_trtllm_network_to_dot(self: trtllm.Network, path: str | None) -> str | None:
-    save_for_debug(f"trt_network_def_{path.stem}", self.trt_network)
+def patched_trtllm_network_to_dot(self: trtllm.Network, path: Path | str | None) -> str | None:
+    if path is None:
+        return None
+    path = path.stem if isinstance(path, Path) else os.path.splitext(path)[0]
+    save_for_debug(f"trt_network_def_{path}", self.trt_network)
     return None
 
 
@@ -130,7 +134,7 @@ def patched_plugin_creator_create_plugin(
 ) -> trt.IPluginV2:
     plugin = original_plugin_creator_create_plugin(self, plugin_name, pfc)
     fields = [
-        f"{field.name} ({field.type}): {field.data} " f"(dtype={field.data.dtype}, shape={field.data.shape})"
+        f"{field.name} ({field.type}): {field.data} (dtype={field.data.dtype}, shape={field.data.shape})"
         for field in pfc
     ]
     PLUGINS_TO_FIELDS.append((plugin, fields))
