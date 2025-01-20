@@ -22,7 +22,7 @@ from ..debug import (
 
 
 def patched_trtllm_network_to_dot(self: trtllm.Network, path: str | None) -> str | None:
-    save_for_debug("trt_network_def", self.trt_network)
+    save_for_debug(f"trt_network_def_{path.stem}", self.trt_network)
     return None
 
 

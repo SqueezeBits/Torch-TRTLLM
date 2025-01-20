@@ -1,3 +1,5 @@
+from .allgather_plugin import AllGatherPlugin
+from .allreduce_plugin import AllReducePlugin, AllReducePluginInputs
 from .gemm_plugin import (
     GemmPlugin,
 )

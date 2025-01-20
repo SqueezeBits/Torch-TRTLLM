@@ -1,11 +1,12 @@
 import torch
 from torch._subclasses import FakeTensor
-from torch.fx import Node
+from torch.fx import Graph, Node
 from typing_extensions import Self
 
 from ditto.fx.utils import get_val
 
-from ..nodes import MM, AddTensorTensor, Reshape
+from ..nodes import MM, AddTensorTensor, Permute, Reshape
+from ..nodes.plugins import Gemm
 from ..utils import get_ancestors_with_depth
 from .subgraph import Subgraph
 
@@ -15,15 +16,16 @@ class Linear(Subgraph):
 
     This subgraph identifies a pattern of matrix multiplication with an optional bias addition,
     which is equivalent to a linear/dense layer in neural networks.
+    The matrix multiplication node can be either a MM or a Gemm node.
 
     The layer performs: output = input @ weight.T + bias
 
     Attributes:
-        mm (MM): The matrix multiplication operation node
+        mm (MM | Gemm): The matrix multiplication operation node
         add (AddTensor | None): The bias addition operation node, if present
     """
 
-    mm: MM
+    mm: MM | Gemm
     add: AddTensorTensor | None
 
     @property
@@ -38,6 +40,13 @@ class Linear(Subgraph):
         return weight
 
     @property
+    def has_transposed_weight(self) -> bool:
+        """Whether the weight is transposed."""
+        if isinstance(self.mm, Gemm):
+            return self.mm.target.transb
+        return False
+
+    @property
     def bias_node(self) -> Node | None:
         """The bias parameter node if present."""
         return self.add.other if self.add is not None else None
@@ -50,8 +59,21 @@ class Linear(Subgraph):
         return None
 
     @property
+    def has_transposed_input(self) -> bool:
+        """Whether the input is transposed."""
+        if isinstance(self.mm, Gemm):
+            return self.mm.target.transa
+        return False
+
+    @property
     def input_node(self) -> Node:
         """The input tensor node to the linear layer."""
+        if (
+            isinstance(self.mm, Gemm)
+            and self.has_transposed_input
+            and (permute := Permute.specialize_from(self.mm.this)) is not None
+        ):
+            return permute.this
         return self.mm.this
 
     @property
@@ -73,14 +95,18 @@ class Linear(Subgraph):
 
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
-        if not ((mm := MM.specialize_from(node)) and (weight := get_val(mm.other, torch.Tensor)) is not None):
+        if not (
+            (mm := MM.specialize_from(node) or Gemm.specialize_from(node))
+            and (weight := get_val(mm.other, torch.Tensor)) is not None
+        ):
             return None
 
         add = AddTensorTensor.specialize_from(users[0]) if len(users := list(mm.users)) == 1 else None
+        has_transposed_weight = isinstance(mm, Gemm) and mm.node.target.transb
         if add is not None and not (
             add.this == mm.node
             and (bias := get_val(add.other, torch.Tensor)) is not None
-            and bias.shape[-1] == weight.shape[-1]
+            and bias.shape[-1] == weight.shape[0 if has_transposed_weight else -1]
         ):
             add = None
         return cls(mm=mm, add=add)
@@ -108,3 +134,19 @@ def find_nearest_linear_projection(x: Node) -> Linear | None:
     ):
         return None
     return min(ancestor_linear_subgraphs, key=lambda subgraph: ancestor_linear_subgraphs[subgraph])
+
+
+def find_last_linear(graph: Graph) -> Linear | None:
+    """Find the last Linear subgraph in the computation graph.
+
+    Args:
+        graph (Graph): The computation graph to search in
+
+    Returns:
+        Linear | None: The last Linear subgraph if found, None otherwise
+    """
+    nodes = list(graph.nodes)
+    for node in reversed(nodes):
+        if subgraph := Linear.configure_from(node):
+            return subgraph
+    return None

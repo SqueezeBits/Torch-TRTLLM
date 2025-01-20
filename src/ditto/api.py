@@ -1,5 +1,5 @@
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 
 import torch
 from loguru import logger
@@ -7,13 +7,13 @@ from torch.fx import GraphModule
 from torch.fx.graph import CodeGen
 from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from transformers import PreTrainedModel
+from typing_extensions import Buffer
 
 from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
 from .config_gen import generate_trtllm_engine_config
 from .configs import (
     TensorRTConfig,
     TRTLLMBuildConfig,
-    TRTLLMEngineConfig,
     TRTLLMLoraConfig,
     TRTLLMMapping,
     TRTLLMModelConfig,
@@ -25,7 +25,7 @@ from .convert import convert
 from .debug import get_memory_footprint, save_for_debug
 from .export import export
 from .inline import inline
-from .transform import transform
+from .transform import parallelize, transform
 from .types import BuiltInConstant
 
 
@@ -59,25 +59,17 @@ def trtllm_build(
         engine_cache (BaseEngineCache | None): Cache for TensorRT engines
     """
     network_name = type(model).__name__
-    model_dtype = model.config.torch_dtype
     mapping = mapping or TRTLLMMapping()
-    plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model_dtype)
+    plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model.config.torch_dtype)
     profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(model.config, plugin_config)
     argument_hint = TRTLLMArgumentHint.configure(profile_config, tp_size=mapping.tp_size)
 
-    logger.info("Exporting the model into graph module")
-    graph_module, engine_config = trtllm_export(
+    logger.info("Exporting the model into graph module and building TensorRT engine")
+    graph_generator = trtllm_export(
         model,
         argument_hint,
-        model_dtype,
+        model.config.torch_dtype,
         mapping,
-        TRTLLMBuildConfig.merge(
-            profile_config,
-            TRTLLMModelConfig(
-                lora_config=lora_config or TRTLLMLoraConfig(),
-                plugin_config=plugin_config,
-            ),
-        ),
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         extra_passes=[add_outputs(debug_node_names)] if debug_node_names else None,
@@ -87,27 +79,34 @@ def trtllm_build(
     if debug_node_names:
         output_names.extend(debug_node_names)
 
-    logger.info("Building TensorRT engine")
-    engine = convert(
-        graph_module,
-        argument_hint,
-        trt_config or TensorRTConfig(),
-        engine_cache=engine_cache,
-        network_name=network_name,
-        output_names=output_names,
-    )
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=get_memory_footprint)
+    for rank, graph_module in graph_generator:
+        engine = convert(
+            graph_module,
+            argument_hint,
+            trt_config or TensorRTConfig(),
+            engine_cache=engine_cache,
+            network_name=network_name,
+            output_names=output_names,
+            rank=rank,
+        )
+        logger.opt(lazy=True).debug("Memory Footprint: {m}", m=get_memory_footprint)
+        save(engine, f"rank{rank}.engine", output_dir, "Writing serialized engine")
 
-    for (name, filename), contents in {
-        ("serialized engine", "rank0.engine"): engine,
-        ("engine config", "config.json"): engine_config.model_dump_json(indent=2),
-    }.items():
-        output_path = os.path.join(output_dir, filename)
-        if os.path.exists(output_path):
-            logger.warning(f"The file at {output_path} will be overwritten")
-        logger.info(f"Writing {name} at {output_path}")
-        with open(output_path, "w" if isinstance(contents, str) else "wb") as f:
-            f.write(contents)
+        if rank == 0:
+            logger.info("Generating engine config from the optimized graph module")
+            engine_config = generate_trtllm_engine_config(
+                graph_module,
+                TRTLLMBuildConfig.merge(
+                    profile_config,
+                    TRTLLMModelConfig(
+                        lora_config=lora_config or TRTLLMLoraConfig(),
+                        plugin_config=plugin_config,
+                    ),
+                ),
+                mapping,
+                architecture=network_name,
+            )
+            save(engine_config.model_dump_json(indent=2), "config.json", output_dir, message="Writing engine config")
 
 
 def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
@@ -158,19 +157,47 @@ def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
     return reset_output
 
 
+def save(
+    contents: str | Buffer,
+    filename: str,
+    output_dir: str,
+    message: str = "Saving",
+) -> None:
+    """Save the contents to the specified file.
+
+    Args:
+        contents (str | Buffer): The contents to save
+        filename (str): The name of the file to save
+        output_dir (str): The directory to save the file
+        message (str): The message to log
+    """
+
+    def get_output_path(filename: str) -> str:
+        output_path = os.path.join(output_dir, filename)
+        assert not os.path.exists(output_path) or os.path.isfile(output_path)
+        if os.path.exists(output_path):
+            logger.warning(f"The file at {output_path} will be overwritten")
+        return output_path
+
+    filepath = get_output_path(filename)
+    mode = "w" if isinstance(contents, str) else "wb"
+    logger.info(f"{message} at {filepath}")
+    with open(filepath, mode) as f:
+        f.write(contents)
+
+
 def trtllm_export(
     model: PreTrainedModel,
     argument_hint: TRTLLMArgumentHint,
     dtype: torch.dtype,
     mapping: TRTLLMMapping,
-    build_config: TRTLLMBuildConfig,
     *,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
     skipped_optimizers: list[PassName] | None = None,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
     enable_experimental_decompositions: bool = False,
-) -> tuple[GraphModule, TRTLLMEngineConfig]:
+) -> Generator[tuple[int, GraphModule], None, None]:
     """Export a PyTorch model to a graph module and generate TensorRT-LLM engine config.
 
     Args:
@@ -186,7 +213,8 @@ def trtllm_export(
         enable_experimental_decompositions (bool): Whether to enable experimental decompositions
 
     Returns:
-        tuple[GraphModule, TRTLLMEngineConfig]: A tuple containing the transformed graph module and engine configuration
+        Generator[tuple[int, GraphModule], None, None]:
+            A generator that yields tuples of rank and the transformed graph module
     """
     logger.debug("torch.exporting module")
     hints: dict[str, TensorTypeHint | BuiltInConstant] = {
@@ -222,14 +250,8 @@ def trtllm_export(
         extra_passes=extra_passes,
     )
     logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
-    save_for_debug("graph_module", graph_module)
 
-    logger.info("Generating engine config from the graph module")
-    config = generate_trtllm_engine_config(
-        graph_module,
-        build_config,
-        mapping,
-        architecture=type(model).__name__,
-    )
-
-    return graph_module, config
+    for rank, parallelized_graph_module in parallelize(graph_module, mapping):
+        logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
+        save_for_debug(f"graph_module_rank{rank}", parallelized_graph_module)
+        yield rank, parallelized_graph_module

@@ -20,6 +20,7 @@ def convert(
     graph_module: GraphModule,
     argument_hint: TRTLLMArgumentHint,
     trt_config: TensorRTConfig,
+    rank: int,
     *,
     engine_cache: BaseEngineCache | None = None,
     network_name: str | None = None,
@@ -39,6 +40,7 @@ def convert(
             input_specs,
             builder_config=trt_config.builder_config,
             network_flags=trt_config.network_creation_flags,
+            rank=rank,
             engine_cache=engine_cache,
             network_name=network_name,
             output_names=output_names,
@@ -46,7 +48,7 @@ def convert(
         engine = interpreter.run().serialized_engine
         if should_save_debug_artifacts():
             save_for_debug(
-                "trt_engine",
+                f"trt_engine_rank{rank}",
                 trt.Runtime(TRT_LOGGER).deserialize_cuda_engine(engine),
             )
         return engine

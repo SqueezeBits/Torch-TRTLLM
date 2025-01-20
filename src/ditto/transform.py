@@ -1,4 +1,5 @@
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from copy import deepcopy
 
 import torch
 from loguru import logger
@@ -9,11 +10,13 @@ from torch_tensorrt.dynamo.lowering.passes import (
 )
 
 from .arguments import TRTLLMArgumentHint
+from .configs import TRTLLMMapping
 from .constants import PassName
 from .contexts import ignore_symbolic_shapes_warning
 from .debug import save_for_debug
 from .fx import (
     ForgetSubmodules,
+    ParallelizeTensor,
     ResetCodeGen,
     fake_tensor_prop_on_node_creation,
     get_level1_transform,
@@ -78,3 +81,38 @@ def transform(
     logger.debug("Running custom passes")
     with fake_tensor_prop_on_node_creation(graph_module), ignore_symbolic_shapes_warning():
         return custom_pass_manager(graph_module)
+
+
+def parallelize(
+    graph_module: GraphModule,
+    mapping: TRTLLMMapping,
+) -> Generator[tuple[int, GraphModule], None, None]:
+    """Parallelize the graph module.
+
+    Args:
+        graph_module (GraphModule): The input graph module to parallelize
+        mapping (TRTLLMMapping): The mapping of the parallelized graph module
+
+    Returns:
+        Generator[tuple[int, GraphModule], None, None]:
+            A generator that yields the parallelized graph module for each rank
+    """
+    if mapping.world_size > 1:
+        logger.info("Parallelizing the graph module")
+        save_for_debug("graph_module_before_parallelization", graph_module)
+        state_dict = graph_module.state_dict()
+        for rank in range(mapping.world_size):
+            logger.debug(f"Running parallelize passes for rank {rank}")
+            sub_graph_module = GraphModule(state_dict, deepcopy(graph_module.graph))
+            # WIP: add parallelize graph module
+            parallelize_pass_manager = DynamoPassManager.build_from_passlist(
+                [
+                    ParallelizeTensor(mapping=mapping.copy_with_rank(rank)).as_transform(),
+                ]
+            )
+            with fake_tensor_prop_on_node_creation(sub_graph_module), ignore_symbolic_shapes_warning():
+                sub_graph_module = parallelize_pass_manager(sub_graph_module)
+
+            yield rank, sub_graph_module
+    else:
+        yield 0, graph_module

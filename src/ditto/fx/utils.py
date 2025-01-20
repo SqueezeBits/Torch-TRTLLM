@@ -54,18 +54,58 @@ def get_ancestors_with_depth(node: Node) -> dict[Node, int]:
         dict[Node, int]: Dictionary mapping ancestor nodes to their depths
     """
     ancestors: dict[Node, int] = {}
-    stack = [(node, 0)]  # Initialize stack with (node, depth)
+    queue = [(node, 0)]  # Initialize queue with (node, depth)
 
-    while stack:
-        current, depth = stack.pop()
+    while queue:
+        current, depth = queue.pop(0)
         # If node is not visited or found at a greater depth
-        if current not in ancestors or depth < ancestors[current]:
+        if current not in ancestors or depth > ancestors[current]:
             ancestors[current] = depth
             # Traverse input nodes and increase the depth by 1
             for input_node in current.all_input_nodes:
-                stack.append((input_node, depth + 1))
+                queue.append((input_node, depth + 1))
 
     return ancestors
+
+
+def find_closest_common_descendant(x: Node, y: Node) -> Node | None:
+    """Find the closest common descendant node between two nodes in a graph.
+
+    Args:
+        x (Node): First node
+        y (Node): Second node
+
+    Returns:
+        Node | None: The closest common descendant node if one exists, None otherwise
+    """
+    descendants_x = get_descendants_with_depth(x)
+    descendants_y = get_descendants_with_depth(y)
+    common_descendants = set(descendants_x.keys()).intersection(descendants_y.keys())
+    if not common_descendants:
+        return None
+    return min(common_descendants, key=lambda d: descendants_x[d] + descendants_y[d])
+
+
+def get_descendants_with_depth(node: Node) -> dict[Node, int]:
+    """Get all descendant nodes of a given node with their depths.
+
+    Args:
+        node (Node): The node to get descendants for
+
+    Returns:
+        dict[Node, int]: Dictionary mapping descendant nodes to their depths
+    """
+    descendants: dict[Node, int] = {}
+    queue = [(node, 0)]
+
+    while queue:
+        current, depth = queue.pop(0)
+        if current not in descendants or depth > descendants[current]:
+            descendants[current] = depth
+            for user in current.users:
+                queue.append((user, depth + 1))
+
+    return descendants
 
 
 def forget_all_descendant_fake_tensors(node: Node) -> None:
@@ -74,11 +114,9 @@ def forget_all_descendant_fake_tensors(node: Node) -> None:
     Args:
         node (Node): The root node to start removing fake tensors from
     """
-    nodes = [node]
-    while nodes:
-        n = nodes.pop()
+    _ = node.meta.pop("val", None)
+    for n in get_descendants_with_depth(node):
         _ = n.meta.pop("val", None)
-        nodes.extend(n.users)
 
 
 def get_tensor_metadata(node: Node) -> TensorMetadata | None:
@@ -90,8 +128,6 @@ def get_tensor_metadata(node: Node) -> TensorMetadata | None:
     Returns:
         TensorMetadata | None: The tensor metadata if available, None otherwise
     """
-    if isinstance(tensor_meta := node.meta.get("tensor_meta"), TensorMetadata):
-        return tensor_meta
     if isinstance(val := node.meta.get("val"), torch.Tensor):
         return _extract_tensor_metadata(val)
     if isinstance(val, torch.SymInt) or node.target is torch.ops.aten.sym_size.int:
@@ -125,7 +161,7 @@ def get_val(node: Node) -> torch.Tensor | torch.SymInt | None:
     ...
 
 
-def get_val(node: Node, expected_type: type[T] | None = None) -> T | None:  # type: ignore[misc]
+def get_val(node: Node, expected_type: type[T] | None = None) -> T | None:
     """Get the value stored in a node's metadata.
 
     Args:

@@ -25,7 +25,7 @@ from .debug import (
     open_debug_artifact,
     save_for_debug,
 )
-from .fx.targets import GemmPlugin, GPTAttentionPlugin
+from .fx.targets import Plugin
 from .fx.utils import get_tensor_metadata
 from .types import DataType
 
@@ -37,6 +37,7 @@ class TRTLLMInterpreter(TRTInterpreter):
         input_specs: tuple[Input, ...],
         network_flags: TensorRTNetworkCreationFlags,
         builder_config: TensorRTBuilderConfig,
+        rank: int,
         engine_cache: BaseEngineCache | None = None,
         network_name: str | None = None,
         output_names: list[str] | None = None,
@@ -56,6 +57,7 @@ class TRTLLMInterpreter(TRTInterpreter):
         self.logger = logger
         self.placeholder_names = [n.name for n in module.graph.find_nodes(op="placeholder")]
         self.user_output_names = output_names
+        self.rank = rank
         if network_name:
             self.ctx.net.name = network_name
         # Note that the `trt.IConstantLayer` created from a graph module's weight holds the data pointer
@@ -68,7 +70,7 @@ class TRTLLMInterpreter(TRTInterpreter):
 
     def _construct_trt_network_def(self) -> None:
         super()._construct_trt_network_def()
-        save_for_debug("trt_network_def", self.ctx.net, self.optimization_profiles)
+        save_for_debug(f"trt_network_def_rank{self.rank}", self.ctx.net, self.optimization_profiles)
 
     def _populate_trt_builder_config(
         self,
@@ -78,7 +80,7 @@ class TRTLLMInterpreter(TRTInterpreter):
     ) -> trt.IBuilderConfig:
         builder_config = self.builder.create_builder_config()
         self._builder_config.copy_to(builder_config)
-        with open_debug_artifact("builder_config.json") as f:
+        with open_debug_artifact(f"builder_config_rank{self.rank}.json") as f:
             if f:
                 json.dump(builder_config_as_dict(builder_config), f, indent=2, sort_keys=True)
         return builder_config
@@ -93,7 +95,7 @@ class TRTLLMInterpreter(TRTInterpreter):
         assert self._cur_node is not None
         converter_packet = (
             DYNAMO_CONVERTERS.get_unvalidated(type(target))
-            if isinstance(target, GPTAttentionPlugin | GemmPlugin)
+            if isinstance(target, Plugin)
             else DYNAMO_CONVERTERS.get(self._cur_node)
         )
         if converter_packet is None:
