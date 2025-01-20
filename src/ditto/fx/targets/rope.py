@@ -2,7 +2,6 @@ from collections.abc import Callable
 
 import torch
 from tensorrt_llm.functional import PositionEmbeddingType
-
 from transformers.models.cohere.modeling_cohere import rotate_half as rotate_half_gptj
 from transformers.models.llama.modeling_llama import rotate_half as rotate_half_gpt_neox
 
