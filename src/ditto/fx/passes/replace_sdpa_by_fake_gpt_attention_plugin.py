@@ -162,8 +162,8 @@ class MHAConfig(StrictlyTyped):
         k = TrailingReformatPath.configure_from(k_rope.all_input_nodes[0]).top
         v = v_seq.top
         if not (
-            q_rope.target in FAKE_ROPE_TARGETS
-            and k_rope.target in FAKE_ROPE_TARGETS
+            q_rope.target in FAKE_ROPE_TARGETS.values()
+            and k_rope.target in FAKE_ROPE_TARGETS.values()
             and (q_proj := find_nearest_linear_projection(sdpa.query))
             and (k_proj := find_nearest_linear_projection(sdpa.key))
             and (v_proj := find_nearest_linear_projection(sdpa.value))

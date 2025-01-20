@@ -59,6 +59,7 @@ class NodeSpecialization(StrictlyTyped, ABC):
 
     @stack_trace.setter
     def stack_trace(self, value: str | None) -> None:
+        """Set the stack trace string for this node."""
         self.node.stack_trace = value
 
     @property
@@ -68,6 +69,7 @@ class NodeSpecialization(StrictlyTyped, ABC):
 
     @output.setter
     def output(self, other: FakeTensor | torch.SymInt | None) -> None:
+        """Set the output value of this node."""
         self.node.meta["val"] = other
 
     @property

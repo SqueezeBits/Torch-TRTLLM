@@ -1,61 +1,48 @@
 from loguru import logger
-from torch.fx import GraphModule, Node
-from torch.fx.subgraph_rewriter import replace_pattern_with_filters
+from torch.fx import Node
+
 from transformers import PretrainedConfig
 
+from ..subgraphs import RoPESubgraph
 from ..targets import (
     FAKE_ROPE_TARGETS,
     ROPEConfig,
-    get_llama2_rope_pattern_graph,
-    get_llama2_rope_replacement_graph,
 )
 from ..utils import get_tensor_metadata
-from .infra import GraphOptimizationPass, PassResult
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class WrapRoPESubgraphs(GraphOptimizationPass):
-    """Match and replace RoPE subgraphs by fake rope target (required for trtllm)."""
+class WrapRoPESubgraphs(NodewiseOptimizationPass):
+    """Match and replace RoPE subgraphs by wrapped RoPE node (required for ReplaceSDPAByFakeGPTAttentionPlugin)."""
 
-    def call(self, graph_module: GraphModule) -> PassResult:
-        if not (
-            replaced_patterns := replace_pattern_with_filters(
-                graph_module,
-                pattern=get_llama2_rope_pattern_graph(),
-                replacement=get_llama2_rope_replacement_graph(),
-                ignore_literals=True,
-            )
-        ):
-            return PassResult(graph_module=graph_module, modified=False)
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+        if not (rope := RoPESubgraph.configure_from(node)):
+            return {}
 
-        if not isinstance(
+        graph = node.graph
+        rope_target = FAKE_ROPE_TARGETS[rope.position_embedding_type]
+        with graph.inserting_before(node):
+            wrapped_rope = graph.call_function(rope_target, (rope.x, rope.cos, rope.sin))
+
+        if x_meta := get_tensor_metadata(rope.x):
+            embed_dim = x_meta.shape[-1]
+        else:
+            logger.warning("Failed to infer `rotary_embedding_dim`")
+            embed_dim = None
+
+        pretrained_config = None
+        if (graph_module := graph.owning_module) is None or not isinstance(
             pretrained_config := graph_module.meta.get("pretrained_config"),
             PretrainedConfig,
         ):
-            logger.warning("No pretrained config found in graph module meta data")
+            logger.warning("No pretrained config found in graph module meta data. Default RoPE config will be used.")
 
-        for replaced_pattern in replaced_patterns:
-            node_map = {k.name: v for k, v in replaced_pattern.nodes_map.items()}
-            rope_node: Node | None = None
-            for node in replaced_pattern.replacements:
-                if node.target in FAKE_ROPE_TARGETS:
-                    rope_node = node
-                    break
-            else:
-                continue
+        rope_config = ROPEConfig.from_pretrained_config(
+            pretrained_config,
+            positional_embedding_type=rope.position_embedding_type,
+            embedding_dim=embed_dim,
+        )
+        wrapped_rope.meta = rope.add.node.meta
+        wrapped_rope.meta["rope_config"] = rope_config
 
-            if (x := node_map.get("x")) and (x_meta := get_tensor_metadata(x)):
-                embed_dim = x_meta.shape[-1]
-            else:
-                logger.warning("Failed to infer `rotary_embedding_dim`")
-                embed_dim = None
-
-            rope_config = ROPEConfig.from_pretrained_config(
-                pretrained_config,
-                positional_embedding_type=FAKE_ROPE_TARGETS[rope_node.target],  # type: ignore[index]
-                embedding_dim=embed_dim,
-            )
-            if output := replaced_pattern.nodes_map.get(replaced_pattern.anchor):
-                rope_node.meta = output.meta
-            rope_node.meta["rope_config"] = rope_config
-
-        return PassResult(graph_module=graph_module, modified=True)
+        return {node: ReplaceAllUses(by=wrapped_rope)}
