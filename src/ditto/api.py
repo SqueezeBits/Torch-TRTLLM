@@ -60,7 +60,7 @@ def trtllm_build(
     """
     network_name = type(model).__name__
     mapping = mapping or TRTLLMMapping()
-    plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model.config.torch_dtype)
+    plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model.config.torch_dtype, mapping.world_size)
     profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(model.config, plugin_config)
     argument_hint = TRTLLMArgumentHint.configure(profile_config, tp_size=mapping.tp_size)
 
