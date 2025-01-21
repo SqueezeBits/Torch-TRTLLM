@@ -3,6 +3,7 @@ from torch.fx import Node
 from typing_extensions import Self
 
 from ..nodes import AddTensorTensor, Cat, MulTensorTensor, Neg, Slice
+from ..utils import get_tensor_metadata
 from .path import TrailingReformatPath
 from .subgraph import Subgraph
 
@@ -14,43 +15,21 @@ class RoPESubgraph(Subgraph):
     to an input tensor.
 
     Attributes:
-        add (AddTensorTensor): The final addition operation
-        mul_cos (MulTensorTensor): Multiplication with cosine embeddings
-        mul_sin (MulTensorTensor): Multiplication with sine embeddings
-        cat (Cat): Concatenation of negated and regular slices
-        neg (Neg): Negation operation
-        slice_1 (Slice): First slice of input
-        slice_2 (Slice): Second slice of input
+        x (Node): The input tensor node for the RoPE operation
+        rotary_embedding_dim (int): The dimension of the rotary embeddings
+        cos (Node): The cosine component of the rotary embeddings
+        sin (Node): The sine component of the rotary embeddings
+        slices (list[Slice]): The slicing operations applied in the RoPE computation
+        out (AddTensorTensor | Cat): The output node of the RoPE computation,
+            which could be an addition or concatenation operation
     """
 
-    add: AddTensorTensor
-    mul_cos: MulTensorTensor
-    mul_sin: MulTensorTensor
-    cat: Cat
-    neg: Neg
-    slice_1: Slice
-    slice_2: Slice
-
-    @property
-    def x(self) -> Node:
-        """The input tensor node."""
-        return self.slice_1.this
-
-    @property
-    def cos(self) -> Node:
-        """The cosine embeddings tensor node."""
-        assert isinstance(self.mul_cos.this, Node) and isinstance(self.mul_cos.other, Node)
-        if self.mul_cos.this == self.x:
-            return self.mul_cos.other
-        return self.mul_cos.this
-
-    @property
-    def sin(self) -> Node:
-        """The sine embeddings tensor node."""
-        assert isinstance(self.mul_sin.this, Node) and isinstance(self.mul_sin.other, Node)
-        if Cat.specialize_from(self.mul_sin.this):
-            return self.mul_sin.other
-        return self.mul_sin.this
+    x: Node
+    rotary_embedding_dim: int
+    cos: Node
+    sin: Node
+    slices: list[Slice]
+    out: AddTensorTensor | Cat
 
     @property
     def position_embedding_type(self) -> PositionEmbeddingType:
@@ -65,12 +44,10 @@ class RoPESubgraph(Subgraph):
         Raises:
             NotImplementedError: If the slicing pattern doesn't match either GPT-NeoX or GPT-J style.
         """
-        assert all(isinstance(x, int) for s in [self.slice_1, self.slice_2] for x in [s.start, s.end, s.step])
-
-        if self.slice_1.start == self.slice_2.end and self.slice_1.step == self.slice_2.step == 1:
+        if self.slices[0].start == self.slices[1].end and self.slices[0].step == self.slices[1].step == 1:
             return PositionEmbeddingType.rope_gpt_neox
 
-        if self.slice_1.start == self.slice_2.start + 1 and self.slice_1.step == self.slice_2.step == 2:
+        if self.slices[0].start == self.slices[1].start + 1 and self.slices[0].step == self.slices[1].step == 2:
             return PositionEmbeddingType.rope_gptj
 
         raise NotImplementedError(f"RoPE type for {self} is not implemented yet.")
@@ -115,12 +92,25 @@ class RoPESubgraph(Subgraph):
         if not all(isinstance(x, int) for s in [slice_1, slice_2] for x in [s.start, s.end, s.step]):
             return None
 
-        return cls(
-            add=add,
-            mul_cos=mul_cos,
-            mul_sin=mul_sin,
-            cat=cat,
-            neg=neg,
-            slice_1=slice_1,
-            slice_2=slice_2,
-        )
+        if not (rope_emb_meta := get_tensor_metadata(slice_1.this)):
+            return None
+
+        x = slice_1.this
+        rotary_embedding_dim = rope_emb_meta.shape[-1]
+        cos = mul_cos.other if mul_cos.this == slice_1.this else mul_cos.this
+        sin = mul_sin.other if Cat.specialize_from(mul_sin.this) else mul_sin.this
+        out = add
+        # check for non-default rotary_embedding_dim (rotary_embedding_dim != head_size)
+        if (  # pylint: disable-next=too-many-boolean-expressions
+            len(add.users) == 1
+            and (optional_final_cat := Cat.specialize_from(next(iter(add.users))))
+            and len(optional_final_cat.tensors) == 2
+            and optional_final_cat.tensors[0] == add.node
+            and (optional_slice_rope := Slice.specialize_from(slice_1.this))
+            and (optional_slice_pass := Slice.specialize_from(optional_final_cat.tensors[1]))
+            and Slice.are_consecutive([optional_slice_rope, optional_slice_pass])
+        ):
+            x = optional_slice_rope.this
+            out = optional_final_cat
+
+        return cls(x=x, rotary_embedding_dim=rotary_embedding_dim, cos=cos, sin=sin, slices=[slice_1, slice_2], out=out)

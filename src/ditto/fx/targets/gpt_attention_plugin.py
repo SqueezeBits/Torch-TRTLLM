@@ -86,7 +86,7 @@ class ROPEConfig(StrictlyTyped):
         cls,
         pretrained_config: PretrainedConfig | None = None,
         positional_embedding_type: PositionEmbeddingType | None = None,
-        embedding_dim: int | None = None,
+        rotary_embedding_dim: int | None = None,
     ) -> Self:
         """Create a RoPE configuration from a HuggingFace pretrained model configuration.
 
@@ -98,7 +98,7 @@ class ROPEConfig(StrictlyTyped):
                 If None, default values will be used. Defaults to None.
             positional_embedding_type (PositionEmbeddingType | None): Override the position embedding type.
                 If None, uses the type from pretrained_config. Defaults to None.
-            embedding_dim (int | None): Override the embedding dimension.
+            rotary_embedding_dim (int | None): Override the rotary embedding dimension.
                 If None, uses the dimension from pretrained_config. Defaults to None.
 
         Returns:
@@ -139,8 +139,8 @@ class ROPEConfig(StrictlyTyped):
             rope_config.llama3_scaling_config = Llama3ScalingConfig(**rope_scaling)
         if positional_embedding_type is not None:
             rope_config.position_embedding_type = positional_embedding_type
-        if embedding_dim is not None:
-            rope_config.rotary_embedding_dim = embedding_dim
+        if rotary_embedding_dim is not None:
+            rope_config.rotary_embedding_dim = rotary_embedding_dim
         return rope_config
 
     def compute_rope_constants(self) -> tuple[np.ndarray, np.ndarray]:
