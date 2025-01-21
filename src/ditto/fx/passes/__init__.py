@@ -24,12 +24,12 @@ from .fuse_reciprocal_mul import FuseReciprocalMul
 from .herd_constants_to_the_right import HerdConstantsToTheRight
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
 from .parallelize_tensor import ParallelizeTensor
-from .replace_index_by_slice import ReplaceIndexBySlice
 from .replace_mm_by_fake_gemm_plugin import ReplaceMMByFakeGemmPlugin
 from .replace_sdpa_by_fake_gpt_attention_plugin import ReplaceSDPAByFakeGPTAttentionPlugin
 from .replace_view_by_reshape import ReplaceViewByReshape
 from .reset_code_gen import ResetCodeGen
 from .rewrite_fp_literals_as_nodes import RewriteFloatingPointLiteralsAsNodes
+from .rewrite_index_as_single_slice import RewriteIndexAsSingleSlice
 from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
 from .wrap_rope_subgraphs import WrapRoPESubgraphs
 from .wrap_sdpa_subgraphs import WrapSDPASubgraphs

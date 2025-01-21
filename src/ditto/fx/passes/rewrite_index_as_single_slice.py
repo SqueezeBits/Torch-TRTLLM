@@ -5,8 +5,8 @@ from ..nodes import Index
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
 
 
-class ReplaceIndexBySlice(NodewiseOptimizationPass):
-    """Replace index op by single slice op when possible (required to support models with MQA)."""
+class RewriteIndexAsSingleSlice(NodewiseOptimizationPass):
+    """Rewrite index op as single slice op when possible (required to support models with MQA)."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if (index := Index.specialize_from(node)) and index.can_replace_with_single_slice:
