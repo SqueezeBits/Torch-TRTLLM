@@ -36,6 +36,7 @@ from .passes import (
     ReplaceViewByReshape,
     RewriteFloatingPointLiteralsAsNodes,
     RewriteIndexAsSingleSlice,
+    RewritePowAsMulSelf,
     RewriteReshapeAsUnsqueeze,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
@@ -124,6 +125,7 @@ LEVEL2_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     FuseConsecutiveSplitConcat,
     FuseReciprocalMul,
     DeferUnsqueeze,
+    RewritePowAsMulSelf,
     RewriteFloatingPointLiteralsAsNodes,
     RewriteReshapeAsUnsqueeze,
 )
