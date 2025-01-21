@@ -19,7 +19,7 @@ class RoPESubgraph(Subgraph):
         rotary_embedding_dim (int): The dimension of the rotary embeddings
         cos (Node): The cosine component of the rotary embeddings
         sin (Node): The sine component of the rotary embeddings
-        slices (list[Slice]): The slicing operations applied in the RoPE computation
+        slices (tuple[Slice, Slice]): The slicing operations applied in the RoPE computation
         out (AddTensorTensor | Cat): The output node of the RoPE computation,
             which could be an addition or concatenation operation
     """
@@ -28,7 +28,7 @@ class RoPESubgraph(Subgraph):
     rotary_embedding_dim: int
     cos: Node
     sin: Node
-    slices: list[Slice]
+    slices: tuple[Slice, Slice]
     out: AddTensorTensor | Cat
 
     @property
@@ -44,7 +44,7 @@ class RoPESubgraph(Subgraph):
         Raises:
             NotImplementedError: If the slicing pattern doesn't match either GPT-NeoX or GPT-J style.
         """
-        if self.slices[0].start == self.slices[1].end and self.slices[0].step == self.slices[1].step == 1:
+        if Slice.are_consecutive(self.slices):
             return PositionEmbeddingType.rope_gpt_neox
 
         if self.slices[0].start == self.slices[1].start + 1 and self.slices[0].step == self.slices[1].step == 2:
@@ -113,4 +113,11 @@ class RoPESubgraph(Subgraph):
             x = optional_slice_rope.this
             out = optional_final_cat
 
-        return cls(x=x, rotary_embedding_dim=rotary_embedding_dim, cos=cos, sin=sin, slices=[slice_1, slice_2], out=out)
+        return cls(
+            x=x,
+            rotary_embedding_dim=rotary_embedding_dim,
+            cos=cos,
+            sin=sin,
+            slices=tuple(sorted([slice_1, slice_2], key=lambda s: s.start)),
+            out=out,
+        )

@@ -30,7 +30,7 @@ from .replace_view_by_reshape import ReplaceViewByReshape
 from .reset_code_gen import ResetCodeGen
 from .rewrite_fp_literals_as_nodes import RewriteFloatingPointLiteralsAsNodes
 from .rewrite_index_as_single_slice import RewriteIndexAsSingleSlice
-from .rewrite_pow_as_mul_self import RewritePowAsMulSelf
+from .rewrite_pow_as_mul import RewritePowAsMul
 from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
 from .wrap_rope_subgraphs import WrapRoPESubgraphs
 from .wrap_sdpa_subgraphs import WrapSDPASubgraphs

@@ -1,11 +1,10 @@
-import torch
 from torch.fx import Node
 
-from ..nodes import PowTensorScalar
+from ..nodes import MulTensor, PowTensorScalar
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
 
 
-class RewritePowAsMulSelf(NodewiseOptimizationPass):
+class RewritePowAsMul(NodewiseOptimizationPass):
     """Rewrite pow op as mul op with self.
 
     Required to prevent engine build failures due to casts inserted where computations are in bf but literals remain fp.
@@ -16,8 +15,8 @@ class RewritePowAsMulSelf(NodewiseOptimizationPass):
             graph = node.graph
 
             with graph.inserting_before(node):
-                equivalent_mul = graph.call_function(torch.ops.aten.mul.Tensor, (power.this, power.this))
-                inject_stack_trace_from(node, to=equivalent_mul)
+                equivalent_mul = MulTensor.create(graph, power.this, power.this)
+                inject_stack_trace_from(node, to=equivalent_mul.node)
 
-            return {node: ReplaceAllUses(by=equivalent_mul)}
+            return {node: ReplaceAllUses(by=equivalent_mul.node)}
         return {}
