@@ -33,5 +33,8 @@ class Subgraph(StrictlyTyped, ABC):
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Subgraph):
-            return self is other
+            for self_node, other_node in zip(self.nodes, other.nodes):
+                if self_node is not other_node:
+                    return False
+            return True
         return False
