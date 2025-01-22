@@ -47,7 +47,7 @@ class RoPESubgraph(Subgraph):
         if Slice.are_consecutive(self.slices):
             return PositionEmbeddingType.rope_gpt_neox
 
-        if self.slices[0].start == self.slices[1].start + 1 and self.slices[0].step == self.slices[1].step == 2:
+        if self.slices[0].start + 1 == self.slices[1].start and self.slices[0].step == self.slices[1].step == 2:
             return PositionEmbeddingType.rope_gptj
 
         raise NotImplementedError(f"RoPE type for {self} is not implemented yet.")
