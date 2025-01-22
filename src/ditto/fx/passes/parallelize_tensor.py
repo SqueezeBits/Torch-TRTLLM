@@ -60,11 +60,11 @@ class ParallelizeTensor(GraphOptimizationPass):
     mapping: TRTLLMMapping
 
     def call(self, graph_module: GraphModule) -> PassResult:
-        vocab_size: int = 0
-        hidden_size: int = 0
-        attention_head_size: int = 0
-        num_attention_heads: int = 0
-        num_attention_kv_heads: int = 0
+        vocab_size: int | None = None
+        hidden_size: int | None = None
+        attention_head_size: int | None = None
+        num_attention_heads: int | None = None
+        num_attention_kv_heads: int | None = None
         first_node_rewritten: Node | None = None
 
         overall_modified = False
@@ -78,6 +78,7 @@ class ParallelizeTensor(GraphOptimizationPass):
             elif (linear := Linear.configure_from(node)) is not None and (
                 weight := GetAttr.specialize_from(linear.weight_node)
             ) is not None:
+                assert hidden_size is not None and vocab_size is not None, "hidden_size and vocab_size must be set"
                 in_features = weight.tensor.shape[1 if linear.has_transposed_weight else 0]
                 out_features = weight.tensor.shape[0 if linear.has_transposed_weight else 1]
                 is_lm_head = vocab_size in (in_features, out_features)
@@ -85,9 +86,13 @@ class ParallelizeTensor(GraphOptimizationPass):
                     users[0].target, GPTAttentionPlugin
                 ):
                     gpt_attn_plugin = users[0].target
-                    if not (attention_head_size > 0 and num_attention_heads > 0 and num_attention_kv_heads > 0):
+                    if not (
+                        attention_head_size is not None
+                        and num_attention_heads is not None
+                        and num_attention_kv_heads is not None
+                    ):
                         # get attention's parameters
-                        attention_head_size = hidden_size // gpt_attn_plugin.num_heads
+                        attention_head_size = gpt_attn_plugin.head_size
                         num_attention_heads = gpt_attn_plugin.num_heads // self.mapping.tp_size
                         num_attention_kv_heads = (
                             gpt_attn_plugin.num_kv_heads + self.mapping.tp_size - 1
