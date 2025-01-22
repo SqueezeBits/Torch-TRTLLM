@@ -13,8 +13,9 @@ class TensorParallelType(Enum):
     """Tensor parallel type.
 
     Attributes:
-        NONE (int): The tensor parallel type is none
-        COLUMN (int): The tensor parallel type is column
+        NONE : The tensor parallel type is none
+        COLUMN : The tensor parallel type is column
+        ROW : The tensor parallel type is row
     """
 
     NONE = "none"
