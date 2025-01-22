@@ -1,4 +1,5 @@
 from copy import copy
+from enum import IntEnum
 
 import tensorrt as trt
 import torch
@@ -17,6 +18,21 @@ from .infra import (
     PassResult,
     inject_stack_trace_from,
 )
+
+
+class TensorParallelType(IntEnum):
+    """Tensor parallel type.
+
+    Attributes:
+        NONE (int): The tensor parallel type is none
+        COLUMN (int): The tensor parallel type is column
+    """
+
+    NONE = 0
+    COLUMN = 1
+
+    def __str__(self) -> str:
+        return self.name
 
 
 # TODO: Change ParallelizeTensor to inherit from NodewiseOptimization instead of GraphOptimizationPass
@@ -54,7 +70,7 @@ class ParallelizeTensor(GraphOptimizationPass):
         overall_modified = False
         for node in graph_module.graph.nodes:
             modified = False
-            tp_type = self.get_previous_tp_type(node)
+            tp_type = get_previous_tp_type(node)
 
             if (token_embedding := TokenEmbedding.configure_from(node)) is not None:
                 vocab_size = token_embedding.vocab_size
@@ -77,7 +93,7 @@ class ParallelizeTensor(GraphOptimizationPass):
                             gpt_attn_plugin.num_kv_heads + self.mapping.tp_size - 1
                         ) // self.mapping.tp_size
 
-                    if tp_type == "none":
+                    if tp_type == TensorParallelType.NONE:
                         self.parallelize_column_linear(
                             graph_module.graph,
                             linear,
@@ -88,7 +104,7 @@ class ParallelizeTensor(GraphOptimizationPass):
                             q_dim=self.mapping.tp_size * num_attention_heads * attention_head_size,
                             kv_dim=self.mapping.tp_size * num_attention_kv_heads * attention_head_size,
                         )
-                        tp_type = "column"
+                        tp_type = TensorParallelType.COLUMN
                     else:
                         raise RuntimeError("QKV linear is always parallelized in column direction")
                 elif is_lm_head:
@@ -99,9 +115,9 @@ class ParallelizeTensor(GraphOptimizationPass):
                         out_features,
                         gather_output=True,
                     )
-                    tp_type = "none"
+                    tp_type = TensorParallelType.NONE
                 else:
-                    if tp_type == "none":
+                    if tp_type == TensorParallelType.NONE:
                         self.parallelize_column_linear(
                             graph_module.graph,
                             linear,
@@ -109,15 +125,15 @@ class ParallelizeTensor(GraphOptimizationPass):
                             out_features,
                             gather_output=False,
                         )
-                        tp_type = "column"
-                    elif tp_type == "column":
+                        tp_type = TensorParallelType.COLUMN
+                    elif tp_type == TensorParallelType.COLUMN:
                         self.parallelize_row_linear(
                             graph_module.graph,
                             linear,
                             in_features,
                             out_features,
                         )
-                        tp_type = "none"
+                        tp_type = TensorParallelType.NONE
                 modified = True
             elif isinstance(node.target, GPTAttentionPlugin):
                 node.target = copy(node.target)
@@ -147,22 +163,6 @@ class ParallelizeTensor(GraphOptimizationPass):
             str: The name of the attribute with the tensor parallel rank
         """
         return f"{from_name}_rank{self.mapping.tp_rank}"
-
-    def get_previous_tp_type(self, node: Node) -> str:
-        """Get the previous parallel linear type of the node.
-
-        Args:
-            node (Node): The node to get the previous parallel linear type from
-
-        Returns:
-            str: The previous parallel linear type (possible values: "none" or "column")
-        """
-        if len(node.all_input_nodes) == 0:
-            return "none"
-        prev_tp_types: list[str] = []
-        for prev_node in node.all_input_nodes:
-            prev_tp_types.append(prev_node.meta.get("tp_type", "none"))
-        return "column" if "column" in prev_tp_types else "none"
 
     # pylint: disable-next=too-many-locals,too-many-statements
     def parallelize_column_linear(
@@ -236,7 +236,7 @@ class ParallelizeTensor(GraphOptimizationPass):
         assert parallelized_weight_tensor.ndim == 2 and tuple(parallelized_weight_tensor.shape) == (
             local_out_features if linear.has_transposed_weight else in_features,
             in_features if linear.has_transposed_weight else local_out_features,
-        ), "unexpected shape of parallelized qkv weight"
+        ), "unexpected shape of parallelized weight"
 
         with graph.inserting_before(weight.node):
             parallelized_weight = GetAttr.create(
@@ -323,7 +323,7 @@ class ParallelizeTensor(GraphOptimizationPass):
         assert parallelized_weight_tensor.ndim == 2 and tuple(parallelized_weight_tensor.shape) == (
             out_features if linear.has_transposed_weight else local_in_features,
             local_in_features if linear.has_transposed_weight else out_features,
-        ), "unexpected shape of parallelized qkv weight"
+        ), "unexpected shape of parallelized weight"
 
         with graph.inserting_before(weight.node):
             parallelized_weight = GetAttr.create(
@@ -416,3 +416,20 @@ def insert_allreduce_plugin(
             plugin_inputs.model_dump(),
         )
     to.replace_all_uses_with(allreduce, delete_user_cb=lambda user: user is not allreduce)
+
+
+def get_previous_tp_type(node: Node) -> TensorParallelType:
+    """Get the previous parallel linear type of the node.
+
+    Args:
+        node (Node): The node to get the previous parallel linear type from
+
+    Returns:
+        TensorParallelType: The previous parallel linear type
+    """
+    if len(node.all_input_nodes) == 0:
+        return TensorParallelType.NONE
+    prev_tp_types: list[TensorParallelType] = []
+    for prev_node in node.all_input_nodes:
+        prev_tp_types.append(prev_node.meta.get("tp_type", TensorParallelType.NONE))
+    return TensorParallelType.COLUMN if TensorParallelType.COLUMN in prev_tp_types else TensorParallelType.NONE
