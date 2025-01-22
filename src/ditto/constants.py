@@ -31,6 +31,7 @@ PassName = Literal[
     "FuseReciprocalMul",
     "InsertGatherLastTokenIds",
     "ParallelizeTensor",
+    "PropagateTensorParallelism",
     "HerdConstantsToTheRight",
     "ReplaceMMByFakeGemmPlugin",
     "ReplaceSDPAByFakeGPTAttentionPlugin",
