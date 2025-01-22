@@ -25,8 +25,7 @@ from ..debug import (
 def patched_trtllm_network_to_dot(self: trtllm.Network, path: Path | str | None) -> str | None:
     if path is None:
         return None
-    path = path.stem if isinstance(path, Path) else os.path.splitext(path)[0]
-    save_for_debug(f"trt_network_def_{path}", self.trt_network)
+    save_for_debug(f"trt_network_def_{Path(path).stem}", self.trt_network)
     return None
 
 
