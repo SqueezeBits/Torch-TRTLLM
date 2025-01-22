@@ -8,9 +8,9 @@ from torch.fx import Graph, GraphModule, Node
 from ...configs.trtllm.pretrained import TRTLLMMapping
 from ...types import DataType
 from ..nodes import GetAttr, Permute, Reshape
-from ..subgraphs import DecoderLayer
-from ..subgraphs.linear import Linear, find_last_linear
-from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs
+from ..subgraphs import TokenEmbedding
+from ..subgraphs.linear import Linear
+from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs, GPTAttentionPlugin
 from ..utils import forget_all_descendant_fake_tensors, get_val
 from .infra import (
     GraphOptimizationPass,
@@ -24,131 +24,116 @@ from .infra import (
 class ParallelizeTensor(GraphOptimizationPass):
     """Parallelize tensor in the graph (Tensor Parallelism).
 
+    This pass is designed to parallelize the tensor in the graph.
+    It propagates the tensor parallel type in the path of current node,
+    and parallelizes the node that meet the conditions according to the following rules:
+    - The possible values of tensor parallel type are "none" and "column"
+    - If the current node is a linear node and the previous tensor parallel type is "none",
+      it will parallelize the node in column direction and set the tensor parallel type of this node to "column".
+    - If the current node is a linear node and the previous tensor parallel type is "column",
+      it will parallelize the node in row direction and set the tensor parallel type of this node to "none".
+      The linear node that is parallelized in row direction has the reduce operation.
+    - If the current node is the lm_head node,
+      it will parallelize the node in column direction with allgather operation.
+    - If the current node is not a linear node, it just propagates the tensor parallel type of the previous node.
+
     Attributes:
         mapping (TRTLLMMapping): The mapping of the model
-        first_node_rewritten (Node | None): The first node that is rewritten.
     """
 
     mapping: TRTLLMMapping
-    first_node_rewritten: Node | None = None
 
     def call(self, graph_module: GraphModule) -> PassResult:
+        vocab_size: int = 0
+        hidden_size: int = 0
+        attention_head_size: int = 0
+        num_attention_heads: int = 0
+        num_attention_kv_heads: int = 0
+        first_node_rewritten: Node | None = None
+
         overall_modified = False
         for node in graph_module.graph.nodes:
-            if not (decoder_layer := DecoderLayer.configure_from(node)):
-                continue
-            assert (
-                decoder_layer.gpt_attn_plugin.target.num_heads % self.mapping.tp_size == 0
-            ), "num_attention_heads must be divisible by tp_size"
+            modified = False
+            tp_type = self.get_previous_tp_type(node)
 
-            # Note: We need to copy the plugin node's target to avoid modifying the original.
-            # This is because GraphModule's deepcopy method creates new nodes rather than copying existing ones.
-            # It doesn't copy the target of the node, but the plugin node's target is a class instance,
-            # so it needs to be copied.
-            node.target = copy(node.target)
+            if (token_embedding := TokenEmbedding.configure_from(node)) is not None:
+                vocab_size = token_embedding.vocab_size
+                hidden_size = token_embedding.hidden_size
+            elif (linear := Linear.configure_from(node)) is not None and (
+                weight := GetAttr.specialize_from(linear.weight_node)
+            ) is not None:
+                in_features = weight.tensor.shape[1 if linear.has_transposed_weight else 0]
+                out_features = weight.tensor.shape[0 if linear.has_transposed_weight else 1]
+                is_lm_head = vocab_size in (in_features, out_features)
+                if len(users := list(linear.output_node.users)) == 1 and isinstance(
+                    users[0].target, GPTAttentionPlugin
+                ):
+                    gpt_attn_plugin = users[0].target
+                    if not (attention_head_size > 0 and num_attention_heads > 0 and num_attention_kv_heads > 0):
+                        # get attention's parameters
+                        attention_head_size = hidden_size // gpt_attn_plugin.num_heads
+                        num_attention_heads = gpt_attn_plugin.num_heads // self.mapping.tp_size
+                        num_attention_kv_heads = (
+                            gpt_attn_plugin.num_kv_heads + self.mapping.tp_size - 1
+                        ) // self.mapping.tp_size
 
-            if self.first_node_rewritten is None:
-                self.first_node_rewritten = decoder_layer.attn_qkv.input_node
+                    if tp_type == "none":
+                        self.parallelize_column_linear(
+                            graph_module.graph,
+                            linear,
+                            in_features,
+                            out_features,
+                            gather_output=False,
+                            is_qkv=True,
+                            q_dim=self.mapping.tp_size * num_attention_heads * attention_head_size,
+                            kv_dim=self.mapping.tp_size * num_attention_kv_heads * attention_head_size,
+                        )
+                        tp_type = "column"
+                    else:
+                        raise RuntimeError("QKV linear is always parallelized in column direction")
+                elif is_lm_head:
+                    self.parallelize_column_linear(
+                        graph_module.graph,
+                        linear,
+                        in_features,
+                        out_features,
+                        gather_output=True,
+                    )
+                    tp_type = "none"
+                else:
+                    if tp_type == "none":
+                        self.parallelize_column_linear(
+                            graph_module.graph,
+                            linear,
+                            in_features,
+                            out_features,
+                            gather_output=False,
+                        )
+                        tp_type = "column"
+                    elif tp_type == "column":
+                        self.parallelize_row_linear(
+                            graph_module.graph,
+                            linear,
+                            in_features,
+                            out_features,
+                        )
+                        tp_type = "none"
+                modified = True
+            elif isinstance(node.target, GPTAttentionPlugin):
+                node.target = copy(node.target)
+                node.target.num_heads = num_attention_heads
+                node.target.num_kv_heads = num_attention_kv_heads
+                node.target.tp_size = self.mapping.tp_size
+                node.target.tp_rank = self.mapping.tp_rank
+                modified = True
 
-            hidden_size = (
-                decoder_layer.gpt_attn_plugin.target.head_size * decoder_layer.gpt_attn_plugin.target.num_heads
-            )
-            attention_head_size = hidden_size // decoder_layer.gpt_attn_plugin.target.num_heads
-            num_attention_heads = decoder_layer.gpt_attn_plugin.target.num_heads // self.mapping.tp_size
-            num_attention_kv_heads = (
-                decoder_layer.gpt_attn_plugin.target.num_kv_heads + self.mapping.tp_size - 1
-            ) // self.mapping.tp_size
+            node.meta["tp_type"] = tp_type
+            if modified and first_node_rewritten is None:
+                first_node_rewritten = node
 
-            # update plugin's fields and val's shape
-            decoder_layer.gpt_attn_plugin.target.num_heads = num_attention_heads
-            decoder_layer.gpt_attn_plugin.target.num_kv_heads = num_attention_kv_heads
-            decoder_layer.gpt_attn_plugin.target.tp_size = self.mapping.tp_size
-            decoder_layer.gpt_attn_plugin.target.tp_rank = self.mapping.tp_rank
+            overall_modified = overall_modified or modified
 
-            # parallelize the qkv linear
-            in_features = hidden_size
-            q_dim = self.mapping.tp_size * num_attention_heads * attention_head_size
-            kv_dim = self.mapping.tp_size * num_attention_kv_heads * attention_head_size
-            out_features = q_dim + (2 * kv_dim)
-            self.parallelize_column_linear(
-                graph_module.graph,
-                decoder_layer.attn_qkv,
-                in_features,
-                out_features,
-                gather_output=False,
-                is_qkv=True,
-                q_dim=q_dim,
-                kv_dim=kv_dim,
-            )
-
-            # parallelize the dense linear
-            in_features = self.mapping.tp_size * num_attention_heads * attention_head_size
-            out_features = hidden_size
-            self.parallelize_row_linear(
-                graph_module.graph,
-                decoder_layer.attn_dense,
-                in_features,
-                out_features,
-            )
-
-            # parallelize the mlp gate linear
-            ffn_hidden_size = get_val(decoder_layer.mlp_gate.output_node).shape[-1]
-            in_features = hidden_size
-            out_features = ffn_hidden_size
-            self.parallelize_column_linear(
-                graph_module.graph,
-                decoder_layer.mlp_gate,
-                in_features,
-                out_features,
-                gather_output=False,
-            )
-
-            # parallelize the mlp up-projection linear
-            in_features = hidden_size
-            out_features = (
-                ffn_hidden_size  # Note: it should be multiplied by 2 if hidden activation is 'swiglu' or 'gegelu'
-            )
-            self.parallelize_column_linear(
-                graph_module.graph,
-                decoder_layer.mlp_up_proj,
-                in_features,
-                out_features,
-                gather_output=False,
-            )
-
-            # parallelize the mlp down-projection linear
-            in_features = ffn_hidden_size
-            out_features = hidden_size
-            self.parallelize_row_linear(
-                graph_module.graph,
-                decoder_layer.mlp_down_proj,
-                in_features,
-                out_features,
-            )
-
-            overall_modified = overall_modified or True
-
-        # parallelize the lm_head linear
-        if (
-            (lm_head := find_last_linear(graph_module.graph))
-            and (lm_head_weight := GetAttr.specialize_from(lm_head.weight_node))
-            and (len(lm_head_weight.tensor.shape) == 2)
-        ):
-            in_features = (
-                lm_head_weight.tensor.shape[1] if lm_head.has_transposed_weight else lm_head_weight.tensor.shape[0]
-            )
-            out_features = (
-                lm_head_weight.tensor.shape[0] if lm_head.has_transposed_weight else lm_head_weight.tensor.shape[1]
-            )
-            self.parallelize_column_linear(
-                graph_module.graph,
-                lm_head,
-                in_features,
-                out_features,
-                gather_output=True,
-            )
-
-        forget_all_descendant_fake_tensors(self.first_node_rewritten)
+        forget_all_descendant_fake_tensors(first_node_rewritten)
 
         return PassResult(graph_module=graph_module, modified=overall_modified, require_fake_tensor_prop=True)
 
@@ -162,6 +147,22 @@ class ParallelizeTensor(GraphOptimizationPass):
             str: The name of the attribute with the tensor parallel rank
         """
         return f"{from_name}_rank{self.mapping.tp_rank}"
+
+    def get_previous_tp_type(self, node: Node) -> str:
+        """Get the previous parallel linear type of the node.
+
+        Args:
+            node (Node): The node to get the previous parallel linear type from
+
+        Returns:
+            str: The previous parallel linear type (possible values: "none" or "column")
+        """
+        if len(node.all_input_nodes) == 0:
+            return "none"
+        prev_tp_types: list[str] = []
+        for prev_node in node.all_input_nodes:
+            prev_tp_types.append(prev_node.meta.get("tp_type", "none"))
+        return "column" if "column" in prev_tp_types else "none"
 
     # pylint: disable-next=too-many-locals,too-many-statements
     def parallelize_column_linear(
