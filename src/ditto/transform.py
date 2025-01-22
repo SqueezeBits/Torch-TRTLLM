@@ -16,7 +16,7 @@ from .contexts import ignore_symbolic_shapes_warning
 from .debug import save_for_debug
 from .fx import (
     ForgetSubmodules,
-    ParallelizeTensor,
+    ParallelizeLinear,
     PropagateTensorParallelism,
     ResetCodeGen,
     fake_tensor_prop_on_node_creation,
@@ -114,7 +114,7 @@ def parallelize(
             parallelize_pass_manager = DynamoPassManager.build_from_passlist(
                 [
                     PropagateTensorParallelism(mapping=mapping_with_rank).as_transform(),
-                    ParallelizeTensor(mapping=mapping_with_rank).as_transform(),
+                    ParallelizeLinear(mapping=mapping_with_rank).as_transform(),
                 ]
             )
             with fake_tensor_prop_on_node_creation(sub_graph_module), ignore_symbolic_shapes_warning():

@@ -30,7 +30,7 @@ PassName = Literal[
     "FuseQKVProjections",
     "FuseReciprocalMul",
     "InsertGatherLastTokenIds",
-    "ParallelizeTensor",
+    "ParallelizeLinear",
     "PropagateTensorParallelism",
     "HerdConstantsToTheRight",
     "ReplaceMMByFakeGemmPlugin",

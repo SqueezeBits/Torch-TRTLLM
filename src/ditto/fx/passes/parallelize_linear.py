@@ -6,7 +6,6 @@ from torch.fx import Graph, GraphModule, Node
 from ...configs.trtllm.pretrained import TRTLLMMapping
 from ...types import DataType
 from ..nodes import GetAttr, Permute, Reshape
-from ..passes.propagate_tensor_parallelism import TensorParallelType
 from ..subgraphs.linear import Linear, find_last_linear
 from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs, GPTAttentionPlugin
 from ..utils import forget_all_descendant_fake_tensors, get_val
@@ -15,12 +14,13 @@ from .infra import (
     PassResult,
     inject_stack_trace_from,
 )
+from .propagate_tensor_parallelism import TensorParallelType
 
 
-# TODO: Change ParallelizeTensor to inherit from NodewiseOptimization instead of GraphOptimizationPass
+# TODO: Change ParallelizeLinear to inherit from NodewiseOptimization instead of GraphOptimizationPass
 # This will allow processing nodes individually rather than the whole graph at once
-class ParallelizeTensor(GraphOptimizationPass):
-    """Parallelize tensor in the graph (Tensor Parallelism).
+class ParallelizeLinear(GraphOptimizationPass):
+    """Parallelize linear nodes in the graph (Tensor Parallelism).
 
     This pass must be run after PropagateTensorParallelism pass.
 
