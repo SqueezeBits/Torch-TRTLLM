@@ -17,6 +17,7 @@ from .debug import save_for_debug
 from .fx import (
     ForgetSubmodules,
     ParallelizeTensor,
+    PropagateTensorParallelism,
     ResetCodeGen,
     fake_tensor_prop_on_node_creation,
     get_level1_transform,
@@ -109,9 +110,11 @@ def parallelize(
             logger.debug(f"Running parallelize passes for rank {rank}")
             sub_graph_module = GraphModule(state_dict, deepcopy(graph_module.graph))
             sub_graph_module.meta.update(graph_module.meta)
+            mapping_with_rank = mapping.copy_with_rank(rank)
             parallelize_pass_manager = DynamoPassManager.build_from_passlist(
                 [
-                    ParallelizeTensor(mapping=mapping.copy_with_rank(rank)).as_transform(),
+                    PropagateTensorParallelism(mapping=mapping_with_rank).as_transform(),
+                    ParallelizeTensor(mapping=mapping_with_rank).as_transform(),
                 ]
             )
             with fake_tensor_prop_on_node_creation(sub_graph_module), ignore_symbolic_shapes_warning():

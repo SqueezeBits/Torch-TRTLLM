@@ -1,6 +1,3 @@
-from copy import copy
-from enum import IntEnum
-
 import tensorrt as trt
 import torch
 from tensorrt_llm.functional import AllReduceConfig, AllReduceFusionOp, AllReduceStrategy
@@ -9,8 +6,8 @@ from torch.fx import Graph, GraphModule, Node
 from ...configs.trtllm.pretrained import TRTLLMMapping
 from ...types import DataType
 from ..nodes import GetAttr, Permute, Reshape
-from ..subgraphs import TokenEmbedding
-from ..subgraphs.linear import Linear
+from ..passes.propagate_tensor_parallelism import TensorParallelType
+from ..subgraphs.linear import Linear, find_last_linear
 from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs, GPTAttentionPlugin
 from ..utils import forget_all_descendant_fake_tensors, get_val
 from .infra import (
@@ -20,38 +17,12 @@ from .infra import (
 )
 
 
-class TensorParallelType(IntEnum):
-    """Tensor parallel type.
-
-    Attributes:
-        NONE (int): The tensor parallel type is none
-        COLUMN (int): The tensor parallel type is column
-    """
-
-    NONE = 0
-    COLUMN = 1
-
-    def __str__(self) -> str:
-        return self.name
-
-
 # TODO: Change ParallelizeTensor to inherit from NodewiseOptimization instead of GraphOptimizationPass
 # This will allow processing nodes individually rather than the whole graph at once
 class ParallelizeTensor(GraphOptimizationPass):
     """Parallelize tensor in the graph (Tensor Parallelism).
 
-    This pass is designed to parallelize the tensor in the graph.
-    It propagates the tensor parallel type in the path of current node,
-    and parallelizes the node that meet the conditions according to the following rules:
-    - The possible values of tensor parallel type are "none" and "column"
-    - If the current node is a linear node and the previous tensor parallel type is "none",
-      it will parallelize the node in column direction and set the tensor parallel type of this node to "column".
-    - If the current node is a linear node and the previous tensor parallel type is "column",
-      it will parallelize the node in row direction and set the tensor parallel type of this node to "none".
-      The linear node that is parallelized in row direction has the reduce operation.
-    - If the current node is the lm_head node,
-      it will parallelize the node in column direction with allgather operation.
-    - If the current node is not a linear node, it just propagates the tensor parallel type of the previous node.
+    This pass must be run after PropagateTensorParallelism pass.
 
     Attributes:
         mapping (TRTLLMMapping): The mapping of the model
@@ -60,99 +31,45 @@ class ParallelizeTensor(GraphOptimizationPass):
     mapping: TRTLLMMapping
 
     def call(self, graph_module: GraphModule) -> PassResult:
-        vocab_size: int | None = None
-        hidden_size: int | None = None
-        attention_head_size: int | None = None
-        num_attention_heads: int | None = None
-        num_attention_kv_heads: int | None = None
         first_node_rewritten: Node | None = None
-
         overall_modified = False
         for node in graph_module.graph.nodes:
-            modified = False
-            tp_type = get_previous_tp_type(node)
+            if not (
+                (linear := Linear.configure_from(node)) and (weight := GetAttr.specialize_from(linear.weight_node))
+            ):
+                continue
 
-            if (token_embedding := TokenEmbedding.configure_from(node)) is not None:
-                vocab_size = token_embedding.vocab_size
-                hidden_size = token_embedding.hidden_size
-            elif (linear := Linear.configure_from(node)) is not None and (
-                weight := GetAttr.specialize_from(linear.weight_node)
-            ) is not None:
-                assert hidden_size is not None and vocab_size is not None, "hidden_size and vocab_size must be set"
-                in_features = weight.tensor.shape[1 if linear.has_transposed_weight else 0]
-                out_features = weight.tensor.shape[0 if linear.has_transposed_weight else 1]
-                is_lm_head = vocab_size in (in_features, out_features)
-                if len(users := list(linear.output_node.users)) == 1 and isinstance(
-                    users[0].target, GPTAttentionPlugin
-                ):
-                    gpt_attn_plugin = users[0].target
-                    if not (
-                        attention_head_size is not None
-                        and num_attention_heads is not None
-                        and num_attention_kv_heads is not None
-                    ):
-                        # get attention's parameters
-                        attention_head_size = gpt_attn_plugin.head_size
-                        num_attention_heads = gpt_attn_plugin.num_heads // self.mapping.tp_size
-                        num_attention_kv_heads = (
-                            gpt_attn_plugin.num_kv_heads + self.mapping.tp_size - 1
-                        ) // self.mapping.tp_size
+            tp_type = node.meta.get("tp_type", TensorParallelType.NONE)
+            in_features = weight.tensor.shape[1 if linear.has_transposed_weight else 0]
+            out_features = weight.tensor.shape[0 if linear.has_transposed_weight else 1]
+            if tp_type == TensorParallelType.COLUMN:
+                gpt_attn_plugin = get_gpt_plugin(linear)
+                self.parallelize_column_linear(
+                    graph_module.graph,
+                    linear,
+                    in_features,
+                    out_features,
+                    gather_output=is_lm_head(linear, graph_module.graph),
+                    is_qkv=gpt_attn_plugin is not None,
+                    q_dim=-1
+                    if gpt_attn_plugin is None
+                    else self.mapping.tp_size * gpt_attn_plugin.num_heads * gpt_attn_plugin.head_size,
+                    kv_dim=-1
+                    if gpt_attn_plugin is None
+                    else self.mapping.tp_size * gpt_attn_plugin.num_kv_heads * gpt_attn_plugin.head_size,
+                )
+            elif tp_type == TensorParallelType.ROW:
+                self.parallelize_row_linear(
+                    graph_module.graph,
+                    linear,
+                    in_features,
+                    out_features,
+                )
 
-                    if tp_type == TensorParallelType.NONE:
-                        self.parallelize_column_linear(
-                            graph_module.graph,
-                            linear,
-                            in_features,
-                            out_features,
-                            gather_output=False,
-                            is_qkv=True,
-                            q_dim=self.mapping.tp_size * num_attention_heads * attention_head_size,
-                            kv_dim=self.mapping.tp_size * num_attention_kv_heads * attention_head_size,
-                        )
-                        tp_type = TensorParallelType.COLUMN
-                    else:
-                        raise RuntimeError("QKV linear is always parallelized in column direction")
-                elif is_lm_head:
-                    self.parallelize_column_linear(
-                        graph_module.graph,
-                        linear,
-                        in_features,
-                        out_features,
-                        gather_output=True,
-                    )
-                    tp_type = TensorParallelType.NONE
-                else:
-                    if tp_type == TensorParallelType.NONE:
-                        self.parallelize_column_linear(
-                            graph_module.graph,
-                            linear,
-                            in_features,
-                            out_features,
-                            gather_output=False,
-                        )
-                        tp_type = TensorParallelType.COLUMN
-                    elif tp_type == TensorParallelType.COLUMN:
-                        self.parallelize_row_linear(
-                            graph_module.graph,
-                            linear,
-                            in_features,
-                            out_features,
-                        )
-                        tp_type = TensorParallelType.NONE
-                modified = True
-            elif isinstance(node.target, GPTAttentionPlugin):
-                node.target = copy(node.target)
-                node.target.num_heads = num_attention_heads
-                node.target.num_kv_heads = num_attention_kv_heads
-                node.target.tp_size = self.mapping.tp_size
-                node.target.tp_rank = self.mapping.tp_rank
-                modified = True
-
-            node.meta["tp_type"] = tp_type
-            if modified and first_node_rewritten is None:
+            if first_node_rewritten is None:
                 first_node_rewritten = node
 
-            overall_modified = overall_modified or modified
+            overall_modified = True
 
         forget_all_descendant_fake_tensors(first_node_rewritten)
 
@@ -423,18 +340,31 @@ def insert_allreduce_plugin(
     to.replace_all_uses_with(allreduce, delete_user_cb=lambda user: user is not allreduce)
 
 
-def get_previous_tp_type(node: Node) -> TensorParallelType:
-    """Get the previous parallel linear type of the node.
+def get_gpt_plugin(linear: Linear) -> GPTAttentionPlugin | None:
+    """Get the GPTAttentionPlugin from the linear node.
 
     Args:
-        node (Node): The node to get the previous parallel linear type from
+        linear (Linear): The linear node to get the GPTAttentionPlugin from
 
     Returns:
-        TensorParallelType: The previous parallel linear type
+        GPTAttentionPlugin | None: The GPTAttentionPlugin from the linear node
     """
-    if len(node.all_input_nodes) == 0:
-        return TensorParallelType.NONE
-    prev_tp_types: list[TensorParallelType] = []
-    for prev_node in node.all_input_nodes:
-        prev_tp_types.append(prev_node.meta.get("tp_type", TensorParallelType.NONE))
-    return TensorParallelType.COLUMN if TensorParallelType.COLUMN in prev_tp_types else TensorParallelType.NONE
+    is_qkv = len(users := list(linear.output_node.users)) == 1 and isinstance(users[0].target, GPTAttentionPlugin)
+    return users[0].target if is_qkv else None
+
+
+def is_lm_head(linear: Linear, graph: Graph) -> bool:
+    """Check if the linear node is the last linear node in the graph.
+
+    It assumes that the last linear node is the lm_head node.
+
+    Args:
+        linear (Linear): The linear node to check
+        graph (Graph): The graph to get the last linear node from
+
+    Returns:
+        bool: Whether the linear node is the last linear node in the graph
+    """
+    if not (last_linear := find_last_linear(graph)):
+        return False
+    return linear == last_linear
