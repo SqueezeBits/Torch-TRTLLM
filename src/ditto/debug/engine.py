@@ -1,6 +1,7 @@
 import json
 import keyword
 import re
+from collections import OrderedDict
 from collections.abc import Callable
 from functools import cache
 from types import NoneType, UnionType
@@ -120,7 +121,7 @@ class ETensor(NamedEngineComponent):
     def __str__(self) -> str:
         loc = f"@{self.location.name.lower()}" if self.location else ""
         dtype = "unknown" if self.dtype is None else self.dtype.name.lower()
-        return f"{self.name}: {dtype}{[*self.shape,]}{loc}"
+        return f"{self.name}: {dtype}{[*self.shape]}{loc}"
 
 
 class ELayer(NamedEngineComponent):
@@ -136,11 +137,26 @@ class ELayer(NamedEngineComponent):
 
     @classmethod
     def from_layer(cls, layer: trt.ILayer) -> Self:
+        attrs = OrderedDict()
+        # set common attributes of ILayer
+        for key in dir(layer):
+            if not (key.startswith("_") or callable(getattr(layer, key))):
+                attrs[key] = str(getattr(layer, key))
+        # set attributes of the specific layer type
+        layer.__class__ = layer_type_to_class(layer)
+        for key in dir(layer):
+            if key in dir(trt.ILayer) and key != "type":
+                continue
+            if key == "type" and not isinstance(layer.type, trt.LayerType):
+                attrs["algo-type"] = str(layer.type)
+                continue
+            attrs[key] = str(getattr(layer, key))
         return cls(
             name=layer.name,
             layer_type=layer.type.name.lower(),
             inputs=[ETensor.from_tensor(layer.get_input(i)) for i in range(layer.num_inputs)],
             outputs=[ETensor.from_tensor(layer.get_output(i)) for i in range(layer.num_outputs)],
+            attributes=attrs,
         )
 
 
@@ -336,3 +352,25 @@ def get_shape_ranges(
         }
         for profile in optimization_profiles
     ]
+
+
+def layer_type_to_class(layer: trt.ILayer) -> type[trt.ILayer]:
+    """Get the class of the layer type."""
+    layer_type_name = str(layer.type).rsplit(".", maxsplit=1)[-1]
+    if layer_type_name == "ELEMENTWISE":
+        return trt.IElementWiseLayer
+    if layer_type_name == "LRN":
+        return trt.ILRNLayer
+    if layer_type_name == "NMS":
+        return trt.INMSLayer
+    if layer_type_name == "PARAMETRIC_RELU":
+        return trt.IParametricReLULayer
+    if layer_type_name == "RAGGED_SOFTMAX":
+        return trt.IRaggedSoftMaxLayer
+    if layer_type_name == "SOFTMAX":
+        return trt.ISoftMaxLayer
+    if layer_type_name == "TOPK":
+        return trt.ITopKLayer
+
+    name = "".join(name[0] + name[1:].lower() for name in layer_type_name.split("_"))
+    return trt.__builtins__["getattr"](trt, f"I{name}Layer")
