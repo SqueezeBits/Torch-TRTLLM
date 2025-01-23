@@ -1,3 +1,17 @@
+# Copyright 2025 SqueezeBits, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import tensorrt as trt
 import torch
 from tensorrt_llm.functional import AllReduceConfig, AllReduceFusionOp, AllReduceStrategy
@@ -115,9 +129,9 @@ class ParallelizeLinear(GraphOptimizationPass):
         local_out_features = out_features // self.mapping.tp_size
         if is_qkv:
             # qkv weight is already merged, so it needs to be split
-            assert (
-                q_dim % self.mapping.tp_size == 0 and kv_dim % self.mapping.tp_size == 0
-            ), "q_dim and kv_dim must be divisible by tp_size"
+            assert q_dim % self.mapping.tp_size == 0 and kv_dim % self.mapping.tp_size == 0, (
+                "q_dim and kv_dim must be divisible by tp_size"
+            )
             q_slice_size = q_dim // self.mapping.tp_size
             kv_slice_size = kv_dim // self.mapping.tp_size
             if linear.has_transposed_weight:
