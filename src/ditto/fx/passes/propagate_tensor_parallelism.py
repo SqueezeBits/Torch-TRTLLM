@@ -1,4 +1,3 @@
-from copy import copy
 from enum import Enum
 
 from torch.fx import Node
@@ -29,7 +28,8 @@ class TensorParallelType(Enum):
 class PropagateTensorParallelism(NodewiseOptimizationPass):
     """Propagate tensor parallelism in the graph.
 
-    It propagates the tensor parallel type in the path of the current node according to the following rules:
+    It propagates the properties of TP for some plugin nodes
+    and the tensor parallel type in the path of the current node according to the following rules:
     - If the current node is a linear node and the previous tensor parallel type is TensorParallelType.NONE,
       it will set the tensor parallel type of this node to TensorParallelType.COLUMN.
     - If the current node is a linear node and the previous tensor parallel type is TensorParallelType.COLUMN,
@@ -37,7 +37,6 @@ class PropagateTensorParallelism(NodewiseOptimizationPass):
     - The previous tensor parallel type is TensorParallelType.ROW is not valid, so the previous tensor parallel type
       is always TensorParallelType.NONE or TensorParallelType.COLUMN.
     - If the current node is not a linear node, it just propagates the tensor parallel type of the previous node.
-    It also copies a GPTAttentionPlugin target to the node to avoid overwriting original's.
 
     Attributes:
         mapping (TRTLLMMapping): The mapping of the model
@@ -49,14 +48,13 @@ class PropagateTensorParallelism(NodewiseOptimizationPass):
         prev_tp_type = get_previous_tp_type(node)
 
         if isinstance(node.target, GPTAttentionPlugin):
-            node.target = copy(node.target)
             node.target.num_heads = node.target.num_heads // self.mapping.tp_size
             node.target.num_kv_heads = (node.target.num_kv_heads + self.mapping.tp_size - 1) // self.mapping.tp_size
             node.target.tp_size = self.mapping.tp_size
             node.target.tp_rank = self.mapping.tp_rank
             node.meta["tp_type"] = prev_tp_type
             return {}
-        if not (_ := Linear.configure_from(node)):
+        if not Linear.configure_from(node):
             node.meta["tp_type"] = prev_tp_type
             return {}
 
