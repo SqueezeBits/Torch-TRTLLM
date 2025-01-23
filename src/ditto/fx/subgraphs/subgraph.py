@@ -32,6 +32,6 @@ class Subgraph(StrictlyTyped, ABC):
         return sum(node_hashes)
 
     def __eq__(self, other: object) -> bool:
-        if isinstance(other, Subgraph):
-            return self is other
+        if isinstance(other, Subgraph) and len(self.nodes) == len(other.nodes):
+            return all(x is y for x, y in zip(self.nodes, other.nodes))
         return False

@@ -1,5 +1,5 @@
 from collections.abc import Callable, Generator
-from copy import deepcopy
+from copy import copy, deepcopy
 
 import torch
 from loguru import logger
@@ -16,13 +16,15 @@ from .contexts import ignore_symbolic_shapes_warning
 from .debug import save_for_debug
 from .fx import (
     ForgetSubmodules,
-    ParallelizeTensor,
+    ParallelizeLinear,
+    PropagateTensorParallelism,
     ResetCodeGen,
     fake_tensor_prop_on_node_creation,
     get_level1_transform,
     get_optimization_transform,
     update_argument_hint,
 )
+from .fx.targets import Plugin
 
 
 def transform(
@@ -104,19 +106,36 @@ def parallelize(
     if mapping.world_size > 1:
         logger.info("Parallelizing the graph module")
         save_for_debug("graph_module_before_parallelization", graph_module)
-        state_dict = graph_module.state_dict()
         for rank in range(mapping.world_size):
             logger.debug(f"Running parallelize passes for rank {rank}")
-            sub_graph_module = GraphModule(state_dict, deepcopy(graph_module.graph))
-            sub_graph_module.meta.update(graph_module.meta)
+            copied_graph_module = copy_graph_module(graph_module)
+            mapping_with_rank = mapping.copy_with_rank(rank)
             parallelize_pass_manager = DynamoPassManager.build_from_passlist(
                 [
-                    ParallelizeTensor(mapping=mapping.copy_with_rank(rank)).as_transform(),
+                    PropagateTensorParallelism(mapping=mapping_with_rank).as_transform(),
+                    ParallelizeLinear(mapping=mapping_with_rank).as_transform(),
                 ]
             )
-            with fake_tensor_prop_on_node_creation(sub_graph_module), ignore_symbolic_shapes_warning():
-                sub_graph_module = parallelize_pass_manager(sub_graph_module)
-
-            yield rank, sub_graph_module
+            with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
+                yield rank, parallelize_pass_manager(copied_graph_module)
     else:
         yield 0, graph_module
+
+
+def copy_graph_module(graph_module: GraphModule) -> GraphModule:
+    """Copy a graph module and its nodes.
+
+    Args:
+        graph_module (GraphModule): The graph module to copy
+
+    Returns:
+        GraphModule: The copied graph module
+    """
+    copied_graph = GraphModule(graph_module.state_dict(), deepcopy(graph_module.graph))
+    copied_graph.meta.update(graph_module.meta)
+    for node in copied_graph.graph.nodes:
+        if isinstance(node.target, Plugin):
+            # Note: If the target of a node is an instance of Plugin, it isn't copied.
+            # We need to copy the Plugin target manually.
+            node.target = copy(node.target)
+    return copied_graph
