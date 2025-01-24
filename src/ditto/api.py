@@ -43,6 +43,7 @@ from .transform import parallelize, transform
 from .types import BuiltInConstant
 
 
+# pylint: disable=too-many-locals
 def trtllm_build(
     model: PreTrainedModel,
     output_dir: str,
@@ -57,6 +58,7 @@ def trtllm_build(
     debug_node_names: list[str] | None = None,
     engine_cache: BaseEngineCache | None = None,
     max_batch_size: int = 256,
+    max_seq_len: int | None = None,
 ) -> None:
     """Build a TensorRT-LLM engine from a PyTorch model.
 
@@ -73,6 +75,7 @@ def trtllm_build(
         debug_node_names (list[str] | None): List of node names to output for debugging
         engine_cache (BaseEngineCache | None): Cache for TensorRT engines
         max_batch_size (int): Maximum batch size for TensorRT engine
+        max_seq_len (int | None): Maximum sequence length for TensorRT engine
     """
     network_name = type(model).__name__
     mapping = mapping or TRTLLMMapping()
@@ -81,6 +84,7 @@ def trtllm_build(
         model.config,
         plugin_config,
         max_batch_size=max_batch_size,
+        max_seq_len=max_seq_len,
     )
     argument_hint = TRTLLMArgumentHint.configure(profile_config, tp_size=mapping.tp_size)
 

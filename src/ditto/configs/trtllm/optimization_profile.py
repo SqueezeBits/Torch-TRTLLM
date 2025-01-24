@@ -23,7 +23,7 @@ from typing_extensions import Self
 from ...types import StrictlyTyped
 from .plugin import TRTLLMPluginConfig
 
-DEFAULT_MAX_POS_EMBEDDING: int = 4096
+DEFAULT_MAX_POS_EMBEDDING: int = 2048
 
 
 class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
@@ -104,8 +104,6 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
     opt_beam_width: int = Field(default=1, gt=0)
     opt_kv_cache_block_size: int = Field(default=32, gt=0)
     max_kv_cache_block_size: int = Field(default=64, gt=1)
-    opt_attention_window_size: int = Field(default=DEFAULT_MAX_POS_EMBEDDING // 2, gt=0)
-    max_attention_window_size: int = Field(default=DEFAULT_MAX_POS_EMBEDDING, gt=1)
 
     @classmethod
     def create_from(
@@ -114,6 +112,8 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
         plugin_config: TRTLLMPluginConfig,
         *,
         max_batch_size: int = 256,
+        max_seq_len: int | None = None,
+        max_input_len: int = 1024,
     ) -> Self:
         max_position_embeddings = getattr(hf_config, "max_position_embeddings", DEFAULT_MAX_POS_EMBEDDING)
         rope_scaling = getattr(hf_config, "rope_scaling", None)
@@ -121,15 +121,24 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             rotary_type = rope_scaling.get("type", rope_scaling.get("rope_type", None))
             rotary_factor = rope_scaling.get("factor", 1.0) if rotary_type not in ("su", "longrope", "llama3") else 1.0
             max_position_embeddings = math.ceil(max_position_embeddings * rotary_factor)
-            logger.debug(f"max_seq_len is scaled to {max_position_embeddings} by rotary scaling {rotary_factor}.")
-        max_kv_cache_block_size = math.ceil(max_position_embeddings / plugin_config.tokens_per_block)
+        if max_seq_len is None:
+            max_seq_len = max_position_embeddings
+            logger.debug(f"max_seq_len is not specified, using deduced value {max_seq_len}")
+        if max_input_len > max_seq_len:
+            logger.debug(
+                f"max_input_len ({max_input_len}) is larger than max_seq_len ({max_seq_len}), using max_seq_len"
+            )
+            max_input_len = max_seq_len
+        max_kv_cache_block_size = math.ceil(max_seq_len / plugin_config.tokens_per_block)
+        opt_kv_cache_block_size = math.ceil((max_seq_len // 2) / plugin_config.tokens_per_block)
         return cls(
             max_batch_size=max_batch_size,
             opt_batch_size=(max_batch_size + 1) // 2,
-            max_seq_len=max_position_embeddings,
-            max_attention_window_size=max_position_embeddings,
+            max_seq_len=max_seq_len,
+            opt_seq_len=(max_seq_len + 1) // 2,
+            max_input_len=max_input_len,
             max_kv_cache_block_size=max_kv_cache_block_size,
-            opt_kv_cache_block_size=max_kv_cache_block_size // 2,
+            opt_kv_cache_block_size=opt_kv_cache_block_size,
         )
 
     def runtime(self) -> RuntimeTRTLLMOptimizationProfileConfig:
@@ -152,14 +161,10 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
         While TRT-LLM tries to adjust the wrong values provided by the user, we will simply reject them.
         """
         assert self.opt_seq_len <= self.max_seq_len, f"{self.opt_seq_len=} must be at most {self.max_seq_len=}."
-        assert self.opt_beam_width <= self.max_beam_width, f"{self.opt_seq_len=} must be at most {self.max_seq_len=}."
+        assert (
+            self.opt_beam_width <= self.max_beam_width
+        ), f"{self.opt_beam_width=} must be at most {self.max_beam_width=}."
         assert (
             self.opt_kv_cache_block_size <= self.max_kv_cache_block_size
         ), f"{self.opt_kv_cache_block_size=} must be at most {self.max_kv_cache_block_size=}."
-        assert (
-            self.opt_attention_window_size <= self.max_attention_window_size
-        ), f"{self.opt_attention_window_size=} must be at most {self.max_attention_window_size=}."
-        assert (
-            self.max_attention_window_size <= self.max_seq_len
-        ), f"{self.max_attention_window_size=} must be at most {self.max_seq_len=}."
         return self

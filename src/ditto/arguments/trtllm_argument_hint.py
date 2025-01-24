@@ -31,10 +31,10 @@ class TRTLLMArgumentHint(StrictlyTyped):
     """
 
     batch_size_range: DynamicDimensionType = Field(frozen=True, exclude=True)
+    max_len_range: DynamicDimensionType = Field(frozen=True, exclude=True)
     num_tokens: DynamicDimensionType = Field(frozen=True, exclude=True)
-    kv_cache_block_size: DynamicDimensionType = Field(frozen=True, exclude=True)
+    max_blocks_per_seq_range: DynamicDimensionType = Field(frozen=True, exclude=True)
     beam_width: DynamicDimensionType | int = Field(frozen=True, exclude=True)
-    attention_window_size: DynamicDimensionType = Field(frozen=True, exclude=True)
     num_attn_layers: int | None = Field(default=None, exclude=True, ge=0)
     tp_size: int = Field(default=1, exclude=True, gt=0)
 
@@ -60,12 +60,18 @@ class TRTLLMArgumentHint(StrictlyTyped):
             opt=profile_config.opt_batch_size,
             max=profile_config.max_batch_size,
         )
+        max_len_range = DynamicDimension(
+            name="max_len_range",
+            min=1,
+            opt=profile_config.opt_seq_len,
+            max=profile_config.max_seq_len,
+        )
         ops_s = profile_config.opt_num_tokens // 8
         max_s = profile_config.max_num_tokens // 8
         s = DynamicDimension(name="s", min=0, opt=ops_s, max=max_s)
         num_tokens = 8 * s
-        kv_cache_block_size = DynamicDimension(
-            name="kv_cache_block_size",
+        max_blocks_per_seq_range = DynamicDimension(
+            name="max_blocks_per_seq_range",
             min=1,
             opt=profile_config.opt_kv_cache_block_size,
             max=profile_config.max_kv_cache_block_size,
@@ -80,18 +86,12 @@ class TRTLLMArgumentHint(StrictlyTyped):
                 max=profile_config.max_beam_width,
             )
         )
-        attention_window_size = DynamicDimension(
-            name="attention_window_size",
-            min=1,
-            opt=profile_config.opt_attention_window_size,
-            max=profile_config.max_attention_window_size,
-        )
         return cls(
             batch_size_range=batch_size_range,
+            max_len_range=max_len_range,
             num_tokens=num_tokens,
-            kv_cache_block_size=kv_cache_block_size,
+            max_blocks_per_seq_range=max_blocks_per_seq_range,
             beam_width=beam_width,
-            attention_window_size=attention_window_size,
             tp_size=tp_size,
         )
 
@@ -122,12 +122,12 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def kv_cache_block_offsets(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(1, self.batch_size_range, 2, self.kv_cache_block_size), dtype=torch.int32)
+        return TensorTypeHint(shape=(1, self.batch_size_range, 2, self.max_blocks_per_seq_range), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def host_kv_cache_block_offsets(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(1, self.batch_size_range, 2, self.kv_cache_block_size), dtype=torch.int32)
+        return TensorTypeHint(shape=(1, self.batch_size_range, 2, self.max_blocks_per_seq_range), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -179,7 +179,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @property
     def cache_indirection(self) -> TensorTypeHint:
         return TensorTypeHint(
-            shape=(self.batch_size_range, self.beam_width, self.attention_window_size),
+            shape=(self.batch_size_range, self.beam_width, self.max_len_range),
             dtype=torch.int32,
         )
 
