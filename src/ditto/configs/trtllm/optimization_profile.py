@@ -13,10 +13,9 @@
 # limitations under the License.
 
 import math
-from typing import Any
 
 from loguru import logger
-from pydantic import Field, PrivateAttr, computed_field, model_validator
+from pydantic import Field, model_validator
 from transformers import PretrainedConfig
 from typing_extensions import Self
 
@@ -31,44 +30,11 @@ class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
 
     max_input_len: int = Field(default=1024, gt=1)
     max_seq_len: int = Field(default=DEFAULT_MAX_POS_EMBEDDING, gt=1)
+    opt_batch_size: int = Field(default=128, gt=0)
     max_batch_size: int = Field(default=256, gt=1)
     max_beam_width: int = Field(default=1, gt=0)
-    max_num_tokens: int = Field(default=8192, multiple_of=8, gt=1)
-    opt_batch_size: int = Field(default=128, gt=0)
-    _opt_num_tokens: int | None = PrivateAttr(default=None)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def opt_num_tokens(self) -> int:
-        if self._opt_num_tokens is None:
-            opt_num_tokens = min(self.max_num_tokens, self.max_batch_size * self.max_beam_width)
-            self._opt_num_tokens = 8 * max(int(round(opt_num_tokens / 8)), 1)
-        return self._opt_num_tokens
-
-    @opt_num_tokens.setter
-    def opt_num_tokens(self, value: Any) -> None:
-        assert isinstance(
-            value, int | None
-        ), f"`opt_num_tokens` must have type `int` or be `None` but assigned with {value}"
-        if value is None:
-            self._opt_num_tokens = None
-            return
-
-        assert value > 0, f"`opt_num_tokens` must be positive but assigned with {value}"
-        if value % 8 != 0:
-            rounded_value = 8 * max(int(round(value / 8)), 1)
-            logger.warning(
-                "torch.export will impose `opt_num_tokens` to be a multiple of 8. "
-                f"The assigned value ({value}) will be rounded to {rounded_value}, the closest multiple of 8."
-            )
-            value = rounded_value
-        if value != (optimal_value := self.max_batch_size * self.max_beam_width):
-            logger.warning(
-                f"The manually set opt_num_token ({value}) is not equal to the optimal value: "
-                f"`max_batch_size x max_beam_width = {self.max_batch_size} x {self.max_beam_width} "
-                f"= {optimal_value}`."
-            )
-        self._opt_num_tokens = value
+    max_num_tokens: int = Field(default=8192, gt=1)
+    opt_num_tokens: int = Field(default=1, gt=0)
 
     @model_validator(mode="after")
     def check_runtime_attribute_dependencies(self) -> Self:
@@ -77,6 +43,9 @@ class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
         The criterions and error messages are adopted from `tensorrt_llm._common.check_max_num_tokens`.
         While TRT-LLM tries to adjust the wrong values provided by the user, we will simply reject them.
         """
+        assert (
+            self.max_input_len <= self.max_seq_len
+        ), f"{self.max_input_len=} shouldn't be greater than {self.max_seq_len=}."
         assert self.max_num_tokens <= self.max_seq_len * self.max_batch_size, (
             f"{self.max_num_tokens=} shouldn't be greater than "
             f"`max_seq_len x max_batch_size = {self.max_seq_len} x {self.max_batch_size} = "
@@ -88,7 +57,6 @@ class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
         assert (
             self.opt_batch_size <= self.max_batch_size
         ), f"{self.opt_batch_size=} must be at most {self.max_batch_size=}."
-        assert self._opt_num_tokens is None or self._opt_num_tokens <= self.max_num_tokens
         if self.max_num_tokens > (upper_bound := 16384):
             logger.warning(
                 f"Specifying a {self.max_num_tokens=} larger than {upper_bound} is usually not recommended. You might "
@@ -114,8 +82,25 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
         max_batch_size: int = 256,
         max_seq_len: int | None = None,
         max_input_len: int = 1024,
+        max_num_tokens: int = 8192,
+        opt_num_tokens: int | None = None,
         max_beam_width: int = 1,
     ) -> Self:
+        """Configure the optimization profile from given configurations.
+
+        Args:
+            hf_config (PretrainedConfig): The Hugging Face configuration
+            plugin_config (TRTLLMPluginConfig): The TensorRT-LLM plugin configuration
+            max_batch_size (int): The maximum batch size
+            max_seq_len (int | None): The maximum sequence length
+            max_input_len (int): The maximum input length
+            max_num_tokens (int): The maximum number of tokens
+            opt_num_tokens (int | None): The optimized number of tokens
+            max_beam_width (int): The maximum beam width
+
+        Returns:
+            TRTLLMOptimizationProfileConfig: The optimization profile configuration
+        """
         max_position_embeddings = getattr(hf_config, "max_position_embeddings", DEFAULT_MAX_POS_EMBEDDING)
         rope_scaling = getattr(hf_config, "rope_scaling", None)
         if rope_scaling is not None:
@@ -130,6 +115,9 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
                 f"max_input_len ({max_input_len}) is larger than max_seq_len ({max_seq_len}), using max_seq_len"
             )
             max_input_len = max_seq_len
+        if opt_num_tokens is None:
+            opt_num_tokens = min(max_num_tokens, max_batch_size * max_beam_width)
+            logger.debug(f"opt_num_tokens is not set, specifying to {opt_num_tokens}")
         max_kv_cache_block_size = math.ceil(max_seq_len / plugin_config.tokens_per_block)
         opt_kv_cache_block_size = math.ceil((max_seq_len // 2) / plugin_config.tokens_per_block)
         return cls(
@@ -138,6 +126,8 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             max_seq_len=max_seq_len,
             opt_seq_len=(max_seq_len + 1) // 2,
             max_input_len=max_input_len,
+            max_num_tokens=max_num_tokens,
+            opt_num_tokens=opt_num_tokens,
             max_beam_width=max_beam_width,
             opt_beam_width=(max_beam_width + 1) // 2,
             max_kv_cache_block_size=max_kv_cache_block_size,
@@ -145,6 +135,11 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
         )
 
     def runtime(self) -> RuntimeTRTLLMOptimizationProfileConfig:
+        """Create a runtime configuration from the current configuration.
+
+        Returns:
+            RuntimeTRTLLMOptimizationProfileConfig: The runtime configuration
+        """
         runtime_config = RuntimeTRTLLMOptimizationProfileConfig(
             **{
                 key: value
@@ -153,7 +148,6 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
                 if key in RuntimeTRTLLMOptimizationProfileConfig.model_fields
             }
         )
-        runtime_config.opt_num_tokens = self.opt_num_tokens
         return runtime_config
 
     @model_validator(mode="after")

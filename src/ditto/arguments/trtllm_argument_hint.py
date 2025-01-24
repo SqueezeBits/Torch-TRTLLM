@@ -32,7 +32,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
 
     batch_size_range: DynamicDimensionType = Field(frozen=True, exclude=True)
     max_len_range: DynamicDimensionType = Field(frozen=True, exclude=True)
-    num_tokens: DynamicDimensionType = Field(frozen=True, exclude=True)
+    num_tokens_range: DynamicDimensionType = Field(frozen=True, exclude=True)
     max_blocks_per_seq_range: DynamicDimensionType = Field(frozen=True, exclude=True)
     beam_width_range: DynamicDimensionType | int = Field(frozen=True, exclude=True)
     num_attn_layers: int | None = Field(default=None, exclude=True, ge=0)
@@ -66,10 +66,12 @@ class TRTLLMArgumentHint(StrictlyTyped):
             opt=profile_config.opt_seq_len,
             max=profile_config.max_seq_len,
         )
-        ops_s = profile_config.opt_num_tokens // 8
-        max_s = profile_config.max_num_tokens // 8
-        s = DynamicDimension(name="s", min=0, opt=ops_s, max=max_s)
-        num_tokens = 8 * s
+        num_tokens_range = DynamicDimension(
+            name="num_tokens_range",
+            min=1,
+            opt=profile_config.opt_num_tokens,
+            max=profile_config.max_num_tokens,
+        )
         max_blocks_per_seq_range = DynamicDimension(
             name="max_blocks_per_seq_range",
             min=1,
@@ -89,7 +91,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
         return cls(
             batch_size_range=batch_size_range,
             max_len_range=max_len_range,
-            num_tokens=num_tokens,
+            num_tokens_range=num_tokens_range,
             max_blocks_per_seq_range=max_blocks_per_seq_range,
             beam_width_range=beam_width_range,
             tp_size=tp_size,
@@ -101,18 +103,18 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @property
     def batched_input_ids(self) -> TensorTypeHint:
         if INPUT_IDS_UNSQUEEZE_DIM == 0:
-            return TensorTypeHint(shape=(1, self.num_tokens), dtype=torch.int32)
-        return TensorTypeHint(shape=(self.num_tokens, 1), dtype=torch.int32)
+            return TensorTypeHint(shape=(1, self.num_tokens_range), dtype=torch.int32)
+        return TensorTypeHint(shape=(self.num_tokens_range, 1), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def input_ids(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.num_tokens,), dtype=torch.int32)
+        return TensorTypeHint(shape=(self.num_tokens_range,), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def position_ids(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.num_tokens,), dtype=torch.int32)
+        return TensorTypeHint(shape=(self.num_tokens_range,), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

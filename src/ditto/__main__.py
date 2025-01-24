@@ -134,6 +134,8 @@ def build(
     run_activations_in_model_dtype: bool = True,
     max_batch_size: int = 256,
     max_seq_len: int | None = None,
+    max_num_tokens: int = 8192,
+    opt_num_tokens: int | None = None,
     max_beam_width: int = 1,
     tp_size: int = 1,
 ) -> None:
@@ -169,6 +171,8 @@ def build(
         debug_node_names=add_output,
         max_batch_size=max_batch_size,
         max_seq_len=max_seq_len,
+        max_num_tokens=max_num_tokens,
+        opt_num_tokens=opt_num_tokens,
         max_beam_width=max_beam_width,
     )
 
