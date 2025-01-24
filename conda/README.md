@@ -10,3 +10,8 @@ to create a conda environment all dependencies installed.
 * You can also use other alternatives for conda such as
 [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) as
 `CONDA=micromamba ./conda/create_env.sh venv`.
+
+Activate the generated conda environment.
+```bash
+conda activate <the environment name>
+```
