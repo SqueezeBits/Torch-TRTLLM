@@ -34,7 +34,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     max_len_range: DynamicDimensionType = Field(frozen=True, exclude=True)
     num_tokens: DynamicDimensionType = Field(frozen=True, exclude=True)
     max_blocks_per_seq_range: DynamicDimensionType = Field(frozen=True, exclude=True)
-    beam_width: DynamicDimensionType | int = Field(frozen=True, exclude=True)
+    beam_width_range: DynamicDimensionType | int = Field(frozen=True, exclude=True)
     num_attn_layers: int | None = Field(default=None, exclude=True, ge=0)
     tp_size: int = Field(default=1, exclude=True, gt=0)
 
@@ -76,11 +76,11 @@ class TRTLLMArgumentHint(StrictlyTyped):
             opt=profile_config.opt_kv_cache_block_size,
             max=profile_config.max_kv_cache_block_size,
         )
-        beam_width: DynamicDimensionType | int = (
+        beam_width_range: DynamicDimensionType | int = (
             1
             if profile_config.max_beam_width == 1
             else DynamicDimension(
-                name="beam_width",
+                name="beam_width_range",
                 min=1,
                 opt=profile_config.opt_beam_width,
                 max=profile_config.max_beam_width,
@@ -91,7 +91,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
             max_len_range=max_len_range,
             num_tokens=num_tokens,
             max_blocks_per_seq_range=max_blocks_per_seq_range,
-            beam_width=beam_width,
+            beam_width_range=beam_width_range,
             tp_size=tp_size,
         )
 
@@ -179,7 +179,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @property
     def cache_indirection(self) -> TensorTypeHint:
         return TensorTypeHint(
-            shape=(self.batch_size_range, self.beam_width, self.max_len_range),
+            shape=(self.batch_size_range, self.beam_width_range, self.max_len_range),
             dtype=torch.int32,
         )
 

@@ -114,6 +114,7 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
         max_batch_size: int = 256,
         max_seq_len: int | None = None,
         max_input_len: int = 1024,
+        max_beam_width: int = 1,
     ) -> Self:
         max_position_embeddings = getattr(hf_config, "max_position_embeddings", DEFAULT_MAX_POS_EMBEDDING)
         rope_scaling = getattr(hf_config, "rope_scaling", None)
@@ -137,6 +138,8 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             max_seq_len=max_seq_len,
             opt_seq_len=(max_seq_len + 1) // 2,
             max_input_len=max_input_len,
+            max_beam_width=max_beam_width,
+            opt_beam_width=(max_beam_width + 1) // 2,
             max_kv_cache_block_size=max_kv_cache_block_size,
             opt_kv_cache_block_size=opt_kv_cache_block_size,
         )
