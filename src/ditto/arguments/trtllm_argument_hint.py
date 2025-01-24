@@ -23,8 +23,14 @@ from .dynamic_dim import DynamicDimension, DynamicDimensionType
 from .tensor_type_hint import TensorTypeHint
 
 
+# pylint: disable=too-many-public-methods
 class TRTLLMArgumentHint(StrictlyTyped):
-    batch_size: DynamicDimensionType = Field(frozen=True, exclude=True)
+    """Argument hint for TensorRT-LLM.
+
+    This class is used to generate argument hints for TensorRT-LLM.
+    """
+
+    batch_size_range: DynamicDimensionType = Field(frozen=True, exclude=True)
     num_tokens: DynamicDimensionType = Field(frozen=True, exclude=True)
     kv_cache_block_size: DynamicDimensionType = Field(frozen=True, exclude=True)
     beam_width: DynamicDimensionType | int = Field(frozen=True, exclude=True)
@@ -33,9 +39,23 @@ class TRTLLMArgumentHint(StrictlyTyped):
     tp_size: int = Field(default=1, exclude=True, gt=0)
 
     @classmethod
-    def configure(cls, profile_config: TRTLLMOptimizationProfileConfig, *, tp_size: int = 1) -> Self:
-        batch_size = DynamicDimension(
-            name="batch_size",
+    def configure(
+        cls,
+        profile_config: TRTLLMOptimizationProfileConfig,
+        *,
+        tp_size: int = 1,
+    ) -> Self:
+        """Configure the argument hint.
+
+        Args:
+            profile_config (TRTLLMOptimizationProfileConfig): The optimization profile configuration
+            tp_size (int): The Tensor Parallelism size
+
+        Returns:
+            Self: The configured argument hint
+        """
+        batch_size_range = DynamicDimension(
+            name="batch_size_range",
             min=1,
             opt=profile_config.opt_batch_size,
             max=profile_config.max_batch_size,
@@ -67,7 +87,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
             max=profile_config.max_attention_window_size,
         )
         return cls(
-            batch_size=batch_size,
+            batch_size_range=batch_size_range,
             num_tokens=num_tokens,
             kv_cache_block_size=kv_cache_block_size,
             beam_width=beam_width,
@@ -97,17 +117,17 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def last_token_ids(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.batch_size,), dtype=torch.int32)
+        return TensorTypeHint(shape=(self.batch_size_range,), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def kv_cache_block_offsets(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(1, self.batch_size, 2, self.kv_cache_block_size), dtype=torch.int32)
+        return TensorTypeHint(shape=(1, self.batch_size_range, 2, self.kv_cache_block_size), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def host_kv_cache_block_offsets(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(1, self.batch_size, 2, self.kv_cache_block_size), dtype=torch.int32)
+        return TensorTypeHint(shape=(1, self.batch_size_range, 2, self.kv_cache_block_size), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -117,22 +137,22 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def sequence_length(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.batch_size,), dtype=torch.int32)
+        return TensorTypeHint(shape=(self.batch_size_range,), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def host_request_types(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.batch_size,), dtype=torch.int32)
+        return TensorTypeHint(shape=(self.batch_size_range,), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def host_past_key_value_lengths(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.batch_size,), dtype=torch.int32)
+        return TensorTypeHint(shape=(self.batch_size_range,), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def context_lengths(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.batch_size,), dtype=torch.int32)
+        return TensorTypeHint(shape=(self.batch_size_range,), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -142,7 +162,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def host_context_lengths(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.batch_size,), dtype=torch.int32)
+        return TensorTypeHint(shape=(self.batch_size_range,), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -159,7 +179,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @property
     def cache_indirection(self) -> TensorTypeHint:
         return TensorTypeHint(
-            shape=(self.batch_size, self.beam_width, self.attention_window_size),
+            shape=(self.batch_size_range, self.beam_width, self.attention_window_size),
             dtype=torch.int32,
         )
 

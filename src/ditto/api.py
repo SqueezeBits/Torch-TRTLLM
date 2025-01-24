@@ -56,6 +56,7 @@ def trtllm_build(
     run_activations_in_model_dtype: bool = True,
     debug_node_names: list[str] | None = None,
     engine_cache: BaseEngineCache | None = None,
+    max_batch_size: int = 256,
 ) -> None:
     """Build a TensorRT-LLM engine from a PyTorch model.
 
@@ -71,11 +72,16 @@ def trtllm_build(
         run_activations_in_model_dtype (bool): Whether to run activations in model dtype
         debug_node_names (list[str] | None): List of node names to output for debugging
         engine_cache (BaseEngineCache | None): Cache for TensorRT engines
+        max_batch_size (int): Maximum batch size for TensorRT engine
     """
     network_name = type(model).__name__
     mapping = mapping or TRTLLMMapping()
     plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model.config.torch_dtype, mapping.world_size)
-    profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(model.config, plugin_config)
+    profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(
+        model.config,
+        plugin_config,
+        max_batch_size=max_batch_size,
+    )
     argument_hint = TRTLLMArgumentHint.configure(profile_config, tp_size=mapping.tp_size)
 
     logger.info("Exporting the model into graph module and building TensorRT engine")

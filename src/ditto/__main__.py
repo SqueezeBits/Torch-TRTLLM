@@ -128,11 +128,12 @@ def build(
     peft_id: str = "",
     output_dir: str = "",
     dtype: str = "auto",
-    tp_size: int = 1,
     verbose: bool = False,
     trust_remote_code: bool = False,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
+    max_batch_size: int = 256,
+    tp_size: int = 1,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
     output_dir = resolve_output_dir(output_dir, model_id)
@@ -164,6 +165,7 @@ def build(
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         debug_node_names=add_output,
+        max_batch_size=max_batch_size,
     )
 
 

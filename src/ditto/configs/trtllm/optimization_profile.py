@@ -108,7 +108,13 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
     max_attention_window_size: int = Field(default=DEFAULT_MAX_POS_EMBEDDING, gt=1)
 
     @classmethod
-    def create_from(cls, hf_config: PretrainedConfig, plugin_config: TRTLLMPluginConfig) -> Self:
+    def create_from(
+        cls,
+        hf_config: PretrainedConfig,
+        plugin_config: TRTLLMPluginConfig,
+        *,
+        max_batch_size: int = 256,
+    ) -> Self:
         max_position_embeddings = getattr(hf_config, "max_position_embeddings", DEFAULT_MAX_POS_EMBEDDING)
         rope_scaling = getattr(hf_config, "rope_scaling", None)
         if rope_scaling is not None:
@@ -118,6 +124,8 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             logger.debug(f"max_seq_len is scaled to {max_position_embeddings} by rotary scaling {rotary_factor}.")
         max_kv_cache_block_size = math.ceil(max_position_embeddings / plugin_config.tokens_per_block)
         return cls(
+            max_batch_size=max_batch_size,
+            opt_batch_size=(max_batch_size + 1) // 2,
             max_seq_len=max_position_embeddings,
             max_attention_window_size=max_position_embeddings,
             max_kv_cache_block_size=max_kv_cache_block_size,
