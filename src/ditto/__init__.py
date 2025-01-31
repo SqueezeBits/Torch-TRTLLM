@@ -10,6 +10,7 @@ from .arguments.torch_export_arguments import TorchExportArguments
 from .configs import *
 from .conversion import *
 from .contexts import brief_tensor_repr, detailed_sym_node_str
+from .peft import load_peft_adapters
 from .types import (
     BuiltInConstant,
     DeviceLikeType,
