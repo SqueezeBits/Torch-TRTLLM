@@ -1,9 +1,9 @@
 from torch.fx import Node
 from typing_extensions import Self
 
-from ..subgraphs.linear import Linear, find_nearest_linear_projection
 from ..targets import GPTAttentionPlugin
 from ..utils import find_closest_common_descendant, get_descendants_with_depth
+from .linear import Linear
 from .subgraph import Subgraph
 
 
@@ -13,7 +13,7 @@ class DecoderLayer(Subgraph):
     This pattern is used to extract the linear subgraphs based on the GPT attention plugin node.
     1) Find the GPTAttentionPlugin node
     2) Find the nearest linear subgraph to the GPTAttentionPlugin node
-       by using find_nearest_linear_projection (QKV linear)
+       by using Linear.find_nearest (QKV linear)
     3) Find the descendant linear subgraphs by using find_descendant_linears
        (Dense linear, MLP gate, MLP up-projection, MLP down-projection)
 
@@ -48,7 +48,7 @@ class DecoderLayer(Subgraph):
         """
         if not (
             isinstance(node.target, GPTAttentionPlugin)
-            and (attn_qkv := find_nearest_linear_projection(node)) is not None
+            and (attn_qkv := Linear.find_nearest(node)) is not None
             and (remaining_linears := find_descendant_linears(node)) is not None
         ):
             return None
