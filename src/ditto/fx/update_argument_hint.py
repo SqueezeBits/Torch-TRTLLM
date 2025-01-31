@@ -49,9 +49,9 @@ def match_input_ids_dynamic_dims(argument_hint: TRTLLMArgumentHint, graph_module
         graph_module (GraphModule): The graph module to update the argument hint
     """
     if num_tokens_sym_int := get_input_ids_dynamic_dim(graph_module):
-        argument_hint.num_tokens_range.sym_int = num_tokens_sym_int
+        argument_hint.num_tokens.sym_int = num_tokens_sym_int
         with detailed_sym_node_str():
-            logger.debug(f"Matched {repr(argument_hint.num_tokens_range)} to {num_tokens_sym_int}")
+            logger.debug(f"Matched {repr(argument_hint.num_tokens)} to {num_tokens_sym_int}")
     else:
         logger.warning(f"Failed to match dynamic dimension of {INPUT_IDS}")
 
