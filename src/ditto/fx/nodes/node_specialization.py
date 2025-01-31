@@ -53,6 +53,16 @@ class NodeSpecialization(StrictlyTyped, ABC):
         return self.node.name
 
     @property
+    def meta(self) -> dict[str, Any]:
+        """The meta data of the underlying node."""
+        return self.node.meta
+
+    @meta.setter
+    def meta(self, value: dict[str, Any]) -> None:
+        """Set the meta data of the underlying node."""
+        self.node.meta = value
+
+    @property
     def stack_trace(self) -> str | None:
         """The stack trace of the underlying node."""
         return self.node.stack_trace
