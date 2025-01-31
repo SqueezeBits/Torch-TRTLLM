@@ -1,0 +1,8 @@
+FREE_LORA_PROTO = "free_lora_proto"
+LORA_PREFIX = "lora_prefix"
+LAYER_INDEX = "layer_index"
+LORA_PROTOS = "lora_protos"
+ORIGINAL_TARGET = "original_target"
+STACK_TRACE = "stack_trace"
+TENSOR_META = "tensor_meta"
+VAL = "val"
