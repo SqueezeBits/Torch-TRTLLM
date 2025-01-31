@@ -3,8 +3,8 @@ from typing import Any
 
 from torch.fx.node import Node
 
-from ..nodes import CallFunction
-from ..targets import GemmPlugin
+from ..targets import GemmPlugin, GPTAttentionPlugin
+from .call_function import CallFunction
 
 
 class Gemm(CallFunction):
@@ -18,6 +18,11 @@ class Gemm(CallFunction):
     this: Node
     other: Node
 
+    @property
+    def target(self) -> GemmPlugin:
+        assert isinstance(t := super().target, GemmPlugin)
+        return t
+
     @classmethod
     def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
         return ()
@@ -25,3 +30,24 @@ class Gemm(CallFunction):
     @classmethod
     def validate_node(cls, node: Node) -> bool:
         return isinstance(node.target, GemmPlugin)
+
+
+class GPTAttention(CallFunction):
+    """A plugin specialization representing a GPT attention plugin node."""
+
+    model_config = {"extra": "ignore"}
+
+    qkv: Node
+
+    @property
+    def target(self) -> GPTAttentionPlugin:
+        assert isinstance(t := super().target, GPTAttentionPlugin)
+        return t
+
+    @classmethod
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
+        return ()
+
+    @classmethod
+    def validate_node(cls, node: Node) -> bool:
+        return isinstance(node.target, GPTAttentionPlugin)
