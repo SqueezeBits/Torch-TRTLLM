@@ -161,7 +161,7 @@ class Linear(Subgraph):
         Args:
             with_prefix: Prefix to bind the LoRA prototype with
         """
-        self.lora_prefix = with_prefix
+        self.mm.meta[LORA_PREFIX] = with_prefix
         if (lora_proto := verify(self.mm.meta.pop(FREE_LORA_PROTO, None), as_type=LoraProto)) is None:
             return
         assert LORA_PROTOS not in self.mm.meta, f"Lora protos already set for {self.mm}: {self.mm.meta[LORA_PROTOS]}"
@@ -196,8 +196,3 @@ class Linear(Subgraph):
     def lora_prefix(self) -> LoraPluginInputPrefix | None:
         """The LoRA prefix associated with this linear layer."""
         return verify(self.mm.meta.get(LORA_PREFIX), as_type=LoraPluginInputPrefix)
-
-    @lora_prefix.setter
-    def lora_prefix(self, value: LoraPluginInputPrefix) -> None:
-        """Set the LoRA prefix for this linear layer."""
-        self.mm.meta[LORA_PREFIX] = value
