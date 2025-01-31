@@ -12,7 +12,6 @@ from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from transformers import PreTrainedModel
 
 from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
-from .config_gen import generate_trtllm_engine_config
 from .configs import (
     TensorRTConfig,
     TRTLLMBuildConfig,
@@ -26,6 +25,7 @@ from .constants import INPUT_IDS
 from .convert import convert
 from .debug import get_memory_footprint, save_for_debug
 from .export import export
+from .fx import generate_trtllm_engine_config
 from .inline import inline
 from .literals import PassName
 from .transform import parallelize, transform

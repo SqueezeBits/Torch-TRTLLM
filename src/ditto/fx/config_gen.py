@@ -2,17 +2,17 @@ from tensorrt_llm._utils import trt_dtype_to_str
 from torch.fx import Graph, GraphModule
 from transformers import PretrainedConfig
 
-from .configs import (
+from ..configs import (
     TRTLLMBuildConfig,
     TRTLLMEngineConfig,
     TRTLLMLoraConfig,
     TRTLLMMapping,
     TRTLLMPretrainedConfig,
 )
-from .fx.subgraphs import Linear, TokenEmbedding
-from .fx.targets import GPTAttentionPlugin
-from .literals import DTypeLiteral
-from .types import verify
+from ..literals import DTypeLiteral
+from ..types import verify
+from .subgraphs import Linear, TokenEmbedding
+from .targets import GPTAttentionPlugin
 
 
 class PretrainedConfigGenerationError(RuntimeError):
