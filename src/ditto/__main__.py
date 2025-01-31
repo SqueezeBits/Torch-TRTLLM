@@ -1,11 +1,11 @@
 # mypy: disable-error-code=misc
 # pylint: disable=dangerous-default-value, too-many-positional-arguments
 import os
+import time
 from typing import Annotated, Literal
 
 import torch
 from loguru import logger
-from peft import PeftModel
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -19,6 +19,7 @@ from .api import trtllm_build
 from .configs import TRTLLMMapping
 from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
 from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
+from .peft import load_peft_adapters
 from .types import trt_to_torch_dtype_mapping
 
 if not DISABLE_TRANSFORMER_PATCHES:
@@ -111,18 +112,18 @@ def run_generation(
 def build(
     model_id: str,
     add_output: list[str] = [],  # noqa: B006
-    peft_id: str = "",
+    peft_ids: list[str] = [],  # noqa: B006
     output_dir: str = "",
     dtype: str = "auto",
     tp_size: int = 1,
-    verbose: bool = False,
+    verbose_failure: bool = False,
     trust_remote_code: bool = False,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
     output_dir = resolve_output_dir(output_dir, model_id)
-    app.pretty_exceptions_show_locals = verbose
+    app.pretty_exceptions_show_locals = verbose_failure
 
     with disable_torch_jit_state(), disable_modelopt_peft_patches():
         logger.info(f"Loading model {model_id}")
@@ -132,9 +133,8 @@ def build(
             device_map="auto",
             trust_remote_code=trust_remote_code,
         )
-        if peft_id:
-            logger.info(f"Loading PEFT adapter {peft_id}")
-            model = PeftModel.from_pretrained(model, peft_id)
+        if peft_ids:
+            model = load_peft_adapters(model, peft_ids)
     logger.info(f"device: {model.device} | dtype: {model.config.torch_dtype}")
     if dtype == "auto" and model.config.torch_dtype == torch.float32:
         logger.warning(
@@ -143,6 +143,7 @@ def build(
         )
 
     os.makedirs(output_dir, exist_ok=True)
+    start_time = time.perf_counter()
     trtllm_build(
         model,
         output_dir,
@@ -151,6 +152,8 @@ def build(
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         debug_node_names=add_output,
     )
+    minutes, seconds = divmod(int(time.perf_counter() - start_time), 60)
+    logger.info(f"Build completed in {minutes:02d}:{seconds:02d}")
 
 
 def get_model_dtype(dtype: str) -> torch.dtype | Literal["auto"]:
