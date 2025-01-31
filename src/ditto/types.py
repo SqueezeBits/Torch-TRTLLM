@@ -1,15 +1,18 @@
+# mypy: disable-error-code="misc"
 # pylint: disable=unused-import, invalid-name
 from collections.abc import Callable
 from functools import cache
-from typing import ClassVar, TypeVar, cast
+from inspect import isclass
+from typing import Any, ClassVar, TypeVar, cast, overload
 
 import tensorrt as trt
 import torch
 from onnx import TensorProto
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from torch._C import _SDPBackend as SDPBackend  # noqa: F401
 from torch.export.dynamic_shapes import _Dim as ExportDim  # noqa: F401
 from torch.fx import Node
+from typing_extensions import Unpack
 
 BuiltInConstant = int | float | bool | None
 DeviceLikeType = str | torch.device | int
@@ -18,6 +21,32 @@ Number = int | float | bool
 SymbolicInteger = torch.SymInt | int
 SymbolicShape = tuple[SymbolicInteger, ...]  # type: ignore[valid-type]
 ShapeArg = list[int | Node]
+
+T = TypeVar("T")
+
+
+def verify(value: Any, *, as_type: type[T], coerce: bool = False, **config: Unpack[ConfigDict]) -> T | None:
+    """Verify that the value is of the specified type.
+
+    Args:
+        value (Any): The value to verify
+        as_type (type[T]): The target type to verify the value against
+        coerce (bool): Whether to coerce the value to the target type. Defaults to False.
+        **config (Unpack[ConfigDict]): The configuration to use for type verification.
+            Ignored when `as_type` is a `pydantic.BaseModel` subclass.
+
+    Returns:
+        T | None: The (coerced) value if it is of the specified type, None otherwise
+    """
+    try:
+        coerced_value = (
+            as_type.model_validate(value)
+            if (isclass(as_type) and not hasattr(as_type, "__origin__") and issubclass(as_type, BaseModel))
+            else TypeAdapter(as_type, config={"arbitrary_types_allowed": True, **config}).validate_python(value)
+        )
+        return coerced_value if coerce else value
+    except ValidationError:
+        return None
 
 
 class StrictlyTyped(BaseModel):
@@ -215,3 +244,35 @@ def torch_to_onnx_dtype_mapping() -> dict[torch.dtype, int]:
 
 # All PyTorch data types converted from TensorRT data types can be mapped to ONNX data types.
 DataType.define_by_composition(trt_to_torch_dtype_mapping(), torch_to_onnx_dtype_mapping())
+
+
+ExpectedType = TypeVar("ExpectedType")
+
+
+@overload
+def expect_identical(value: ExpectedType, *others: ExpectedType) -> ExpectedType | None:
+    ...
+
+
+@overload
+def expect_identical(value: Any, *others: Any, expecting_type: type[ExpectedType]) -> ExpectedType | None:
+    ...
+
+
+def expect_identical(value: Any, *others: Any, expecting_type: type[ExpectedType] | None = None) -> ExpectedType | None:
+    """Compare multiple values for equality and optionally check their type.
+
+    Args:
+        value: First value to compare
+        *others: Additional values to compare against the first value
+        expecting_type: Optional type to validate all values against. If None, no type checking is performed.
+
+    Returns:
+        The first value if all values are equal and match the specified type (if provided).
+        None if any values are not equal or don't match the type.
+    """
+    if expecting_type is not None and not all(verify(v, as_type=expecting_type) is not None for v in (value, *others)):
+        return None
+    if all(v == value for v in others):
+        return value
+    return None
