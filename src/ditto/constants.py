@@ -118,3 +118,8 @@ If there are fusible matmul siblings with the total output dimention size larger
 they will not be fused by the pass `FuseQKVProjections`.
 If this value is negative, all matmul siblings will be fused.
 """
+
+DEFAULT_MAX_POS_EMBEDDING: int = 2048
+"""
+The default maximum position embedding size.
+"""

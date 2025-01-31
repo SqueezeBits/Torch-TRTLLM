@@ -19,10 +19,9 @@ from pydantic import Field, model_validator
 from transformers import PretrainedConfig
 from typing_extensions import Self
 
+from ...constants import DEFAULT_MAX_POS_EMBEDDING
 from ...types import StrictlyTyped
 from .plugin import TRTLLMPluginConfig
-
-DEFAULT_MAX_POS_EMBEDDING: int = 2048
 
 
 class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
