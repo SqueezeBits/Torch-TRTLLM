@@ -9,7 +9,7 @@ from ...configs.trtllm.pretrained import TRTLLMMapping
 from ...types import DataType
 from ..nodes import GetAttr, Permute, Reshape
 from ..subgraphs import DecoderLayer
-from ..subgraphs.linear import Linear, find_last_linear
+from ..subgraphs.linear import Linear
 from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs
 from ..utils import forget_all_descendant_fake_tensors, get_val
 from .infra import (
@@ -130,7 +130,7 @@ class ParallelizeTensor(GraphOptimizationPass):
 
         # parallelize the lm_head linear
         if (
-            (lm_head := find_last_linear(graph_module.graph))
+            (lm_head := Linear.find_last(graph_module.graph))
             and (lm_head_weight := GetAttr.specialize_from(lm_head.weight_node))
             and (len(lm_head_weight.tensor.shape) == 2)
         ):
