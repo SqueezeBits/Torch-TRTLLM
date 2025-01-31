@@ -5,46 +5,16 @@ import tensorrt as trt
 import torch
 from loguru import logger
 
-PassName = Literal[
-    "AddTRTLLMInputs",
-    "CanonicalizeCopy",
-    "CastMMToFP32",
-    "ConstantFolding",
-    "DecomposeAddMM",
-    "DeferUnsqueeze",
-    "EliminateNopCatOrStack",
-    "EliminateNopPermute",
-    "EliminateNopReshapeOrExpand",
-    "EliminateNopSlice",
-    "EliminateUnsqueezeSqueeze",
-    "FixActivationPrecision",
-    "FixBinaryElementwiseOpOverloads",
-    "FixSliceRanges",
-    "ForgetSubmodules",
-    "FuseConsecutivePermutes",
-    "FuseConsecutiveReshapes",
-    "FuseConsecutiveSliceConcat",
-    "FuseConsecutiveSplitConcat",
-    "FuseConsecutiveToCopys",
-    "FuseEquivalentNodes",
-    "FuseQKVProjections",
-    "FuseReciprocalMul",
-    "InsertGatherLastTokenIds",
-    "ParallelizeTensor",
-    "HerdConstantsToTheRight",
-    "ReplaceMMByFakeGemmPlugin",
-    "ReplaceSDPAByFakeGPTAttentionPlugin",
-    "ReplaceViewByReshape",
-    "ResetCodeGen",
-    "RewriteFloatingPointLiteralsAsNodes",
-    "RewriteReshapeAsUnsqueeze",
-    "WrapRoPESubgraphs",
-    "WrapSDPASubgraphs",
-]
-"""The possible names of FX optimization passes"""
+from .literals import AttnGatedMLPPrefix, AttnQKVPrefix
+
+ATTN_QKV_PREFIXES: tuple[AttnQKVPrefix, AttnQKVPrefix, AttnQKVPrefix] = ("attn_q", "attn_k", "attn_v")
+"""The prefixes for the QKV projection of the attention layer."""
+
+ATTN_GATED_MLP_PREFIXES: tuple[AttnGatedMLPPrefix, AttnGatedMLPPrefix] = ("mlp_h_to_4h", "mlp_gate")
+"""The prefixes for the gated MLP of the attention layer."""
 
 # pylint: disable-next=invalid-envvar-default
-DEBUG_ARTIFACTS_DIR: str | None = os.getenv("DEBUG_ARTIFACTS_DIR", None)
+DEBUG_ARTIFACTS_DIR: str | None = os.getenv("DEBUG_ARTIFACTS_DIR") or None
 """The directory to save the debug artifacts such as graph module code."""
 
 DEBUG_TENSOR_CHUNK_SIZE: int = int(os.getenv("DEBUG_TENSOR_CHUNK_SIZE", "10"))
@@ -103,3 +73,6 @@ If there are fusible matmul siblings with the total output dimention size larger
 they will not be fused by the pass `FuseQKVProjections`.
 If this value is negative, all matmul siblings will be fused.
 """
+
+PEFT_ADAPTER_PREFIX: str = "adapter"
+"""The predefined prefix for the PEFT adapters."""
