@@ -16,7 +16,7 @@ from .targets import GPTAttentionPlugin
 
 
 class PretrainedConfigGenerationError(RuntimeError):
-    """Indicate failure in pretrained config generation based on graph module."""
+    """Error indicating failure in pretrained config generation based on graph module."""
 
 
 def generate_trtllm_engine_config(
@@ -56,15 +56,15 @@ def generate_trtllm_pretrained_config(
     *,
     architecture: str | None = None,
 ) -> TRTLLMPretrainedConfig:
-    """Generate TRTLLM pretrained configuration.
+    """Generate TRTLLMPretrainedConfig from graph module.
 
     Args:
-        graph_module (GraphModule): The graph module to process.
-        mapping (TRTLLMMapping): The mapping configuration.
-        architecture (str | None): The architecture name, optional.
+        graph_module (GraphModule): The graph module to generate the pretrained config from.
+        mapping (TRTLLMMapping): The tensor parallel mapping to use for the pretrained config.
+        architecture (str | None, optional): The architecture to use for the pretrained config. Defaults to None.
 
     Returns:
-        TRTLLMPretrainedConfig: The generated pretrained configuration.
+        TRTLLMPretrainedConfig: The generated pretrained config.
     """
     vocab_size, hidden_size = get_embedding_weight_sizes(graph_module)
     pretrained_config = infer_and_validate_pretrained_configs(
@@ -84,16 +84,16 @@ def generate_trtllm_pretrained_config(
 
 
 def get_embedding_weight_sizes(graph_module: GraphModule) -> tuple[int, int]:
-    """Get embedding weight sizes from the graph module.
+    """Get the vocab size and hidden size from the graph module.
 
     Args:
-        graph_module (GraphModule): The graph module to process.
+        graph_module (GraphModule): The graph module to get the vocab size and hidden size from.
 
     Returns:
-        tuple[int, int]: The vocabulary size and hidden size.
+        tuple[int, int]: The vocab size and hidden size.
 
     Raises:
-        PretrainedConfigGenerationError: If vocab size cannot be inferred.
+        PretrainedConfigGenerationError: If failed to infer vocab size from graph module.
     """
     for node in graph_module.graph.nodes:
         if token_embedding := TokenEmbedding.configure_from(node):
@@ -102,13 +102,13 @@ def get_embedding_weight_sizes(graph_module: GraphModule) -> tuple[int, int]:
 
 
 def collect_gpt_attention_plugins(graph: Graph) -> list[GPTAttentionPlugin]:
-    """Collect GPT attention plugins from the graph.
+    """Collect GPTAttentionPlugin nodes from the graph.
 
     Args:
-        graph (Graph): The graph to process.
+        graph (Graph): The graph to collect GPTAttentionPlugin nodes from.
 
     Returns:
-        list[GPTAttentionPlugin]: Sorted list of GPT attention plugins.
+        list[GPTAttentionPlugin]: The collected GPTAttentionPlugin nodes that are sorted by layer index.
     """
     plugins: list[GPTAttentionPlugin] = []
     for node in graph.nodes:
@@ -152,21 +152,21 @@ def infer_and_validate_pretrained_configs(
     intermediate_size: int,
     mapping: TRTLLMMapping,
 ) -> TRTLLMPretrainedConfig:
-    """Infer and validate pretrained configurations.
+    """Infer and validate TRTLLMPretrainedConfig from GPTAttentionPlugin nodes.
 
     Args:
-        plugins (list[GPTAttentionPlugin]): List of GPT attention plugins.
-        vocab_size (int): The vocabulary size.
-        hidden_size (int): The hidden size.
-        architecture (str): The architecture name.
-        intermediate_size (int): The intermediate size.
-        mapping (TRTLLMMapping): The mapping configuration.
+        plugins (list[GPTAttentionPlugin]): The GPTAttentionPlugin nodes to generate the pretrained config from.
+        vocab_size (int): The vocab size to use for the pretrained config.
+        hidden_size (int): The hidden size to use for the pretrained config.
+        architecture (str): The architecture to use for the pretrained config.
+        intermediate_size (int): The hidden size of the intermediate layer.
+        mapping (TRTLLMMapping): The tensor parallel mapping to use for the pretrained config.
 
     Returns:
-        TRTLLMPretrainedConfig: The validated pretrained configuration.
+        TRTLLMPretrainedConfig: The generated pretrained config.
 
     Raises:
-        PretrainedConfigGenerationError: If no plugins are found or configurations mismatch.
+        PretrainedConfigGenerationError: If failed to generate the pretrained config.
     """
     if (num_hidden_layers := len(plugins)) == 0:
         raise PretrainedConfigGenerationError("No GPTAttentionPlugin nodes found")
@@ -215,23 +215,23 @@ def infer_pretrained_config(
     intermediate_size: int,
     mapping: TRTLLMMapping,
 ) -> TRTLLMPretrainedConfig:
-    """Infer pretrained configuration for a plugin.
+    """Infer TRTLLMPretrainedConfig from GPTAttentionPlugin node.
 
     Args:
-        plugin_idx (int): The index of the plugin.
-        plugin (GPTAttentionPlugin): The GPT attention plugin.
-        vocab_size (int): The vocabulary size.
-        hidden_size (int): The hidden size.
-        architecture (str): The architecture name.
-        num_hidden_layers (int): The number of hidden layers.
-        intermediate_size (int): The intermediate size.
-        mapping (TRTLLMMapping): The mapping configuration.
+        plugin_idx (int): The index of the GPTAttentionPlugin node.
+        plugin (GPTAttentionPlugin): The GPTAttentionPlugin node to generate the pretrained config from.
+        vocab_size (int): The vocab size to use for the pretrained config.
+        hidden_size (int): The hidden size to use for the pretrained config.
+        architecture (str): The architecture to use for the pretrained config.
+        num_hidden_layers (int): The number of hidden layers to use for the pretrained config.
+        intermediate_size (int): The hidden size of the intermediate layer.
+        mapping (TRTLLMMapping): The tensor parallel mapping to use for the pretrained config.
 
     Returns:
-        TRTLLMPretrainedConfig: The inferred pretrained configuration.
+        TRTLLMPretrainedConfig: The generated pretrained config.
 
     Raises:
-        PretrainedConfigGenerationError: If layer index mismatches or invalid type_id is found.
+        PretrainedConfigGenerationError: If failed to generate the pretrained config.
     """
     if plugin_idx != plugin.layer_idx:
         raise PretrainedConfigGenerationError(f"Expected layer_idx={plugin_idx} but got {plugin.layer_idx=}")
@@ -245,8 +245,8 @@ def infer_pretrained_config(
         vocab_size=vocab_size,
         hidden_size=hidden_size,
         num_hidden_layers=num_hidden_layers,
-        num_attention_heads=plugin.num_heads,
-        num_key_value_heads=plugin.num_kv_heads,
+        num_attention_heads=plugin.num_heads * mapping.tp_size,
+        num_key_value_heads=plugin.num_kv_heads * mapping.tp_size,
         intermediate_size=intermediate_size,
         mapping=mapping,
         # TODO: fill in appropriate values in the quantization when quantization are supported.

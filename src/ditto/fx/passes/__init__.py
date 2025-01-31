@@ -1,3 +1,17 @@
+# Copyright 2025 SqueezeBits, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from .add_trtllm_inputs import AddTRTLLMInputs
 from .bind_unmatched_lora_protos import BindUnmatchedLoraProtos
 from .canonicalize_copy import CanonicalizeCopy
@@ -27,14 +41,16 @@ from .fuse_reciprocal_mul import FuseReciprocalMul
 from .herd_constants_to_the_right import HerdConstantsToTheRight
 from .index_layers import IndexLayers
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
-from .parallelize_tensor import ParallelizeTensor
+from .parallelize_linear import ParallelizeLinear
 from .pop_lora_plugins import PopLoraPlugins
-from .replace_index_by_slice import ReplaceIndexBySlice
+from .propagate_tensor_parallelism import PropagateTensorParallelism
 from .replace_mm_by_fake_gemm_plugin import ReplaceMMByFakeGemmPlugin
 from .replace_sdpa_by_fake_gpt_attention_plugin import ReplaceSDPAByFakeGPTAttentionPlugin
 from .replace_view_by_reshape import ReplaceViewByReshape
 from .reset_code_gen import ResetCodeGen
 from .rewrite_fp_literals_as_nodes import RewriteFloatingPointLiteralsAsNodes
+from .rewrite_index_as_single_slice import RewriteIndexAsSingleSlice
+from .rewrite_pow_as_mul import RewritePowAsMul
 from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
 from .rewrite_split_as_slices import RewriteSplitAsSlices
 from .stash_lora_subgraphs import StashLoraSubgraphs

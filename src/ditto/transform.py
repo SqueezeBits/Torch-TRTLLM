@@ -1,5 +1,19 @@
+# Copyright 2025 SqueezeBits, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from collections.abc import Callable, Generator
-from copy import deepcopy
+from copy import copy, deepcopy
 
 import torch
 from loguru import logger
@@ -15,7 +29,9 @@ from .contexts import ignore_symbolic_shapes_warning
 from .debug import save_for_debug
 from .fx import (
     ForgetSubmodules,
-    ParallelizeTensor,
+    ParallelizeLinear,
+    Plugin,
+    PropagateTensorParallelism,
     ResetCodeGen,
     fake_tensor_prop_on_node_creation,
     get_level1_transform,
@@ -107,16 +123,34 @@ def parallelize(
 
     logger.info("Parallelizing the graph module")
     save_for_debug("graph_module_before_parallelization", graph_module)
-    state_dict = graph_module.state_dict()
     for rank in range(mapping.world_size):
         logger.debug(f"Running parallelize passes for rank {rank}")
-        sub_graph_module = GraphModule(state_dict, deepcopy(graph_module.graph))
-        # WIP: add parallelize graph module
+        copied_graph_module = copy_graph_module(graph_module)
+        mapping_with_rank = mapping.copy_with_rank(rank)
         parallelize_pass_manager = DynamoPassManager.build_from_passlist(
             [
-                ParallelizeTensor(mapping=mapping.copy_with_rank(rank)).as_transform(),
+                PropagateTensorParallelism(mapping=mapping_with_rank).as_transform(),
+                ParallelizeLinear(mapping=mapping_with_rank).as_transform(),
             ]
         )
-        with fake_tensor_prop_on_node_creation(sub_graph_module), ignore_symbolic_shapes_warning():
-            sub_graph_module = parallelize_pass_manager(sub_graph_module)
-        yield rank, sub_graph_module
+        with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
+            yield rank, parallelize_pass_manager(copied_graph_module)
+
+
+def copy_graph_module(graph_module: GraphModule) -> GraphModule:
+    """Copy a graph module and its nodes.
+
+    Args:
+        graph_module (GraphModule): The graph module to copy
+
+    Returns:
+        GraphModule: The copied graph module
+    """
+    copied_graph = GraphModule(graph_module.state_dict(), deepcopy(graph_module.graph))
+    copied_graph.meta.update(graph_module.meta)
+    for node in copied_graph.graph.nodes:
+        if isinstance(node.target, Plugin):
+            # Note: If the target of a node is an instance of Plugin, it isn't copied.
+            # We need to copy the Plugin target manually.
+            node.target = copy(node.target)
+    return copied_graph
