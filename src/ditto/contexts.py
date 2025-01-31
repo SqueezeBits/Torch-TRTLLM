@@ -1,8 +1,6 @@
 import contextlib
-import inspect
 import logging
-import sys
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from typing import Any
 
 import torch
@@ -11,6 +9,8 @@ from loguru import logger
 from peft import PeftModel
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import log as symbolic_shape_logger
+
+from .types import verify
 
 
 @contextlib.contextmanager
@@ -25,11 +25,11 @@ def brief_tensor_repr() -> Generator[None, None, None]:
         return f"Tensor(shape={tuple(self.shape)}, dtype={dtype_repr}, device={self.device})"
 
     original_tensor__repr__ = torch.Tensor.__repr__
-    torch.Tensor.__repr__ = tensor_repr  # type: ignore[method-assign, assignment]
+    torch.Tensor.__repr__ = tensor_repr
     try:
         yield None
     finally:
-        torch.Tensor.__repr__ = original_tensor__repr__  # type: ignore[method-assign, assignment]
+        torch.Tensor.__repr__ = original_tensor__repr__
 
 
 @contextlib.contextmanager
@@ -45,11 +45,11 @@ def detailed_sym_node_str() -> Generator[None, None, None]:
         return f"{self.expr}"
 
     original_sym_node_str = SymNode.str
-    SymNode.str = sym_node_str  # type: ignore[method-assign]
+    SymNode.str = sym_node_str
     try:
         yield None
     finally:
-        SymNode.str = original_sym_node_str  # type: ignore[method-assign]
+        SymNode.str = original_sym_node_str
 
 
 @contextlib.contextmanager
@@ -90,18 +90,20 @@ def disable_modelopt_peft_patches() -> Generator[None, None, None]:
     While active, any modelopt patches to PEFT will be disabled by unimporting relevant modules.
     The patches are restored on exit by allowing reimport.
     """
-    is_peft_patched_by_modelopt = any(m.startswith("modelopt") for m in sys.modules) and inspect.getsourcefile(
-        PeftModel.load_adapter
-    ) != inspect.getsourcefile(PeftModel)
-
+    modelopt_cache = verify(getattr(PeftModel, "_modelopt_cache", None), as_type=dict[str, Callable[..., Any]]) or {}
+    is_peft_patched_by_modelopt = len(modelopt_cache) > 0
+    modelopt_patched_methods: dict[str, Callable[..., Any]] = {}
     try:
         if is_peft_patched_by_modelopt:
-            modules_to_unimport = {m for m in sys.modules if m.startswith("modelopt") or m.startswith("peft")}
-            for m in modules_to_unimport:
-                del sys.modules[m]
-
-            logger.debug("modelopt peft patches disabled")
+            for method_name, original_method in modelopt_cache.items():
+                if not hasattr(PeftModel, method_name):
+                    continue
+                modelopt_patched_methods[method_name] = getattr(PeftModel, method_name)
+                setattr(PeftModel, method_name, original_method)
+                logger.debug(f"modelopt patches for {PeftModel.__name__}.{method_name} disabled")
         yield None
     finally:
         if is_peft_patched_by_modelopt:
-            logger.debug("modelopt peft patches enabled")
+            for method_name, patched_method in modelopt_patched_methods.items():
+                setattr(PeftModel, method_name, patched_method)
+                logger.debug(f"modelopt patches for {PeftModel.__name__}.{method_name} enabled")
