@@ -1,6 +1,10 @@
 import contextlib
 import logging
+import operator
+import random
 from collections.abc import Callable, Generator
+from functools import reduce
+from hashlib import md5
 from typing import Any
 
 import torch
@@ -107,3 +111,38 @@ def disable_modelopt_peft_patches() -> Generator[None, None, None]:
             for method_name, patched_method in modelopt_patched_methods.items():
                 setattr(PeftModel, method_name, patched_method)
                 logger.debug(f"modelopt patches for {PeftModel.__name__}.{method_name} enabled")
+
+
+@contextlib.contextmanager
+def temporary_random_seed(*seeds: int | str | bytes | None) -> Generator[None, None, None]:
+    """Context manager that temporarily sets a random seed.
+
+    While active, sets a compound random seed derived from the input seeds.
+    The original random state is restored on exit.
+
+    Args:
+        *seeds (int | str | bytes | None): Variable number of seed values that can be integers, strings, bytes or None.
+               These are combined into a single compound seed using XOR. If no seeds are provided, the random state
+               remains unchanged.
+    """
+
+    def to_int(value: int | str | bytes | None) -> int:
+        b: bytes
+        if isinstance(value, int):
+            b = value.to_bytes(length=16, byteorder="big")
+        elif isinstance(value, str):
+            b = value.encode()
+        elif value is None:
+            b = b""
+        else:
+            b = value
+        return int(md5(b).hexdigest(), 16)
+
+    original_seed = random.getstate()
+    compound_seed = reduce(operator.xor, (to_int(seed) for seed in seeds)) if seeds else None
+    if compound_seed is not None:
+        random.seed(compound_seed)
+    try:
+        yield None
+    finally:
+        random.setstate(original_seed)
