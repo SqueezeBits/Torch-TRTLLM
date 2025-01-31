@@ -47,12 +47,12 @@ class StackTrace(_ParsedStackTrace):
         )
 
 
-def inject_stack_trace_from(
+def propagate_metadata_from(
     node: Node | NodeSpecialization,
     *others: Node | NodeSpecialization,
     to: Node | NodeSpecialization,
 ) -> None:
-    """Inject stack trace and other metadata from source node(s) to target node.
+    """Propagate metadata from source node(s) to target node.
 
     Args:
         node: The primary source node

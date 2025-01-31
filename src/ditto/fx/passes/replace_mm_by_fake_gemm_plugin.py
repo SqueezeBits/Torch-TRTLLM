@@ -6,7 +6,7 @@ from ...types import DataType
 from ..nodes import MM, Permute
 from ..targets import GemmPlugin
 from ..utils import get_tensor_metadata
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
@@ -30,6 +30,6 @@ class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
         with graph.inserting_before(node):
             other_t = Permute.create(graph, mm.other, (1, 0)).node
             gemm_plugin = graph.call_function(fake_gemm_plugin, (mm.this, other_t))
-            inject_stack_trace_from(mm, to=gemm_plugin)
+            propagate_metadata_from(mm, to=gemm_plugin)
 
         return {node: ReplaceAllUses(by=gemm_plugin)}

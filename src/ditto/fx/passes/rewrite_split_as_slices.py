@@ -1,7 +1,7 @@
 from torch.fx.node import Node
 
 from ..nodes import GetItem, Slice, SplitTensor
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class RewriteSplitAsSlices(NodewiseOptimizationPass):
@@ -27,6 +27,6 @@ class RewriteSplitAsSlices(NodewiseOptimizationPass):
                     getitem.idx * size,
                     (getitem.idx + 1) * size,
                 )
-                inject_stack_trace_from(node, to=s)
+                propagate_metadata_from(node, to=s)
                 results[getitem.node] = ReplaceAllUses(by=s.node)
         return results

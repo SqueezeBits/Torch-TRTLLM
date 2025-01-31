@@ -8,7 +8,7 @@ from ...literals import LoraPluginInputPrefix
 from ..metadata_keys import LORA_PREFIX
 from ..nodes import MM, AddTensor, Cat, Slice
 from ..subgraphs import Linear
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class FuseProjections(NodewiseOptimizationPass):
@@ -61,7 +61,7 @@ class FuseProjections(NodewiseOptimizationPass):
             fused_node: Node = MM.create(graph, linears[0].input_node, fused_param).node
             fused_node.meta[LORA_PREFIX] = self.fused_lora_prefix
             nodes_to_replace = [linear.mm.node for linear in linears]
-            inject_stack_trace_from(*nodes_to_replace, to=fused_node)
+            propagate_metadata_from(*nodes_to_replace, to=fused_node)
 
             if all(linear.bias_node is not None for linear in linears):
                 # The existing bias nodes must be recreated in order to avoid breaking topological orders.
@@ -79,7 +79,7 @@ class FuseProjections(NodewiseOptimizationPass):
                 fused_bias_params = Cat.create(graph, bias_nodes)
                 fused_node = AddTensor.create(graph, fused_node, fused_bias_params).node
                 nodes_to_replace = [linear.add.node for linear in linears if linear.add is not None]
-                inject_stack_trace_from(*nodes_to_replace, to=fused_node)
+                propagate_metadata_from(*nodes_to_replace, to=fused_node)
 
             slice_indices = [0, *accumulate(output_sizes)]
             slices = [
@@ -89,7 +89,7 @@ class FuseProjections(NodewiseOptimizationPass):
 
         results: dict[Node, NodewisePassResult] = {}
         for n, s in zip(nodes_to_replace, slices):
-            inject_stack_trace_from(n, to=s)
+            propagate_metadata_from(n, to=s)
             results[n] = ReplaceAllUses(by=s.node)
         return results
 

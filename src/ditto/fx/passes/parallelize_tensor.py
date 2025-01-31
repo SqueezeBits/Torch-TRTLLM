@@ -15,7 +15,7 @@ from ..utils import forget_all_descendant_fake_tensors, get_val
 from .infra import (
     GraphOptimizationPass,
     PassResult,
-    inject_stack_trace_from,
+    propagate_metadata_from,
 )
 
 
@@ -241,7 +241,7 @@ class ParallelizeTensor(GraphOptimizationPass):
             parallelized_weight = GetAttr.create(
                 graph, self.get_name_of_attr(weight.target), parallelized_weight_tensor
             )
-            inject_stack_trace_from(weight, to=parallelized_weight)
+            propagate_metadata_from(weight, to=parallelized_weight)
         weight.node.replace_all_uses_with(parallelized_weight.node)
         linear.mm.other = parallelized_weight.node
 
@@ -254,7 +254,7 @@ class ParallelizeTensor(GraphOptimizationPass):
 
             with graph.inserting_before(bias.node):
                 parallelized_bias = GetAttr.create(graph, self.get_name_of_attr(bias.target), parallelized_bias_tensor)
-                inject_stack_trace_from(bias, to=parallelized_bias)
+                propagate_metadata_from(bias, to=parallelized_bias)
             bias.node.replace_all_uses_with(parallelized_bias.node)
             linear.add.other = parallelized_bias.node
 
@@ -306,7 +306,7 @@ class ParallelizeTensor(GraphOptimizationPass):
             parallelized_weight = GetAttr.create(
                 graph, self.get_name_of_attr(weight.target), parallelized_weight_tensor
             )
-            inject_stack_trace_from(weight, to=parallelized_weight)
+            propagate_metadata_from(weight, to=parallelized_weight)
         weight.node.replace_all_uses_with(parallelized_weight.node)
         linear.mm.other = parallelized_weight.node
 

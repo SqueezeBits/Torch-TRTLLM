@@ -2,7 +2,7 @@ import torch
 from torch.fx import Node
 
 from ..nodes import Index
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class ReplaceIndexBySlice(NodewiseOptimizationPass):
@@ -18,7 +18,7 @@ class ReplaceIndexBySlice(NodewiseOptimizationPass):
 
             with graph.inserting_before(node):
                 equivalent_slice = graph.call_function(torch.ops.aten.slice.Tensor, (index.this, dim, start, end))
-                inject_stack_trace_from(node, to=equivalent_slice)
+                propagate_metadata_from(node, to=equivalent_slice)
 
             return {node: ReplaceAllUses(by=equivalent_slice)}
         return {}

@@ -1,7 +1,7 @@
 from torch.fx import Node
 
 from ..nodes import MM, AddMM, AddTensor
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class DecomposeAddMM(NodewiseOptimizationPass):
@@ -13,7 +13,7 @@ class DecomposeAddMM(NodewiseOptimizationPass):
 
         with (graph := node.graph).inserting_before(node):
             mm = MM.create(graph, addmm.mat1, addmm.mat2)
-            inject_stack_trace_from(addmm, to=mm)
+            propagate_metadata_from(addmm, to=mm)
             add = AddTensor.create(graph, mm.node, addmm.this)
-            inject_stack_trace_from(addmm, to=add)
+            propagate_metadata_from(addmm, to=add)
         return {node: ReplaceAllUses(by=add.node)}

@@ -3,7 +3,7 @@ from torch.fx import Node
 
 from ...types import Number
 from ..nodes import Div, GetAttr, Mul
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class FuseReciprocalMul(NodewiseOptimizationPass):
@@ -17,7 +17,7 @@ class FuseReciprocalMul(NodewiseOptimizationPass):
         with graph.inserting_before(node):
             if not (fused_div := Div.create_from_overloadpacket(graph, args=(x, div.other))):
                 return {}
-            inject_stack_trace_from(*((div, x) if isinstance(x, Node) else (div,)), to=fused_div)
+            propagate_metadata_from(*((div, x) if isinstance(x, Node) else (div,)), to=fused_div)
         return {node: ReplaceAllUses(by=fused_div.node)}
 
 

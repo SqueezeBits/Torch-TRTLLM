@@ -3,7 +3,7 @@ from torch.fx import Node
 
 from ..nodes import Reshape, Unsqueeze
 from ..utils import get_tensor_metadata
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class RewriteReshapeAsUnsqueeze(NodewiseOptimizationPass):
@@ -20,7 +20,7 @@ class RewriteReshapeAsUnsqueeze(NodewiseOptimizationPass):
         graph = node.graph
         with graph.inserting_before(node):
             unsqueeze = Unsqueeze.create(graph, reshape.this, dim)
-            inject_stack_trace_from(reshape, to=unsqueeze)
+            propagate_metadata_from(reshape, to=unsqueeze)
         return {node: ReplaceAllUses(by=unsqueeze.node)}
 
 
@@ -28,6 +28,15 @@ def find_unsqueeze_dim(
     input_shape: torch.Size,
     target_shape: torch.Size,
 ) -> int | None:
+    """Find the dimension to unsqueeze to match the target shape.
+
+    Args:
+        input_shape (torch.Size): The input shape
+        target_shape (torch.Size): The target shape
+
+    Returns:
+        int | None: The dimension to unsqueeze, or None if no match is found
+    """
     ndim = len(input_shape)
     if ndim + 1 != len(target_shape):
         return None

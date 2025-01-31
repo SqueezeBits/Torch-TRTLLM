@@ -1,7 +1,7 @@
 from torch.fx import Node
 
 from ..nodes import GetAttr
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class ForgetSubmodules(NodewiseOptimizationPass):
@@ -25,5 +25,5 @@ class ForgetSubmodules(NodewiseOptimizationPass):
 
         with graph.inserting_before(node):
             unnested_get_attr = GetAttr.create(graph, get_qualname(), get_attr.parameter)
-            inject_stack_trace_from(get_attr, to=unnested_get_attr)
+            propagate_metadata_from(get_attr, to=unnested_get_attr)
         return {get_attr.node: ReplaceAllUses(by=unnested_get_attr.node)}
