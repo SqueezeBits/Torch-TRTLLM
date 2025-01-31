@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from typing import Any
 
 import tensorrt as trt
@@ -30,11 +31,26 @@ from .fx.utils import get_tensor_metadata
 from .types import DataType
 
 
+# pylint: disable-next=too-many-instance-attributes
 class TRTLLMInterpreter(TRTInterpreter):
+    """TensorRT-LLM interpreter for converting PyTorch models to TensorRT engines.
+
+    Args:
+        module (GraphModule): The PyTorch graph module to convert
+        input_specs (tuple[Input, ...]): Input specifications for the network
+        network_flags (TensorRTNetworkCreationFlags): Network creation flags
+        builder_config (TensorRTBuilderConfig): TensorRT builder configuration
+        rank (int): Rank of the current process
+        engine_cache (BaseEngineCache | None, optional): Cache for TensorRT engines. Defaults to None.
+        network_name (str | None, optional): Name of the network. Defaults to None.
+        output_names (list[str] | None, optional): Names of output tensors. Defaults to None.
+    """
+
     def __init__(
         self,
         module: GraphModule,
         input_specs: tuple[Input, ...],
+        *,
         network_flags: TensorRTNetworkCreationFlags,
         builder_config: TensorRTBuilderConfig,
         rank: int,
@@ -85,9 +101,9 @@ class TRTLLMInterpreter(TRTInterpreter):
                 json.dump(builder_config_as_dict(builder_config), f, indent=2, sort_keys=True)
         return builder_config
 
-    def run_node(self, n: Node) -> Node:
+    def run_node(self, n: Node) -> trt.ITensor | Sequence[trt.ITensor]:
         self.logger.debug(f"Converting {n.format_node(self.placeholder_names) or str(n)}")
-        output = super().run_node(n)
+        output: trt.ITensor | Sequence[trt.ITensor] = super().run_node(n)
         self.logger.debug(f"{n.name} -> {_format_output(output)}")
         return output
 
@@ -149,6 +165,14 @@ class TRTLLMInterpreter(TRTInterpreter):
 
 
 def _format_output(output: Any) -> str:
+    """Format TensorRT output objects as strings.
+
+    Args:
+        output (Any): The output object to format
+
+    Returns:
+        str: A string representation of the output object
+    """
     if isinstance(output, trt.ITensor):
         return (
             f"trt.ITensor(name={output.name}, shape={output.shape}, "
@@ -168,6 +192,18 @@ def infer_module_output_dtypes(
     module: GraphModule,
     truncate_double: bool = False,
 ) -> tuple[dtype, ...]:
+    """Infer output data types from a graph module.
+
+    Args:
+        module (GraphModule): The graph module to analyze
+        truncate_double (bool, optional): Whether to convert float64 to float32. Defaults to False.
+
+    Returns:
+        tuple[dtype, ...]: Tuple of inferred output data types
+
+    Raises:
+        RuntimeError: If a graph output node is missing tensor metadata
+    """
     the_output = [n for n in module.graph.nodes if n.op == "output"][0]
     output_dtypes: list[dtype] = []
     for node in the_output.all_input_nodes:
