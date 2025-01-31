@@ -46,7 +46,7 @@ LoraPluginInputPrefix = Literal[
 
 PassName = Literal[
     "AddTRTLLMInputs",
-    "IndexLayers",
+    "BindUnmatchedLoraProtos",
     "CanonicalizeCopy",
     "CastMMToFP32",
     "ConstantFolding",
@@ -71,10 +71,11 @@ PassName = Literal[
     "FuseGatedMLPProjections",
     "FuseQKVProjections",
     "FuseReciprocalMul",
-    "InsertGatherLastTokenIds",
-    "PopLoraPlugins",
-    "ParallelizeTensor",
     "HerdConstantsToTheRight",
+    "IndexLayers",
+    "InsertGatherLastTokenIds",
+    "ParallelizeTensor",
+    "PopLoraPlugins",
     "ReplaceMMByFakeGemmPlugin",
     "ReplaceSDPAByFakeGPTAttentionPlugin",
     "ReplaceViewByReshape",
