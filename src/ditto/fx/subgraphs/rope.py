@@ -17,7 +17,7 @@ from torch.fx import Node
 from typing_extensions import Self
 
 from ..nodes import AddTensorTensor, Cat, MulTensorTensor, Neg, Slice
-from ..utils import get_tensor_metadata
+from ..utils import get_first_element, get_tensor_metadata
 from .path import TrailingReformatPath
 from .subgraph import Subgraph
 
@@ -117,7 +117,8 @@ class RoPESubgraph(Subgraph):
         # check for non-default rotary_embedding_dim (rotary_embedding_dim != head_size)
         if (  # pylint: disable-next=too-many-boolean-expressions
             len(add.users) == 1
-            and (optional_final_cat := Cat.specialize_from(next(iter(add.users))))
+            and (first_user := get_first_element(add.users))
+            and (optional_final_cat := Cat.specialize_from(first_user))
             and len(optional_final_cat.tensors) == 2
             and optional_final_cat.tensors[0] == add.node
             and (optional_slice_rope := Slice.specialize_from(slice_1.this))

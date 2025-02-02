@@ -26,6 +26,7 @@ from typing_extensions import Buffer
 from .arguments import TensorTypeHint, TorchExportArguments, TRTLLMArgumentHint
 from .config_gen import generate_trtllm_engine_config
 from .configs import (
+    DTypeLiteral,
     TensorRTConfig,
     TRTLLMBuildConfig,
     TRTLLMLoraConfig,
@@ -38,6 +39,7 @@ from .constants import INPUT_IDS, PassName
 from .convert import convert
 from .debug import get_memory_footprint, save_for_debug
 from .export import export
+from .fx.utils import find_output_node
 from .inline import inline
 from .transform import parallelize, transform
 from .types import BuiltInConstant
@@ -62,6 +64,9 @@ def trtllm_build(
     max_num_tokens: int = 8192,
     opt_num_tokens: int | None = None,
     max_beam_width: int = 1,
+    logits_dtype: DTypeLiteral = "float32",
+    gather_context_logits: bool = False,
+    gather_generation_logits: bool = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a PyTorch model.
 
@@ -82,12 +87,15 @@ def trtllm_build(
         max_num_tokens (int): Maximum number of tokens for TensorRT engine
         opt_num_tokens (int | None): Optimized number of tokens for TensorRT engine
         max_beam_width (int): Maximum beam width for TensorRT engine
+        logits_dtype (DTypeLiteral): Dtype of the output logits
+        gather_context_logits (bool): Whether to gather context token logits for benchmark
+        gather_generation_logits (bool): Whether to gather generation token logits for benchmark
     """
     network_name = type(model).__name__
     mapping = mapping or TRTLLMMapping()
     plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model.config.torch_dtype, mapping.world_size)
     profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(
-        model.config,
+        model.config, 
         plugin_config,
         max_batch_size=max_batch_size,
         max_seq_len=max_seq_len,
@@ -95,12 +103,20 @@ def trtllm_build(
         opt_num_tokens=opt_num_tokens,
         max_beam_width=max_beam_width,
     )
-    argument_hint = TRTLLMArgumentHint.configure(profile_config, tp_size=mapping.tp_size)
+    model_config = TRTLLMModelConfig(
+        lora_config=lora_config or TRTLLMLoraConfig(),
+        plugin_config=plugin_config,
+        gather_context_logits=gather_context_logits,
+        gather_generation_logits=gather_generation_logits,
+        logits_dtype=logits_dtype,
+    )
+    argument_hint = TRTLLMArgumentHint.configure(profile_config, gather_context_logits, tp_size=mapping.tp_size)
 
     logger.info("Exporting the model into graph module and building TensorRT engine")
     graph_generator = trtllm_export(
         model,
         argument_hint,
+        model_config,
         model.config.torch_dtype,
         mapping,
         run_matmuls_in_fp32=run_matmuls_in_fp32,
@@ -129,13 +145,7 @@ def trtllm_build(
             logger.info("Generating engine config from the optimized graph module")
             engine_config = generate_trtllm_engine_config(
                 graph_module,
-                TRTLLMBuildConfig.merge(
-                    profile_config,
-                    TRTLLMModelConfig(
-                        lora_config=lora_config or TRTLLMLoraConfig(),
-                        plugin_config=plugin_config,
-                    ),
-                ),
+                TRTLLMBuildConfig.merge(profile_config, model_config),
                 mapping,
                 architecture=network_name,
             )
@@ -166,12 +176,7 @@ def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
             RuntimeError: If output node is not found or specified nodes don't exist
         """
         nodes = {n.name: n for n in gm.graph.nodes}
-        for node in reversed(gm.graph.nodes):
-            if node.op == "output":
-                break
-        else:
-            gm.print_readable()
-            raise RuntimeError("No output node found in the graph module")
+        node = find_output_node(gm)
 
         try:
             outputs = node.args[0] + tuple(nodes[name] for name in names)
@@ -222,6 +227,7 @@ def save(
 def trtllm_export(
     model: PreTrainedModel,
     argument_hint: TRTLLMArgumentHint,
+    model_config: TRTLLMModelConfig,
     dtype: torch.dtype,
     mapping: TRTLLMMapping,
     *,
@@ -236,6 +242,7 @@ def trtllm_export(
     Args:
         model (PreTrainedModel): The PyTorch model to export
         argument_hint (TRTLLMArgumentHint): Configuration for input arguments
+        model_config (TRTLLMModelConfig): Model configurations
         dtype (torch.dtype): Data type for the model
         mapping (TRTLLMMapping): Configuration for tensor parallelism mapping
         build_config (TRTLLMBuildConfig): Configuration for building the engine
@@ -276,6 +283,7 @@ def trtllm_export(
     graph_module = transform(
         graph_module,
         argument_hint=argument_hint,
+        model_config=model_config,
         dtype=dtype,
         skipped_optimizers=skipped_optimizers,
         run_matmuls_in_fp32=run_matmuls_in_fp32,

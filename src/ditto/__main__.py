@@ -17,9 +17,10 @@
 import os
 from typing import Annotated, Literal
 
+import click
 import torch
 from loguru import logger
-from peft import PeftModel
+from peft.peft_model import PeftModel
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -30,7 +31,7 @@ from transformers import (
 from typer import Option, Typer
 
 from .api import trtllm_build
-from .configs import TRTLLMMapping
+from .configs import DTypeLiteral, TRTLLMMapping
 from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
 from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
 from .types import trt_to_torch_dtype_mapping
@@ -138,6 +139,10 @@ def build(
     opt_num_tokens: int | None = None,
     max_beam_width: int = 1,
     tp_size: int = 1,
+    logits_dtype: Annotated[DTypeLiteral, Option(click_type=click.Choice(["float16", "float32"]))] = "float32",
+    gather_context_logits: bool = False,
+    gather_generation_logits: bool = False,
+    gather_all_token_logits: bool = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
     output_dir = resolve_output_dir(output_dir, model_id)
@@ -161,6 +166,9 @@ def build(
             "Specify `--dtype float16` or `--dtype bfloat16` to reduce memory usage."
         )
 
+    if gather_all_token_logits:
+        gather_context_logits = gather_generation_logits = True
+
     os.makedirs(output_dir, exist_ok=True)
     trtllm_build(
         model,
@@ -174,6 +182,9 @@ def build(
         max_num_tokens=max_num_tokens,
         opt_num_tokens=opt_num_tokens,
         max_beam_width=max_beam_width,
+        logits_dtype=logits_dtype,
+        gather_context_logits=gather_context_logits,
+        gather_generation_logits=gather_generation_logits,
     )
 
 

@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# mypy: disable-error-code="misc"
+
 import torch
 from pydantic import Field, TypeAdapter, computed_field
 from typing_extensions import Self
@@ -37,11 +39,13 @@ class TRTLLMArgumentHint(StrictlyTyped):
     beam_width: DynamicDimensionType | int = Field(frozen=True, exclude=True)
     num_attn_layers: int | None = Field(default=None, exclude=True, ge=0)
     tp_size: int = Field(default=1, exclude=True, gt=0)
+    last_token_ids: TensorTypeHint | None = Field(default=None)
 
     @classmethod
     def configure(
         cls,
         profile_config: TRTLLMOptimizationProfileConfig,
+        gather_context_logits: bool,
         *,
         tp_size: int = 1,
     ) -> Self:
@@ -88,6 +92,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
                 max=profile_config.max_beam_width,
             )
         )
+        last_token_ids = None if gather_context_logits else TensorTypeHint(shape=(batch_size,), dtype=torch.int32)
         return cls(
             batch_size=batch_size,
             max_len=max_len,
@@ -95,6 +100,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
             max_blocks_per_seq=max_blocks_per_seq,
             beam_width=beam_width,
             tp_size=tp_size,
+            last_token_ids=last_token_ids,
         )
 
     def as_dict(self) -> dict[str, TensorTypeHint | None]:
@@ -115,11 +121,6 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @property
     def position_ids(self) -> TensorTypeHint:
         return TensorTypeHint(shape=(self.num_tokens,), dtype=torch.int32)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def last_token_ids(self) -> TensorTypeHint:
-        return TensorTypeHint(shape=(self.batch_size,), dtype=torch.int32)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
