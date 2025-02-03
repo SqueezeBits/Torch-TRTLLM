@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from itertools import accumulate
+
 import tensorrt as trt
 import torch
 from pydantic import Field
@@ -20,8 +22,8 @@ from torch.fx import Graph, GraphModule, Node
 
 from ...configs import TRTLLMMapping
 from ...types import DataType
-from ..nodes import GetAttr, Permute, Reshape
-from ..subgraphs import Linear
+from ..nodes import GetAttr, Permute, Reshape, Slice
+from ..subgraphs import FusedLinear, Linear
 from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs, GPTAttentionPlugin
 from ..utils import forget_all_descendant_fake_tensors, get_val
 from .infra import (
@@ -51,22 +53,29 @@ class ParallelizeLinear(GraphOptimizationPass):
         graph = graph_module.graph
         lm_head = Linear.find_last(graph)
         for node in graph.nodes:
-            if not (linear := Linear.configure_from(node)):
+            if not ((fused_linear := FusedLinear.configure_from(node)) or (linear := Linear.configure_from(node))):
                 continue
 
+            linear = fused_linear.linear if fused_linear else linear
             tp_type = node.meta.get("tp_type", TensorParallelType.NONE)
             if tp_type == TensorParallelType.COLUMN:
-                gpt_attn_plugin = get_gpt_plugin(linear)
+                slice_dim_sizes: list[int] | None = None
+                if gpt_attn_plugin := get_gpt_plugin(linear):
+                    q_dim = self.mapping.tp_size * gpt_attn_plugin.num_heads * gpt_attn_plugin.head_size
+                    kv_dim = self.mapping.tp_size * gpt_attn_plugin.num_kv_heads * gpt_attn_plugin.head_size
+                    slice_dim_sizes = [q_dim, kv_dim, kv_dim]
+                elif fused_linear:
+                    slice_dim_sizes = []
+                    for slice_node in fused_linear.slices:
+                        assert isinstance(slice_node.start, int) and isinstance(
+                            slice_node.end, int
+                        ), "slice must have int start and end"
+                        slice_dim_sizes.append(slice_node.end - slice_node.start)
+                        self.parallelize_slice(slice_node)
                 self.parallelize_column_linear(
                     linear,
                     gather_output=linear == lm_head,
-                    is_qkv=gpt_attn_plugin is not None,
-                    q_dim=-1
-                    if gpt_attn_plugin is None
-                    else self.mapping.tp_size * gpt_attn_plugin.num_heads * gpt_attn_plugin.head_size,
-                    kv_dim=-1
-                    if gpt_attn_plugin is None
-                    else self.mapping.tp_size * gpt_attn_plugin.num_kv_heads * gpt_attn_plugin.head_size,
+                    slice_dim_sizes=slice_dim_sizes,
                 )
             elif tp_type == TensorParallelType.ROW:
                 self.parallelize_row_linear(linear)
@@ -92,59 +101,33 @@ class ParallelizeLinear(GraphOptimizationPass):
         """
         return f"{from_name}_rank{self.mapping.tp_rank}"
 
-    # pylint: disable-next=too-many-locals,too-many-statements
     def parallelize_column_linear(
         self,
         linear: Linear,
         *,
         gather_output: bool = True,
-        is_qkv: bool = False,
-        q_dim: int = -1,
-        kv_dim: int = -1,
+        slice_dim_sizes: list[int] | None = None,
     ) -> None:
         """Parallelize the linear subgraph in column direction.
 
         Args:
             linear (Linear): The linear subgraph to be parallelized
             gather_output (bool, optional): Whether to gather the output. Defaults to True.
-            is_qkv (bool, optional): Whether the linear subgraph is a QKV linear. Defaults to False.
-            q_dim (int, optional): The dimension of the query. Defaults to -1.
-            kv_dim (int, optional): The dimension of the key/value. Defaults to -1.
+            slice_dim_sizes (list[int] | None, optional): The dimension sizes to slice the weight. Defaults to None.
         """
         if not (weight := GetAttr.specialize_from(linear.weight_node)):
             return
         local_out_features = linear.out_features // self.mapping.tp_size
-        if is_qkv:
-            # qkv weight is already merged, so it needs to be split
-            assert (
-                q_dim % self.mapping.tp_size == 0 and kv_dim % self.mapping.tp_size == 0
-            ), "q_dim and kv_dim must be divisible by tp_size"
-            q_slice_size = q_dim // self.mapping.tp_size
-            kv_slice_size = kv_dim // self.mapping.tp_size
-            if linear.has_transposed_weight:
-                q = weight.tensor[:q_dim, :]
-                q_slices = [q[q_slice_size * i : q_slice_size * (i + 1), :] for i in range(self.mapping.tp_size)]
-                k = weight.tensor[q_dim : q_dim + kv_dim, :]
-                k_slices = [k[kv_slice_size * i : kv_slice_size * (i + 1), :] for i in range(self.mapping.tp_size)]
-                v = weight.tensor[q_dim + kv_dim :, :]
-                v_slices = [v[kv_slice_size * i : kv_slice_size * (i + 1), :] for i in range(self.mapping.tp_size)]
-
-                parallelized_weight_tensor = torch.cat(
-                    [q_slices[self.mapping.tp_rank], k_slices[self.mapping.tp_rank], v_slices[self.mapping.tp_rank]],
-                    dim=0,
-                )
-            else:
-                q = weight.tensor[:, :q_dim]
-                q_slices = [q[:, q_slice_size * i : q_slice_size * (i + 1)] for i in range(self.mapping.tp_size)]
-                k = weight.tensor[:, q_dim : q_dim + kv_dim]
-                k_slices = [k[:, kv_slice_size * i : kv_slice_size * (i + 1)] for i in range(self.mapping.tp_size)]
-                v = weight.tensor[:, q_dim + kv_dim :]
-                v_slices = [v[:, kv_slice_size * i : kv_slice_size * (i + 1)] for i in range(self.mapping.tp_size)]
-
-                parallelized_weight_tensor = torch.cat(
-                    [q_slices[self.mapping.tp_rank], k_slices[self.mapping.tp_rank], v_slices[self.mapping.tp_rank]],
-                    dim=1,
-                )
+        if slice_dim_sizes:
+            assert all(
+                dim % self.mapping.tp_size == 0 for dim in slice_dim_sizes
+            ), "dimension to be sliced must be divisible by tp_size"
+            parallelized_weight_tensor = torch.cat(
+                list(zip(*self.slice_weight(weight.tensor, slice_dim_sizes, linear.has_transposed_weight)))[
+                    self.mapping.tp_rank
+                ],
+                dim=0 if linear.has_transposed_weight else 1,
+            )
         else:
             slice_size = local_out_features
             if linear.has_transposed_weight:
@@ -183,24 +166,9 @@ class ParallelizeLinear(GraphOptimizationPass):
             and linear.add is not None
             and (bias := GetAttr.specialize_from(linear.bias_node))
         ):
-            if is_qkv:
-                q_bias = bias.tensor[:q_dim]
-                q_bias_slices = [q_bias[q_slice_size * i : q_slice_size * (i + 1)] for i in range(self.mapping.tp_size)]
-                k_bias = bias.tensor[q_dim : q_dim + kv_dim]
-                k_bias_slices = [
-                    k_bias[kv_slice_size * i : kv_slice_size * (i + 1)] for i in range(self.mapping.tp_size)
-                ]
-                v_bias = bias.tensor[q_dim + kv_dim :]
-                v_bias_slices = [
-                    v_bias[kv_slice_size * i : kv_slice_size * (i + 1)] for i in range(self.mapping.tp_size)
-                ]
-
+            if slice_dim_sizes:
                 parallelized_bias_tensor = torch.cat(
-                    [
-                        q_bias_slices[self.mapping.tp_rank],
-                        k_bias_slices[self.mapping.tp_rank],
-                        v_bias_slices[self.mapping.tp_rank],
-                    ],
+                    list(zip(*self.slice_bias(bias.tensor, slice_dim_sizes)))[self.mapping.tp_rank]
                 )
             else:
                 slice_size = local_out_features
@@ -280,6 +248,73 @@ class ParallelizeLinear(GraphOptimizationPass):
             fusion_op=fusion_op,
             eps=eps,
         )
+
+    def parallelize_slice(self, slice_node: Slice) -> None:
+        """Parallelize the slice node.
+
+        This function just updates the slice node to be parallelized in place.
+
+        Args:
+            slice_node (Slice): The slice node to be parallelized
+        """
+        input_tensor, dim, start, end, *remains = slice_node.node.args
+        new_args = (
+            input_tensor,
+            dim,
+            start // self.mapping.tp_size,
+            end // self.mapping.tp_size,
+            *remains,
+        )
+        slice_node.node.args = new_args
+
+    def slice_weight(
+        self, weight: torch.Tensor, slice_dim_sizes: list[int], is_transposed: bool
+    ) -> list[list[torch.Tensor]]:
+        """Slice the weight tensor into multiple tensors.
+
+        Args:
+            weight (torch.Tensor): The weight tensor to be sliced
+            slice_dim_sizes (list[int]): The dimension sizes to slice the weight
+            is_transposed (bool): Whether the weight is transposed
+
+        Returns:
+            list[list[torch.Tensor]]: The sliced weight tensors for each tensor parallel rank
+        """
+        cumulative_slice_offsets = list(accumulate([0, *slice_dim_sizes]))
+        sliced_weights: list[list[torch.Tensor]] = []
+        for idx, slice_dim_size in enumerate(slice_dim_sizes):
+            slice_size = slice_dim_size // self.mapping.tp_size
+            if is_transposed:
+                weight_to_be_sliced = weight[cumulative_slice_offsets[idx] : cumulative_slice_offsets[idx + 1], :]
+                slices = [
+                    weight_to_be_sliced[slice_size * i : slice_size * (i + 1), :] for i in range(self.mapping.tp_size)
+                ]
+            else:
+                weight_to_be_sliced = weight[:, cumulative_slice_offsets[idx] : cumulative_slice_offsets[idx + 1]]
+                slices = [
+                    weight_to_be_sliced[:, slice_size * i : slice_size * (i + 1)] for i in range(self.mapping.tp_size)
+                ]
+            sliced_weights.append(slices)
+        return sliced_weights
+
+    def slice_bias(self, bias: torch.Tensor, slice_dim_sizes: list[int]) -> list[list[torch.Tensor]]:
+        """Slice the bias tensor into multiple tensors.
+
+        Args:
+            bias (torch.Tensor): The bias tensor to be sliced
+            slice_dim_sizes (list[int]): The dimension sizes to slice the bias
+
+        Returns:
+            list[list[torch.Tensor]]: The sliced bias tensors for each tensor parallel rank
+        """
+        cumulative_slice_offsets = list(accumulate([0, *slice_dim_sizes]))
+        sliced_biases: list[list[torch.Tensor]] = []
+        for idx, slice_dim_size in enumerate(slice_dim_sizes):
+            slice_size = slice_dim_size // self.mapping.tp_size
+            bias_to_be_sliced = bias[cumulative_slice_offsets[idx] : cumulative_slice_offsets[idx + 1]]
+            slices = [bias_to_be_sliced[slice_size * i : slice_size * (i + 1)] for i in range(self.mapping.tp_size)]
+            sliced_biases.append(slices)
+        return sliced_biases
 
 
 # [TODO] This function is only supported for 2D tensor, it should be extended to support arbitrary dimensions
