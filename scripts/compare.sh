@@ -14,12 +14,42 @@ declare PROMPT="Hey, are you conscious?"
 declare TRTLLM_REPO=""
 declare DTYPE="auto"
 declare MODEL_TYPE=""
+declare TRUST_REMOTE_CODE=false
+declare REBUILD=false
+declare RERUN=false
+declare TP_SIZE=1
 
 # Global variables for engine and artifact directories
 declare DITTO_ENGINE_DIR=""
 declare DITTO_ARTIFACTS_DIR=""
 declare TRTLLM_ENGINE_DIR=""
 declare TRTLLM_ARTIFACTS_DIR=""
+
+# Execute command and handle errors based on verbose mode
+rich_execute() {
+    local cmd="$1"
+    local log_file="$2"
+    local description="$3"
+
+    echo -e "\033[1;32mExecuting the following command to $description redirecting output to $log_file\033[0m"
+    echo -e "\033[1;38;5;213m$cmd\033[0m" | sed 's/[[:space:]]\{2,\}/\n    /g'
+    if [ "$VERBOSE_MODE" = true ]; then
+        set -o pipefail
+        eval "$cmd" 2>&1 | tee "$log_file"
+        local ret=$?
+        set +o pipefail
+        if [ $ret -ne 0 ]; then
+            echo -e "\033[1;31mError: Failed to $description\033[0m"
+            exit 1
+        fi
+    else
+        eval "$cmd" &> "$log_file"
+        if [ $? -ne 0 ]; then
+            echo -e "\033[1;31mError: Failed to $description. Check $log_file for details.\033[0m"
+            exit 1
+        fi
+    fi
+}
 
 # Print help message and exit
 print_help() {
@@ -40,6 +70,8 @@ print_help() {
     echo "Options:"
     echo "  -h, --help              Show this help message and exit"
     echo "  -v, --verbose           Show all terminal outputs"
+    echo "  --skip-build           Skip building both engines"
+    echo "  --skip-run             Skip running both engines"
     echo "  --skip-ditto           Skip building and running Ditto engine"
     echo "  --skip-ditto-build     Skip building Ditto engine"
     echo "  --skip-ditto-run       Skip running Ditto engine"
@@ -52,6 +84,10 @@ print_help() {
     echo "                         (default: clone at user cache directory with version from pyproject.toml)"
     echo "  --dtype DTYPE          Data type for model conversion (default: auto)"
     echo "  --model-type TYPE      Model type for finding convert_checkpoint.py (default: auto-detected)"
+    echo "  --trust-remote-code    Trust remote code when loading models from Hugging Face"
+    echo "  --rebuild              Rebuild engines even if they already exist"
+    echo "  --rerun               Run engines even if output files exist"
+    echo "  --tp-size SIZE         Tensor parallel size (default: 1)"
     echo
     echo "[Example: Simply run meta-llama/Llama-2-7b-chat-hf]"
     echo "  $0 meta-llama/Llama-2-7b-chat-hf"
@@ -91,6 +127,16 @@ parse_args() {
     local ARGS=()
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --skip-build)
+                SKIP_DITTO_BUILD=true
+                SKIP_NATIVE_BUILD=true
+                shift
+                ;;
+            --skip-run)
+                SKIP_DITTO_RUN=true
+                SKIP_NATIVE_RUN=true
+                shift
+                ;;
             --skip-ditto)
                 SKIP_DITTO_BUILD=true
                 SKIP_DITTO_RUN=true
@@ -139,6 +185,26 @@ parse_args() {
                 ;;
             --model-type)
                 MODEL_TYPE="$2"
+                shift 2
+                ;;
+            --trust-remote-code)
+                TRUST_REMOTE_CODE=true
+                shift
+                ;;
+            --rebuild)
+                REBUILD=true
+                shift
+                ;;
+            --rerun)
+                RERUN=true
+                shift
+                ;;
+            --tp-size)
+                TP_SIZE="$2"
+                if ! [[ "$TP_SIZE" =~ ^0*[1-9][0-9]*$ ]]; then
+                    echo "Error: TP_SIZE must be a positive integer."
+                    exit 1
+                fi
                 shift 2
                 ;;
             -*)
@@ -262,11 +328,20 @@ set_directories() {
     fi
 
     if [ "$DTYPE" != "auto" ]; then
-        DITTO_ENGINE_DIR="${DITTO_ENGINE_DIR}/${DTYPE}"
-        TRTLLM_ENGINE_DIR="${TRTLLM_ENGINE_DIR}/${DTYPE}"
+        DITTO_ENGINE_DIR="${DITTO_ENGINE_DIR}_${DTYPE}"
+        TRTLLM_ENGINE_DIR="${TRTLLM_ENGINE_DIR}_${DTYPE}"
         if [ "$DEBUG_MODE" = true ]; then
-            DITTO_ARTIFACTS_DIR="${DITTO_ARTIFACTS_DIR}/${DTYPE}"
-            TRTLLM_ARTIFACTS_DIR="${TRTLLM_ARTIFACTS_DIR}/${DTYPE}"
+            DITTO_ARTIFACTS_DIR="${DITTO_ARTIFACTS_DIR}_${DTYPE}"
+            TRTLLM_ARTIFACTS_DIR="${TRTLLM_ARTIFACTS_DIR}_${DTYPE}"
+        fi
+    fi
+
+    if [ "$TP_SIZE" -gt 1 ]; then
+        DITTO_ENGINE_DIR="${DITTO_ENGINE_DIR}_tp${TP_SIZE}"
+        TRTLLM_ENGINE_DIR="${TRTLLM_ENGINE_DIR}_tp${TP_SIZE}"
+        if [ "$DEBUG_MODE" = true ]; then
+            DITTO_ARTIFACTS_DIR="${DITTO_ARTIFACTS_DIR}_tp${TP_SIZE}"
+            TRTLLM_ARTIFACTS_DIR="${TRTLLM_ARTIFACTS_DIR}_tp${TP_SIZE}"
         fi
     fi
 
@@ -278,51 +353,62 @@ ditto_build() {
     local model_id=$1
     local peft_ids=("${@:2}")
 
-    echo "Building TensorRT-LLM engine using ditto ..."
-    local cmd="DEBUG_ARTIFACTS_DIR=$DITTO_ARTIFACTS_DIR \
-        ditto build ${model_id} \
+    # Early return if engine already exists and --rebuild not specified
+    if [ "$REBUILD" = false ] && [ -f "$DITTO_ENGINE_DIR/config.json" ] && [ -f "$DITTO_ENGINE_DIR/rank0.engine" ]; then
+        echo "Skip building Ditto engine as it already exists at $DITTO_ENGINE_DIR"
+        return 0
+    fi
+
+    local cmd="ditto build ${model_id} \
         --output-dir $DITTO_ENGINE_DIR \
         --dtype $DTYPE \
+        --tp-size $TP_SIZE \
         $(build_peft_args "${peft_ids[@]}")"
 
-    if [ "$VERBOSE_MODE" = true ]; then
-        eval "$cmd 2>&1 | tee $DITTO_ENGINE_DIR/build.log"
-    else
-        eval "$cmd &> $DITTO_ENGINE_DIR/build.log"
+    if [ "$TRUST_REMOTE_CODE" = true ]; then
+        cmd="$cmd --trust-remote-code"
     fi
+
+    DEBUG_ARTIFACTS_DIR=$DITTO_ARTIFACTS_DIR rich_execute "$cmd" "$DITTO_ENGINE_DIR/build.log" "build Ditto engine"
 }
 
-# Run inference with Ditto engine
-ditto_run() {
+# Run inference with engine
+run_engine() {
     local model_id=$1
     local num_pefts=$2
+    local engine_type=$3
+    local engine_dir=$4
 
-    echo "Running TensorRT-LLM engine built by ditto ..."
     local base_cmd="python -u ${TRTLLM_REPO}/examples/run.py \
-        --engine_dir $DITTO_ENGINE_DIR \
+        --engine_dir $engine_dir \
         --tokenizer_dir ${model_id} \
-        --max_output_len 100 \
-        --input_text \"$PROMPT\""
+        --input_text \"$PROMPT\" \
+        --max_output_len 100"
 
-    if [ "$VERBOSE_MODE" = true ]; then
-        eval "$base_cmd 2>&1 | tee $DITTO_ENGINE_DIR/run.log"
+    # Only run if output file doesn't exist or is empty or --rerun specified
+    OUTPUT_FILE="$engine_dir/output.log"
+    RUN_FILE="$engine_dir/run.log"
+    if [ "$RERUN" = true ] || [ ! -f "$OUTPUT_FILE" ] || [ ! -s "$OUTPUT_FILE" ]; then
+        rich_execute "$base_cmd" "$RUN_FILE" "run $engine_type engine"
+        extract_output "$RUN_FILE" "$OUTPUT_FILE"
     else
-        eval "$base_cmd &> $DITTO_ENGINE_DIR/run.log"
+        echo "Skip running $engine_type engine as output file already exists at $OUTPUT_FILE"
     fi
-    extract_output "$DITTO_ENGINE_DIR/run.log" "$DITTO_ENGINE_DIR/output.log"
 
     for task_uid in $(seq 0 $(($num_pefts - 1))); do
-        echo "Running TensorRT-LLM engine built by ditto with task_uid $task_uid ..."
         local cmd="$base_cmd \
-            --lora_dir $(build_lora_args $DITTO_ENGINE_DIR $num_pefts) \
+            --lora_dir $(build_lora_args $engine_dir $num_pefts) \
             --lora_task_uids $task_uid"
 
-        if [ "$VERBOSE_MODE" = true ]; then
-            eval "$cmd" 2>&1 | tee "$DITTO_ENGINE_DIR/run_task_uid_${task_uid}.log"
+        # Only run if output file doesn't exist or is empty or --rerun specified
+        RUN_FILE="$engine_dir/run_task_uid_${task_uid}.log"
+        OUTPUT_FILE="$engine_dir/output_task_uid_${task_uid}.log"
+        if [ "$RERUN" = true ] || [ ! -f "$OUTPUT_FILE" ] || [ ! -s "$OUTPUT_FILE" ]; then
+            rich_execute "$cmd" "$RUN_FILE" "run $engine_type engine with task_uid $task_uid"
+            extract_output "$RUN_FILE" "$OUTPUT_FILE"
         else
-            eval "$cmd &> $DITTO_ENGINE_DIR/run_task_uid_${task_uid}.log"
+            echo "Skip running $engine_type engine with task_uid $task_uid as output file already exists at $OUTPUT_FILE"
         fi
-        extract_output "$DITTO_ENGINE_DIR/run_task_uid_${task_uid}.log" "$DITTO_ENGINE_DIR/output_task_uid_${task_uid}.log"
     done
 }
 
@@ -331,7 +417,13 @@ native_build() {
     local model_id=$1
     local num_pefts=$2
     local peft_ids=("${@:3}")
-    
+
+    # Early return if engine already exists and --rebuild not specified
+    if [ "$REBUILD" = false ] && [ -f "$TRTLLM_ENGINE_DIR/config.json" ] && [ -f "$TRTLLM_ENGINE_DIR/rank0.engine" ]; then
+        echo "Skip building native TensorRT-LLM engine as it already exists at $TRTLLM_ENGINE_DIR"
+        return 0
+    fi
+
     BASE_MODEL_DIR=$(get_hf_cache_dir ${model_id})
     TRTLLM_CKPT_DIR="${BASE_MODEL_DIR}/trtllm-ckpts"
     if [ "$DTYPE" != "auto" ]; then
@@ -339,15 +431,44 @@ native_build() {
     fi
     mkdir -p $TRTLLM_CKPT_DIR
     if [ ! -f "$TRTLLM_CKPT_DIR/config.json" ]; then
-        echo "Converting checkpoint from $BASE_MODEL_DIR to $TRTLLM_CKPT_DIR ..."
-        if [ -z "$MODEL_TYPE" ]; then
-            MODEL_TYPE=$(echo "$model_id" | rev | cut -d'/' -f1 | rev | tr '[:upper:]' '[:lower:]' | tr '-' '_' | grep -o 'arctic\|baichuan\|bert\|blip2\|bloom\|chatglm\|cogvlm\|commandr\|dbrx\|deepseek_v1\|deepseek_v2\|dit\|eagle\|enc_dec\|exaone\|falcon\|gemma\|gpt\|gptj\|gptneox\|grok\|internlm\|internlm2\|jais\|llama\|lookahead\|mamba\|medusa\|mixtral\|mllama\|mpt\|nemotron\|nemotron_nas\|openai_triton\|opt\|phi\|prompt_lookup\|qwen\|qwenvl\|recurrentgemma\|sdxl\|skywork\|smaug\|whisper')
+
+        # EXAONE model directory needs to contain lower-cased "exaone" in its name
+        if [[ "$BASE_MODEL_DIR" == *EXAONE* ]]; then
+            BASE_MODEL_ROOT_DIR=`dirname $(dirname $BASE_MODEL_DIR)`
+            EXAONE_DIR="$(dirname $BASE_MODEL_ROOT_DIR)/exaone"
+            echo "EXAONE_DIR: $EXAONE_DIR"
+            SYMLINK_PATH="./$(basename $BASE_MODEL_ROOT_DIR)"
+            echo "SYMLINK_PATH: $SYMLINK_PATH"
+            if [ ! -e "$EXAONE_DIR" ]; then
+                ln -s "./$(basename $BASE_MODEL_ROOT_DIR)" $EXAONE_DIR
+            fi
+            BASE_MODEL_DIR="${BASE_MODEL_DIR/$BASE_MODEL_ROOT_DIR/$EXAONE_DIR}"
         fi
+
+        echo "Converting checkpoint at $BASE_MODEL_DIR ..."
+        if [ -z "$MODEL_TYPE" ]; then
+            # Find all convert_checkpoint.py files and extract their parent directory names
+            # Get list of available model types from TensorRT-LLM examples directory
+            AVAILABLE_MODEL_TYPES=$(find "${TRTLLM_REPO}/examples" -type f -name convert_checkpoint.py | xargs -n1 dirname | xargs -n1 basename)
+
+            # Convert model_id to lowercase for case-insensitive matching
+            model_id_lower=$(echo "$model_id" | tr '[:upper:]' '[:lower:]')
+
+            # Try to match each available model type
+            for type in $AVAILABLE_MODEL_TYPES; do
+                if [[ $model_id_lower == *"$type"* ]]; then
+                    MODEL_TYPE=$type
+                    break
+                fi
+            done
+        fi
+
         local convert_script="${TRTLLM_REPO}/examples/${MODEL_TYPE}/convert_checkpoint.py"
         if [ ! -f "$convert_script" ]; then
             echo "Error: Failed to configure model type of $model_id. Please specify the --model-type flag manually."
-            return 1
+            exit 1
         fi
+
         echo "Using conversion script at $convert_script"
         if [ "$MODEL_TYPE" = "gemma" ]; then
             local convert_cmd="python $convert_script \
@@ -362,16 +483,11 @@ native_build() {
                 --dtype $DTYPE"
         fi
 
-        if [ "$VERBOSE_MODE" = true ]; then
-            eval "$convert_cmd 2>&1 | tee $TRTLLM_CKPT_DIR/convert.log"
-        else
-            eval "$convert_cmd &> $TRTLLM_CKPT_DIR/convert.log"
-        fi
+        rich_execute "$convert_cmd" "$TRTLLM_CKPT_DIR/convert.log" "convert checkpoint"
     else
-        echo "Skipping conversion as TensorRT-LLM checkpoint directory already exists at $TRTLLM_CKPT_DIR"
+        echo "Skipping checkpoint conversion as TensorRT-LLM it already exists at $TRTLLM_CKPT_DIR"
     fi
 
-    echo "Building native TensorRT-LLM engine ..."
     TRTLLM_BUILD_ARGS="--checkpoint_dir $TRTLLM_CKPT_DIR \
         --output_dir $TRTLLM_ENGINE_DIR \
         --gemm_plugin auto"
@@ -395,48 +511,9 @@ native_build() {
         TRTLLM_BUILD_SCRIPT="trtllm-build"
     fi
 
-    local build_cmd="DEBUG_ARTIFACTS_DIR=$TRTLLM_ARTIFACTS_DIR \
-        $TRTLLM_BUILD_SCRIPT $TRTLLM_BUILD_ARGS"
+    local build_cmd="$TRTLLM_BUILD_SCRIPT $TRTLLM_BUILD_ARGS"
 
-    if [ "$VERBOSE_MODE" = true ]; then
-        eval "$build_cmd 2>&1 | tee $TRTLLM_ENGINE_DIR/build.log"
-    else
-        eval "$build_cmd &> $TRTLLM_ENGINE_DIR/build.log"
-    fi
-}
-
-# Run inference with native TensorRT-LLM engine
-native_run() {
-    local model_id=$1
-    local num_pefts=$2
-    
-    echo "Running native TensorRT-LLM engine ..."
-    local base_cmd="python -u ${TRTLLM_REPO}/examples/run.py \
-        --engine_dir $TRTLLM_ENGINE_DIR \
-        --tokenizer_dir ${model_id} \
-        --max_output_len 100 \
-        --input_text \"$PROMPT\""
-
-    if [ "$VERBOSE_MODE" = true ]; then
-        eval "$base_cmd 2>&1 | tee $TRTLLM_ENGINE_DIR/run.log"
-    else
-        eval "$base_cmd &> $TRTLLM_ENGINE_DIR/run.log"
-    fi
-    extract_output "$TRTLLM_ENGINE_DIR/run.log" "$TRTLLM_ENGINE_DIR/output.log"
-
-    for task_uid in $(seq 0 $(($num_pefts - 1))); do
-        echo "Running native TensorRT-LLM engine with task_uid $task_uid ..."
-        local cmd="$base_cmd \
-            --lora_dir $(build_lora_args $TRTLLM_ENGINE_DIR $num_pefts) \
-            --lora_task_uids $task_uid"
-
-        if [ "$VERBOSE_MODE" = true ]; then
-            eval "$cmd 2>&1 | tee $TRTLLM_ENGINE_DIR/run_task_uid_${task_uid}.log"
-        else
-            eval "$cmd &> $TRTLLM_ENGINE_DIR/run_task_uid_${task_uid}.log"
-        fi
-        extract_output "$TRTLLM_ENGINE_DIR/run_task_uid_${task_uid}.log" "$TRTLLM_ENGINE_DIR/output_task_uid_${task_uid}.log"
-    done
+    DEBUG_ARTIFACTS_DIR=$TRTLLM_ARTIFACTS_DIR rich_execute "$build_cmd" "$TRTLLM_ENGINE_DIR/build.log" "build native TensorRT-LLM engine"
 }
 
 # Compare outputs between two files and print result
@@ -462,13 +539,13 @@ compare_output_files() {
     local colorized_diff_output=$(diff --color --new-line-format='+%L' --old-line-format='-%L' --unchanged-line-format=' %L' "$file1" "$file2" | sed 's/^-/\x1b[31m-/;s/^+/\x1b[32m+/;s/^ /\x1b[34m /;s/$/\x1b[0m/')
 
     if [ -n "$(diff $file1 $file2)" ]; then
-        echo -e "\033[31mFAILED\033[0m"
+        echo -e "\033[31;1mFAILED\033[0m"
         if [ "$VERBOSE_MODE" = true ]; then
             echo "$colorized_diff_output"
         fi
         return 1
     fi
-    echo -e "\033[32mSUCCESS\033[0m"
+    echo -e "\033[32;1mSUCCESS\033[0m"
     if [ "$VERBOSE_MODE" = true ]; then
         echo "$colorized_diff_output"
     fi
@@ -487,12 +564,15 @@ compare_outputs() {
     fi
 
     echo "Comparing outputs between Ditto and native TensorRT-LLM engines..."
-    
+    local all_succeeded=0
+
     # Compare base model outputs
-    echo "Comparing base model outputs: "
     compare_output_files \
         "$TRTLLM_ENGINE_DIR/output.log" \
         "$DITTO_ENGINE_DIR/output.log"
+    if [ $? -ne 0 ]; then
+        all_succeeded=1
+    fi
 
     # Compare PEFT model outputs
     for task_uid in $(seq 0 $(($num_pefts - 1))); do
@@ -500,9 +580,12 @@ compare_outputs() {
         compare_output_files \
             "$DITTO_ENGINE_DIR/output_task_uid_${task_uid}.log" \
             "$TRTLLM_ENGINE_DIR/output_task_uid_${task_uid}.log"
+        if [ $? -ne 0 ]; then
+            all_succeeded=1
+        fi
     done
 
-    return 0
+    return $all_succeeded
 }
 
 main() {
@@ -517,14 +600,14 @@ main() {
         ditto_build "$MODEL_ID" "${PEFT_IDS[@]}"
     fi
     if [ "$SKIP_DITTO_RUN" = false ]; then
-        ditto_run "$MODEL_ID" "$NUM_PEFTS"
+        run_engine "$MODEL_ID" "$NUM_PEFTS" "Ditto" "$DITTO_ENGINE_DIR"
     fi
 
     if [ "$SKIP_NATIVE_BUILD" = false ]; then
         native_build "$MODEL_ID" "$NUM_PEFTS" "${PEFT_IDS[@]}"
     fi
     if [ "$SKIP_NATIVE_RUN" = false ]; then
-        native_run "$MODEL_ID" "$NUM_PEFTS"
+        run_engine "$MODEL_ID" "$NUM_PEFTS" "native TensorRT-LLM" "$TRTLLM_ENGINE_DIR"
     fi
 
     compare_outputs "$NUM_PEFTS"

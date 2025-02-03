@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import select
 import sys
 
 from huggingface_hub import snapshot_download
@@ -49,19 +50,26 @@ def get_snapshot_dir(model_id: str) -> str:
     if len(hashes) == 1:
         chosen_hash = hashes[0]
     else:
-        print(f"\nMultiple model versions found in {snapshot_dir}.\nPlease choose one:", file=sys.stderr)
-        for i, h in enumerate(hashes):
-            print(f"[{i}] {h}", file=sys.stderr)
+        # Check if stdin is connected to a terminal and input is available
+        if sys.stdin.isatty() and select.select([sys.stdin], [], [], 0.0)[0]:
+            print(f"\nMultiple model versions found in {snapshot_dir}.\nPlease choose one:", file=sys.stderr)
+            for i, h in enumerate(hashes):
+                print(f"[{i}] {h}", file=sys.stderr)
 
-        while True:
-            try:
-                choice = int(input("Enter number: "))
-                if 0 <= choice < len(hashes):
-                    chosen_hash = hashes[choice]
-                    break
-                print("Invalid choice. Try again.", file=sys.stderr)
-            except ValueError:
-                print("Please enter a number.", file=sys.stderr)
+            while True:
+                try:
+                    choice = int(input("Enter number: "))
+                    if 0 <= choice < len(hashes):
+                        chosen_hash = hashes[choice]
+                        break
+                    print("Invalid choice. Try again.", file=sys.stderr)
+                except ValueError:
+                    print("Please enter a number.", file=sys.stderr)
+        else:
+            # If user input is not available, choose the latest hash by modification time
+            hash_with_mtime = [(h, os.path.getmtime(os.path.join(snapshot_dir, h))) for h in hashes]
+            chosen_hash = sorted(hash_with_mtime, key=lambda x: x[1], reverse=True)[0][0]
+            print(f"Automatically selecting latest hash: {chosen_hash}", file=sys.stderr)
 
     return f"{snapshot_dir}/{chosen_hash}"
 
