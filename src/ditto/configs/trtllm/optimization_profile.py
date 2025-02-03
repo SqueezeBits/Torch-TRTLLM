@@ -32,8 +32,8 @@ class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
     opt_batch_size: int = Field(default=128, gt=0)
     max_batch_size: int = Field(default=256, gt=1)
     max_beam_width: int = Field(default=1, gt=0)
-    max_num_tokens: int = Field(default=8192, gt=1)
-    opt_num_tokens: int = Field(default=1, gt=0)
+    max_num_tokens: int = Field(default=8192, multiple_of=8, gt=1)
+    opt_num_tokens: int = Field(default=8, multiple_of=8, gt=0)
 
     @model_validator(mode="after")
     def check_runtime_attribute_dependencies(self) -> Self:
