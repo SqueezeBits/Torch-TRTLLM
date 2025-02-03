@@ -15,8 +15,10 @@ declare TRTLLM_REPO=""
 declare DTYPE="auto"
 declare MODEL_TYPE=""
 declare TRUST_REMOTE_CODE=false
-declare REBUILD=false
-declare RERUN=false
+declare REBUILD_DITTO=false
+declare RERUN_DITTO=false
+declare REBUILD_NATIVE=false
+declare RERUN_NATIVE=false
 declare TP_SIZE=1
 
 # Global variables for engine and artifact directories
@@ -70,24 +72,34 @@ print_help() {
     echo "Options:"
     echo "  -h, --help              Show this help message and exit"
     echo "  -v, --verbose           Show all terminal outputs"
-    echo "  --skip-build           Skip building both engines"
-    echo "  --skip-run             Skip running both engines"
-    echo "  --skip-ditto           Skip building and running Ditto engine"
-    echo "  --skip-ditto-build     Skip building Ditto engine"
-    echo "  --skip-ditto-run       Skip running Ditto engine"
-    echo "  --skip-native          Skip building and running TensorRT-LLM native engine"
-    echo "  --skip-native-build    Skip building native TensorRT-LLM engine"
-    echo "  --skip-native-run      Skip running native TensorRT-LLM engine"
     echo "  -d, --debug            Enable debug mode"
     echo "  --prompt TEXT          Input prompt (default: \"Hey, are you conscious?\")"
     echo "  --trtllm-repo PATH     Path to TensorRT-LLM repository"
     echo "                         (default: clone at user cache directory with version from pyproject.toml)"
     echo "  --dtype DTYPE          Data type for model conversion (default: auto)"
     echo "  --model-type TYPE      Model type for finding convert_checkpoint.py (default: auto-detected)"
-    echo "  --trust-remote-code    Trust remote code when loading models from Hugging Face"
-    echo "  --rebuild              Rebuild engines even if they already exist"
-    echo "  --rerun               Run engines even if output files exist"
     echo "  --tp-size SIZE         Tensor parallel size (default: 1)"
+    echo "  --trust-remote-code    Trust remote code when loading models from Hugging Face"
+    echo
+    echo "  --skip                 Equivalent to --skip-build --skip-run"
+    echo "  --skip-build           Equivalent to --skip-ditto-build --skip-native-build"
+    echo "  --skip-run             Equivalent to --skip-ditto-run --skip-native-run"
+    echo "  --skip-ditto           Equivalent to --skip-ditto-build --skip-ditto-run"
+    echo "  --skip-ditto-build     Skip building Ditto engine"
+    echo "  --skip-ditto-run       Skip running Ditto engine"
+    echo "  --skip-native          Equivalent to --skip-native-build --skip-native-run"
+    echo "  --skip-native-build    Skip building native TensorRT-LLM engine"
+    echo "  --skip-native-run      Skip running native TensorRT-LLM engine"
+    echo
+    echo "  --redo                 Equivalent to --rebuild --rerun"
+    echo "  --rebuild              Equivalent to --rebuild-ditto --rebuild-native"
+    echo "  --rerun                Equivalent to --rerun-ditto --rerun-native"
+    echo "  --redo-ditto           Equivalent to --rebuild-ditto --rerun-ditto"
+    echo "  --rebuild-ditto        Rebuild Ditto engine even if it already exists"
+    echo "  --rerun-ditto          Run Ditto engine even if output files exist"
+    echo "  --redo-native          Equivalent to --rebuild-native --rerun-native"
+    echo "  --rebuild-native       Rebuild native TensorRT-LLM engine even if it already exists"
+    echo "  --rerun-native         Run native TensorRT-LLM engine even if output files exist"
     echo
     echo "[Example: Simply run meta-llama/Llama-2-7b-chat-hf]"
     echo "  $0 meta-llama/Llama-2-7b-chat-hf"
@@ -127,6 +139,13 @@ parse_args() {
     local ARGS=()
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --skip)
+                SKIP_DITTO_BUILD=true
+                SKIP_NATIVE_BUILD=true
+                SKIP_DITTO_RUN=true
+                SKIP_NATIVE_RUN=true
+                shift
+                ;;
             --skip-build)
                 SKIP_DITTO_BUILD=true
                 SKIP_NATIVE_BUILD=true
@@ -191,12 +210,47 @@ parse_args() {
                 TRUST_REMOTE_CODE=true
                 shift
                 ;;
+            --redo)
+                REBUILD_DITTO=true
+                REBUILD_NATIVE=true
+                RERUN_DITTO=true
+                RERUN_NATIVE=true
+                shift
+                ;;
             --rebuild)
-                REBUILD=true
+                REBUILD_DITTO=true
+                REBUILD_NATIVE=true
                 shift
                 ;;
             --rerun)
-                RERUN=true
+                RERUN_DITTO=true
+                RERUN_NATIVE=true
+                shift
+                ;;
+            --redo-ditto)
+                REBUILD_DITTO=true
+                RERUN_DITTO=true
+                shift
+                ;;
+            --rebuild-ditto)
+                REBUILD_DITTO=true
+                shift
+                ;;
+            --rerun-ditto)
+                RERUN_DITTO=true
+                shift
+                ;;
+            --redo-native)
+                REBUILD_NATIVE=true
+                RERUN_NATIVE=true
+                shift
+                ;;
+            --rebuild-native)
+                REBUILD_NATIVE=true
+                shift
+                ;;
+            --rerun-native)
+                RERUN_NATIVE=true
                 shift
                 ;;
             --tp-size)
@@ -353,8 +407,8 @@ ditto_build() {
     local model_id=$1
     local peft_ids=("${@:2}")
 
-    # Early return if engine already exists and --rebuild not specified
-    if [ "$REBUILD" = false ] && [ -f "$DITTO_ENGINE_DIR/config.json" ] && [ -f "$DITTO_ENGINE_DIR/rank0.engine" ]; then
+    # Early return if engine already exists and --rebuild-ditto not specified
+    if [ "$REBUILD_DITTO" = false ] && [ -f "$DITTO_ENGINE_DIR/config.json" ] && [ -f "$DITTO_ENGINE_DIR/rank0.engine" ]; then
         echo "Skip building Ditto engine as it already exists at $DITTO_ENGINE_DIR"
         return 0
     fi
@@ -378,6 +432,7 @@ run_engine() {
     local num_pefts=$2
     local engine_type=$3
     local engine_dir=$4
+    local rerun=$5
 
     local base_cmd="python -u ${TRTLLM_REPO}/examples/run.py \
         --engine_dir $engine_dir \
@@ -385,10 +440,10 @@ run_engine() {
         --input_text \"$PROMPT\" \
         --max_output_len 100"
 
-    # Only run if output file doesn't exist or is empty or --rerun specified
+    # Only run if output file doesn't exist or is empty or rerun flag is true
     OUTPUT_FILE="$engine_dir/output.log"
     RUN_FILE="$engine_dir/run.log"
-    if [ "$RERUN" = true ] || [ ! -f "$OUTPUT_FILE" ] || [ ! -s "$OUTPUT_FILE" ]; then
+    if [ "$rerun" = true ] || [ ! -f "$OUTPUT_FILE" ] || [ ! -s "$OUTPUT_FILE" ]; then
         rich_execute "$base_cmd" "$RUN_FILE" "run $engine_type engine"
         extract_output "$RUN_FILE" "$OUTPUT_FILE"
     else
@@ -400,10 +455,10 @@ run_engine() {
             --lora_dir $(build_lora_args $engine_dir $num_pefts) \
             --lora_task_uids $task_uid"
 
-        # Only run if output file doesn't exist or is empty or --rerun specified
+        # Only run if output file doesn't exist or is empty or rerun flag is true
         RUN_FILE="$engine_dir/run_task_uid_${task_uid}.log"
         OUTPUT_FILE="$engine_dir/output_task_uid_${task_uid}.log"
-        if [ "$RERUN" = true ] || [ ! -f "$OUTPUT_FILE" ] || [ ! -s "$OUTPUT_FILE" ]; then
+        if [ "$rerun" = true ] || [ ! -f "$OUTPUT_FILE" ] || [ ! -s "$OUTPUT_FILE" ]; then
             rich_execute "$cmd" "$RUN_FILE" "run $engine_type engine with task_uid $task_uid"
             extract_output "$RUN_FILE" "$OUTPUT_FILE"
         else
@@ -418,8 +473,8 @@ native_build() {
     local num_pefts=$2
     local peft_ids=("${@:3}")
 
-    # Early return if engine already exists and --rebuild not specified
-    if [ "$REBUILD" = false ] && [ -f "$TRTLLM_ENGINE_DIR/config.json" ] && [ -f "$TRTLLM_ENGINE_DIR/rank0.engine" ]; then
+    # Early return if engine already exists and --rebuild-native not specified
+    if [ "$REBUILD_NATIVE" = false ] && [ -f "$TRTLLM_ENGINE_DIR/config.json" ] && [ -f "$TRTLLM_ENGINE_DIR/rank0.engine" ]; then
         echo "Skip building native TensorRT-LLM engine as it already exists at $TRTLLM_ENGINE_DIR"
         return 0
     fi
@@ -600,14 +655,14 @@ main() {
         ditto_build "$MODEL_ID" "${PEFT_IDS[@]}"
     fi
     if [ "$SKIP_DITTO_RUN" = false ]; then
-        run_engine "$MODEL_ID" "$NUM_PEFTS" "Ditto" "$DITTO_ENGINE_DIR"
+        run_engine "$MODEL_ID" "$NUM_PEFTS" "Ditto" "$DITTO_ENGINE_DIR" "$RERUN_DITTO"
     fi
 
     if [ "$SKIP_NATIVE_BUILD" = false ]; then
         native_build "$MODEL_ID" "$NUM_PEFTS" "${PEFT_IDS[@]}"
     fi
     if [ "$SKIP_NATIVE_RUN" = false ]; then
-        run_engine "$MODEL_ID" "$NUM_PEFTS" "native TensorRT-LLM" "$TRTLLM_ENGINE_DIR"
+        run_engine "$MODEL_ID" "$NUM_PEFTS" "native TensorRT-LLM" "$TRTLLM_ENGINE_DIR" "$RERUN_NATIVE"
     fi
 
     compare_outputs "$NUM_PEFTS"
