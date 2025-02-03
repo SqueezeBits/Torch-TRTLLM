@@ -45,8 +45,9 @@ class FuseQKVProjections(FuseProjections):
             return []
         if q_proj.mm.node == k_proj.mm.node == v_proj.mm.node:
             q_proj.bind_free_lora_proto(with_prefix="attn_qkv")
-        else:
-            for prefix, proj in zip(("attn_q", "attn_k", "attn_v"), (q_proj, k_proj, v_proj)):
-                proj.bind_free_lora_proto(with_prefix=prefix)
+            return []
+
+        for prefix, proj in zip(("attn_q", "attn_k", "attn_v"), (q_proj, k_proj, v_proj)):
+            proj.bind_free_lora_proto(with_prefix=prefix)
         attn_dense.bind_free_lora_proto(with_prefix="attn_dense")
         return [q_proj, k_proj, v_proj]

@@ -18,7 +18,11 @@ class FuseGatedMLPProjections(FuseProjections):
         root = TrailingReformatPath.configure_from(down_proj.input_node).top
         if not (gated_mlp := GatedMLP.configure_from(root)):
             return []
-        gated_mlp.gate_proj.bind_free_lora_proto(with_prefix="mlp_gate")
+        if gated_mlp.gate_proj.mm.node == gated_mlp.up_proj.mm.node:
+            gated_mlp.up_proj.bind_free_lora_proto(with_prefix="mlp_h_to_4h")
+            return []
+
         gated_mlp.up_proj.bind_free_lora_proto(with_prefix="mlp_h_to_4h")
+        gated_mlp.gate_proj.bind_free_lora_proto(with_prefix="mlp_gate")
         down_proj.bind_free_lora_proto(with_prefix="mlp_4h_to_h")
         return [gated_mlp.up_proj, gated_mlp.gate_proj]
