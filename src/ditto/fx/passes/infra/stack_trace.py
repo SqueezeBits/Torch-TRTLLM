@@ -255,6 +255,6 @@ class MergeLoraProtos(MetadataPropagator[dict[LoraPluginInputPrefix, LoraProto]]
             return None
         lora_protos: dict[LoraPluginInputPrefix, LoraProto] = {}
         for n in (node, *others):
-            if (protos := verify(n.meta.get(LORA_PROTOS), as_type=dict[LoraPluginInputPrefix, LoraProto])) is not None:
+            if (protos := verify(n.meta.get(cls.KEY), as_type=dict[LoraPluginInputPrefix, LoraProto])) is not None:
                 lora_protos.update(protos)
         return lora_protos
