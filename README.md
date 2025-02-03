@@ -6,7 +6,7 @@
 [![transformers](https://img.shields.io/badge/transformers-%3C%3D4.45.1%2C%3E%3D4.38.2-yellow)](https://huggingface.co/transformers/)
 [![tensorrt-llm](https://img.shields.io/badge/tensorrt--llm-0.16.0-green)](https://developer.nvidia.com/blog/tag/tensorrt-llm/)
 [![torch-tensorrt](https://img.shields.io/badge/torch--tensorrt-2.5.0-lightgreen)](https://pytorch.org/TensorRT)
-[![version](https://img.shields.io/badge/version-0.0.0-purple)](#)
+[![version](https://img.shields.io/badge/version-0.1.0-purple)](#)
 [![license](https://img.shields.io/badge/license-Apache%202-red)](./LICENSE)
 
 <div align="left">

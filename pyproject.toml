@@ -16,7 +16,7 @@ classifiers = [
     "License :: OSI Approved :: GNU Affero General Public License v3",
     "Operating System :: OS Independent"
 ]
-version = "0.0.0"
+version = "0.1.0"
 
 [tool.poetry.dependencies]
 python = ">=3.10"
@@ -35,9 +35,6 @@ onnx-graphsurgeon = "*"
 
 [tool.poetry.scripts]
 ditto = "ditto.__main__:app"
-
-[tool.poetry.dynamic]
-version = { source = "ditto", attribute = "__version__" }
 
 [tool.poetry.package.include]
 path = "src/ditto"
