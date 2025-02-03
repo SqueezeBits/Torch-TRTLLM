@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from collections.abc import Iterable
-from typing import Any, TypeVar, cast, overload
+from typing import TypeVar, cast, overload
 from weakref import WeakKeyDictionary
 
 import torch
@@ -245,16 +245,21 @@ def find_sym_size_node(graph: Graph, s: torch.SymInt) -> Node:
         raise RuntimeError(f"Failed to find a node producing the symbolic integer {s}")
 
 
-def get_first_element(iterable: Iterable[Any]) -> Any | None:
+# pylint: disable-next=invalid-name
+ElementType = TypeVar("ElementType")
+
+
+def get_first_element(iterable: Iterable[ElementType]) -> ElementType | None:
     """Get first element of an iterable.
 
-    Useful hack to get the first element of any iterable, especially when retrieving a `Node` from `dict[Node, Any]`.
+    Useful hack to get the first element of any iterable, especially when retrieving
+        a `Node` from `dict[Node, ElementType]`.
 
     Args:
-        iterable (Iterable[Any]): Any iterable
+        iterable (Iterable[ElementType]): Any iterable object
 
     Returns:
-        Any | None: The first element of an iterable if one exists, None otherwise
+        ElementType | None: The first element of an iterable if one exists, None otherwise
     """
     try:
         return next(iter(iterable))
@@ -277,9 +282,8 @@ def find_output_node(graph_or_graph_module: Graph | GraphModule) -> Node:
     graph = graph_or_graph_module if isinstance(graph_or_graph_module, Graph) else graph_or_graph_module.graph
 
     output_nodes = graph.find_nodes(op="output")
-    if len(output_nodes) != 1:
+    if len(output_nodes) != 1 or not (output_node := get_first_element(output_nodes)):
         print(graph)
         raise RuntimeError("Graph contains either multiple output nodes or no output nodes")
-    output_node = get_first_element(output_nodes)
 
     return output_node

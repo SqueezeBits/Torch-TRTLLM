@@ -31,7 +31,7 @@ class CastOutputLogits(GraphOptimizationPass):
 
         output_node = find_output_node(graph)
         if len(output_node.all_input_nodes) != 1:
-            # TODO: handle cases with multiple outputs (eg, medusa, debug outputs) and remove the assertion below
+            # TODO: handle cases with multiple outputs (eg, medusa, debug outputs)
             return PassResult(graph_module=graph_module, modified=False)
 
         logits = output_node.all_input_nodes[0]
