@@ -68,7 +68,7 @@ def trtllm_build(
     4. Saves the engine components to the output directory
 
     Args:
-        model (PreTrainedModel): The PyTorch model to convert
+        model (PreTrainedModel | PeftModel): The PyTorch model to convert
         output_dir (str): Directory to save the engine and config files
         profile_config (TRTLLMOptimizationProfileConfig | None): Configuration for optimization profiles
         mapping (TRTLLMMapping | None): Configuration for tensor parallelism mapping
@@ -131,7 +131,7 @@ def trtllm_export(
     3. Optimizes the graph module for TensorRT-LLM compatibility
 
     Args:
-        model (PreTrainedModel): The PyTorch model to export
+        model (PreTrainedModel | PeftModel): The PyTorch model to export
         argument_hint (TRTLLMArgumentHint): Configuration for input arguments
         dtype (torch.dtype): Data type for the model
         run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.

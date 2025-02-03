@@ -356,12 +356,12 @@ class LoraPluginInputs(StrictlyTyped):
         The newly added Lora input pairs will be used by TRT-LLM Lora plugin nodes.
 
         Args:
-            graph: The FX graph being modified. New placeholder nodes will be added.
-            argument_hint: Type hints for TRTLLM inputs, containing batch size and other specs.
+            graph (Graph): The FX graph being modified. New placeholder nodes will be added.
+            argument_hint (TRTLLMArgumentHint): Type hints for TRTLLM inputs, containing batch size and other specs.
                 Will be updated with the new Lora input hints.
-            prefix: Position in the transformer layer predefined by TRT-LLM to add Lora to
+            prefix (LoraPluginInputPrefix): Position in the transformer layer predefined by TRT-LLM to add Lora to
                 (e.g. "attn_q", "attn_k", "attn_v" or "attn_dense"). See LoraPluginInputPrefix for all supported values.
-            layer_index: Index of the current transformer layer, used for unique input names.
+            layer_index (int): Index of the current transformer layer, used for unique input names.
         """
         input_pair = LoraPluginInputPair.create(
             graph=graph,

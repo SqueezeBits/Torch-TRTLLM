@@ -57,14 +57,14 @@ def aten_ops_all(
     """Convert PyTorch's aten.all operation to TensorRT.
 
     Args:
-        ctx: Conversion context
-        target: Target operation
-        args: Positional arguments
-        kwargs: Keyword arguments
-        name: Layer name
+        ctx (ConversionContext): Conversion context
+        target (Target): Target operation
+        args (tuple[Argument, ...]): Positional arguments
+        kwargs (dict[str, Argument]): Keyword arguments
+        name (str): Layer name
 
     Returns:
-        Converted TensorRT tensor or sequence of tensors
+        trt.ITensor | Sequence[trt.ITensor]: Converted TensorRT tensor or sequence of tensors
     """
     return reduce_all(
         ctx,
@@ -90,16 +90,16 @@ def reduce_all(
     """Reduce tensor along specified dimensions using logical AND.
 
     Args:
-        ctx: Conversion context
-        target: Target operation
-        source_ir: Source IR type
-        name: Layer name
-        input_val: Input tensor
-        dim: Dimensions to reduce along
-        keepdim: Whether to keep reduced dimensions
+        ctx (ConversionContext): Conversion context
+        target (Target): Target operation
+        source_ir (SourceIR | None): Source IR type
+        name (str): Layer name
+        input_val (trt.ITensor): Input tensor
+        dim (int | Sequence[int] | None, optional): Dimensions to reduce along. Defaults to None.
+        keepdim (bool, optional): Whether to keep reduced dimensions. Defaults to False.
 
     Returns:
-        Reduced tensor
+        trt.ITensor: Reduced tensor
     """
     if (isinstance(input_val, trt.ITensor)) and (input_val.dtype == trt.bool):
         input_val = cast_trt_tensor(ctx, input_val, trt.int32, f"{name}_cast")
@@ -125,11 +125,11 @@ class ATenSliceTensorInputs(StrictlyTyped):
     """Input parameters for aten.slice.Tensor operation.
 
     Attributes:
-        x: Input tensor
-        dim: Dimension to slice along
-        start: Starting index
-        end: Ending index
-        step: Step size
+        x (trt.ITensor): Input tensor
+        dim (int): Dimension to slice along
+        start (int | None, optional): Starting index. Defaults to None.
+        end (int | None, optional): Ending index. Defaults to None.
+        step (int, optional): Step size. Defaults to 1.
     """
 
     x: trt.ITensor
@@ -174,7 +174,7 @@ class ATenSliceTensorInputs(StrictlyTyped):
         """Validate that slicing dimension is static.
 
         Returns:
-            Self if validation passes
+            Self: Self if validation passes
 
         Raises:
             AssertionError: If slicing dimension is dynamic
@@ -205,14 +205,14 @@ def aten_ops_slice(
     """Convert PyTorch's aten.slice.Tensor operation to TensorRT.
 
     Args:
-        ctx: Conversion context
-        target: Target operation
-        args: Positional arguments
-        kwargs: Keyword arguments
-        name: Layer name
+        ctx (ConversionContext): Conversion context
+        target (Target): Target operation
+        args (tuple[Argument, ...]): Positional arguments
+        kwargs (dict[str, Argument]): Keyword arguments
+        name (str): Layer name
 
     Returns:
-        Sliced tensor
+        trt.ITensor | Sequence[trt.ITensor]: Sliced tensor
     """
     try:
         args_kwargs = dict(zip(ATenSliceTensorInputs.model_fields.keys(), args))
@@ -252,14 +252,14 @@ def aten_ops_to_copy(
     """Convert PyTorch's aten._to_copy operation to TensorRT.
 
     Args:
-        ctx: Conversion context
-        target: Target operation
-        args: Positional arguments
-        kwargs: Keyword arguments
-        name: Layer name
+        ctx (ConversionContext): Conversion context
+        target (Target): Target operation
+        args (tuple[Argument, ...]): Positional arguments
+        kwargs (dict[str, Argument]): Keyword arguments
+        name (str): Layer name
 
     Returns:
-        Copied tensor with specified dtype
+        trt.ITensor | Sequence[trt.ITensor]: Copied tensor with specified dtype
     """
     return impl.cast.to_copy(
         ctx,

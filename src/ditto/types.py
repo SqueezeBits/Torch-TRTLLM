@@ -278,13 +278,14 @@ def expect_identical(value: Any, *others: Any, expecting_type: type[ExpectedType
     """Compare multiple values for equality and optionally check their type.
 
     Args:
-        value: First value to compare
-        *others: Additional values to compare against the first value
-        expecting_type: Optional type to validate all values against. If None, no type checking is performed.
+        value (Any): First value to compare
+        *others (Any): Additional values to compare against the first value
+        expecting_type (type[ExpectedType] | None): Optional type to validate all values against.
+            If None, no type checking is performed.
 
     Returns:
-        The first value if all values are equal and match the specified type (if provided).
-        None if any values are not equal or don't match the type.
+        ExpectedType | None: The first value if all values are equal and match the specified type (if provided).
+            None if any values are not equal or don't match the type.
     """
     if expecting_type is not None and not all(verify(v, as_type=expecting_type) is not None for v in (value, *others)):
         return None

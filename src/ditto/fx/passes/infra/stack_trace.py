@@ -46,10 +46,10 @@ class StackTrace(_ParsedStackTrace):
         """Parse a stack trace string into a StackTrace object.
 
         Args:
-            stack_trace: The stack trace string to parse
+            stack_trace (str | None): The stack trace string to parse
 
         Returns:
-            A StackTrace object if parsing succeeds, None otherwise
+            StackTrace | None: A StackTrace object if parsing succeeds, None otherwise
         """
         if stack_trace is None or (_self := _parse_stack_trace(stack_trace)) is None:
             return None
@@ -69,9 +69,9 @@ def propagate_metadata_from(
     """Propagate metadata from source node(s) to target node.
 
     Args:
-        node: The primary source node
-        others: Additional source nodes
-        to: The target node to inject metadata into
+        node (Node | NodeSpecialization): The primary source node
+        others (Node | NodeSpecialization): Additional source nodes
+        to (Node | NodeSpecialization): The target node to inject metadata into
     """
     for propagator_class in PROPAGATOR_REGISTRY.values():
         propagator_class.update_metadata(node, *others, to=to)
@@ -98,10 +98,10 @@ class MetadataPropagator(StrictlyTyped, ABC, Generic[MetadataType]):
         """Register a metadata propagator for a specific key.
 
         Args:
-            key: The metadata key to register for
+            key (str): The metadata key to register for
 
         Returns:
-            A decorator that registers the propagator class
+            Callable[[type[PropagatorType]], type[PropagatorType]]: A decorator that registers the propagator class
         """
 
         def decorator(subclass: type[PropagatorType]) -> type[PropagatorType]:
@@ -144,7 +144,7 @@ class MetadataPropagator(StrictlyTyped, ABC, Generic[MetadataType]):
             to (Node | NodeSpecialization): The target node to compute metadata for
 
         Returns:
-            The computed metadata or None if no metadata is computed
+            MetadataType | None: The computed metadata or None if no metadata is computed
         """
 
 
@@ -167,7 +167,7 @@ class Forget(MetadataPropagator[None]):
             others (Node | NodeSpecialization): Additional source nodes
             to (Node | NodeSpecialization): The target node
         """
-        return None
+        return
 
 
 @MetadataPropagator.register(STACK_TRACE)

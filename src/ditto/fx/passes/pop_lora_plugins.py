@@ -37,7 +37,15 @@ from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class PopLoraPlugins(NodewiseOptimizationPass):
-    """Pass that converts LoRA subgraphs into TensorRT-LLM LoRA plugins."""
+    """Pass that converts LoRA subgraphs into TensorRT-LLM LoRA plugins.
+
+    Attributes:
+        argument_hint (TRTLLMArgumentHint): Hint for TensorRT-LLM arguments.
+        state_dicts (dict[int, dict[str, torch.Tensor]]): Combined state dictionaries for each LoRA task.
+        target_modules (dict[int, set[LoraPluginInputPrefix]]): Target modules for each LoRA task.
+        max_rank (int): Maximum rank of the LoRA prototypes.
+        ckpt_source (LoraCheckpointLiteral): Source of the checkpoint, default is "hf".
+    """
 
     argument_hint: TRTLLMArgumentHint
     state_dicts: dict[int, dict[str, torch.Tensor]] = Field(default_factory=dict)
