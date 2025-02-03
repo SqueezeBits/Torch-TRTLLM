@@ -15,7 +15,7 @@
 import json
 import operator
 from collections.abc import Iterable
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 
 import numpy as np
 import onnx
@@ -28,11 +28,23 @@ from torch.fx.node import Argument, Target
 
 from ..constants import DEBUG_TENSOR_CHUNK_SIZE
 from ..fx.utils import get_tensor_metadata
-from ..types import DataType
+from ..types import DataType, StrictlyTyped
 from .constant import make_constant
 
 
+# pylint: disable-next=too-many-locals, too-many-branches, too-many-statements
 def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
+    """Convert a PyTorch FX GraphModule to an ONNX model.
+
+    Args:
+        graph_module (GraphModule): The FX GraphModule to convert
+
+    Returns:
+        onnx.ModelProto: The converted ONNX model
+
+    Raises:
+        NotImplementedError: If an invalid FX node is encountered
+    """
     inputs: dict[str, gs.Tensor] = {}
     outputs: list[gs.Tensor] = []
     tensors: dict[str, gs.Tensor] = {}
@@ -118,7 +130,7 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
                             {
                                 f"{node.name}_first": param[:DEBUG_TENSOR_CHUNK_SIZE].tolist(),
                                 f"{node.name}_middle": param[
-                                    (numel - DEBUG_TENSOR_CHUNK_SIZE) // 2:(numel + DEBUG_TENSOR_CHUNK_SIZE) // 2
+                                    (numel - DEBUG_TENSOR_CHUNK_SIZE) // 2 : (numel + DEBUG_TENSOR_CHUNK_SIZE) // 2
                                 ].tolist(),
                                 f"{node.name}_last": param[-DEBUG_TENSOR_CHUNK_SIZE:].tolist(),
                             }
@@ -178,6 +190,14 @@ def build_onnx_from_fx(graph_module: GraphModule) -> onnx.ModelProto:
 
 
 def is_multi_output_getitem(node: Node) -> bool:
+    """Check if a node is a getitem operation with multiple outputs.
+
+    Args:
+        node (Node): The FX node to check
+
+    Returns:
+        bool: True if the node is a multi-output getitem operation, False otherwise
+    """
     return (
         node.op == "call_function"
         and node.target is operator.getitem
@@ -192,6 +212,16 @@ def get_target_name(
     target: Target,
     meta: dict[str, Any],
 ) -> str:
+    """Get the target name for a node operation.
+
+    Args:
+        op (Literal["call_function", "call_module", "call_method"]): The operation type
+        target (Target): The operation target
+        meta (dict[str, Any]): Node metadata
+
+    Returns:
+        str: The formatted target name
+    """
     match op:
         case "call_function":
             assert callable(target)
@@ -222,13 +252,25 @@ def get_target_name(
             return target
 
 
-AllowedMetaDataType = int | float | bool | str | list[str] | list[float] | list[int] | list[bool] | TensorProto
+AllowedMetaDataType: TypeAlias = (
+    int | float | bool | str | list[str] | list[float] | list[int] | list[bool] | TensorProto
+)
 
 
 def process_metadata(meta: dict[str, Any]) -> dict[str, AllowedMetaDataType]:
-    def _is_homogeneous(seq: list | tuple) -> bool:
-        return len(seq) < 2 or all(type(x) is type(seq[0]) for x in seq[1:])
+    """Process node metadata into a format suitable for ONNX export.
 
+    Args:
+        meta (dict[str, Any]): The metadata to process
+
+    Returns:
+        dict[str, AllowedMetaDataType]: The processed metadata
+    """
+
+    def _is_homogeneous(seq: list | tuple) -> bool:
+        return len(seq) < 2 or all(type(x) is type(seq[0]) for x in seq[1:])  # noqa: E721
+
+    # pylint: disable-next=too-many-return-statements
     def _impl(v: Any) -> AllowedMetaDataType:
         if isinstance(v, torch.Tensor):
             shape = (*v.shape,)
@@ -237,13 +279,19 @@ def process_metadata(meta: dict[str, Any]) -> dict[str, AllowedMetaDataType]:
         if isinstance(v, int | float | bool | str):
             return v
         if isinstance(v, dict):
-            return [f"{key}: {val}" for key, val in v.items()]
+            return [f"{key}: {_impl(val)}" for key, val in v.items()]
         if isinstance(v, list | tuple):
             if _is_homogeneous(v) and v and isinstance(v[0], int | float | bool | str):
                 return list(v)
-            return [str(x) for x in v]
+            return [f"{_impl(x)}" for x in v]
         if isinstance(v, TensorProto):
             return v
-        return str(v)
+        if isinstance(v, StrictlyTyped):
+            return _impl(v.model_dump_json())
+        return repr(v)
 
-    return {name: _impl(value) for name, value in meta.items()}
+    return {
+        name: processed_value
+        for name, value in meta.items()
+        if not isinstance(processed_value := _impl(value), list) or len(processed_value) > 0
+    }

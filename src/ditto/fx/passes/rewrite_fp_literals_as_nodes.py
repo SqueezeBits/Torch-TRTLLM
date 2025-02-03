@@ -19,7 +19,7 @@ import torch
 from torch.fx import Node
 
 from ..nodes import Binary, GetAttr
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class RewriteFloatingPointLiteralsAsNodes(NodewiseOptimizationPass):
@@ -61,7 +61,7 @@ class RewriteFloatingPointLiteralsAsNodes(NodewiseOptimizationPass):
                 kwargs=kwargs_,
                 overloadpacket=binary.target.overloadpacket,
             ):
-                inject_stack_trace_from(node, to=replacement)
+                propagate_metadata_from(node, to=replacement)
                 return {node: ReplaceAllUses(by=replacement.node)}
         graph.erase_node(constant.node)
         return {}

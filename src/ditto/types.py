@@ -12,18 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# mypy: disable-error-code="misc"
 # pylint: disable=unused-import, invalid-name
+
 from collections.abc import Callable
 from functools import cache
-from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
+from inspect import isclass
+from typing import Any, ClassVar, TypeVar, cast, overload
 
 import tensorrt as trt
 import torch
 from onnx import TensorProto
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 from torch._C import _SDPBackend as SDPBackend  # noqa: F401
 from torch.export.dynamic_shapes import _Dim as ExportDim  # noqa: F401
 from torch.fx import Node
+from typing_extensions import Unpack
+
+from .literals import DTypeLiteral
 
 BuiltInConstant = int | float | bool | None
 DeviceLikeType = str | torch.device | int
@@ -33,8 +39,31 @@ SymbolicInteger = torch.SymInt | int
 SymbolicShape = tuple[SymbolicInteger, ...]  # type: ignore[valid-type]
 ShapeArg = list[int | Node]
 
-if TYPE_CHECKING:
-    from .configs import DTypeLiteral
+T = TypeVar("T")
+
+
+def verify(value: Any, *, as_type: type[T], coerce: bool = False, **config: Unpack[ConfigDict]) -> T | None:
+    """Verify that the value is of the specified type.
+
+    Args:
+        value (Any): The value to verify
+        as_type (type[T]): The target type to verify the value against
+        coerce (bool): Whether to coerce the value to the target type. Defaults to False.
+        **config (Unpack[ConfigDict]): The configuration to use for type verification.
+            Ignored when `as_type` is a `pydantic.BaseModel` subclass.
+
+    Returns:
+        T | None: The (coerced) value if it is of the specified type, None otherwise
+    """
+    try:
+        coerced_value = (
+            as_type.model_validate(value)
+            if (isclass(as_type) and not hasattr(as_type, "__origin__") and issubclass(as_type, BaseModel))
+            else TypeAdapter(as_type, config={"arbitrary_types_allowed": True, **config}).validate_python(value)
+        )
+        return coerced_value if coerce else value
+    except ValidationError:
+        return None
 
 
 class StrictlyTyped(BaseModel):
@@ -56,9 +85,9 @@ class UnsupportedDataTypeConversionError(TypeError):
     """Error indicating unsupported data type conversion between two different frameworks."""
 
 
-FromDataType = TypeVar("FromDataType", torch.dtype, trt.DataType, int, str)
-OtherDataType = TypeVar("OtherDataType", torch.dtype, trt.DataType, int, str)
-ToDataType = TypeVar("ToDataType", torch.dtype, trt.DataType, int, str)
+FromDataType = TypeVar("FromDataType", torch.dtype, trt.DataType, int, DTypeLiteral)
+OtherDataType = TypeVar("OtherDataType", torch.dtype, trt.DataType, int, DTypeLiteral)
+ToDataType = TypeVar("ToDataType", torch.dtype, trt.DataType, int, DTypeLiteral)
 
 
 class DataType:
@@ -77,7 +106,11 @@ class DataType:
     MAPPING: ClassVar[dict[tuple[type, type], dict]] = {}
 
     def __init__(self, dtype: FromDataType) -> None:
-        self.dtype: torch.dtype | trt.DataType | int | DTypeLiteral = dtype
+        self.dtype: torch.dtype | trt.DataType | int | str = dtype
+
+    @overload
+    def to(self, data_type: type[str]) -> DTypeLiteral:
+        ...
 
     def to(self, data_type: type[ToDataType]) -> ToDataType:
         """Convert the stored data type to a specified target type.
@@ -96,10 +129,10 @@ class DataType:
         if data_type is TensorProto.DataType:  # TensorProto.DataType is not actually a type
             if isinstance(self.dtype, int):
                 return cast(TensorProto.DataType, self.dtype)
-        elif isinstance(self.dtype, data_type):
-            return self.dtype
-        actual_type: type = (
-            int if data_type is TensorProto.DataType else str if isinstance(data_type, str) else data_type
+        elif verified_dtype := verify(self.dtype, as_type=data_type):
+            return verified_dtype
+        actual_type: type[int] | type[torch.dtype] | type[trt.DataType] | type[str] = (
+            int if data_type is TensorProto.DataType else str if data_type is DTypeLiteral else data_type
         )
         assert (
             type_pair := (type(self.dtype), actual_type)
@@ -233,13 +266,13 @@ def torch_to_onnx_dtype_mapping() -> dict[torch.dtype, int]:
 
 
 @DataType.define_from
-def literal_to_torch_mapping() -> dict[str, torch.dtype]:
+def literal_to_torch_mapping() -> dict[DTypeLiteral, torch.dtype]:
     """Create `DTypeLiteral` to `torch.dtype` compatibility map.
 
-    * All strings in DTypeLiteral can be mapped to a PyTorch data type.
+    * All values in DTypeLiteral can be mapped to a PyTorch data type.
 
     Returns:
-        dict[str, torch.dtype]: the compatibility map.
+        dict[DTypeLiteral, torch.dtype]: the compatibility map.
     """
     return {
         "float16": torch.float16,
@@ -258,3 +291,35 @@ DataType.define_by_composition(trt_to_torch_dtype_mapping(), torch_to_onnx_dtype
 
 # All PyTorch data types converted from DTypeLiteral can be mapped to ONNX data types.
 DataType.define_by_composition(literal_to_torch_mapping(), torch_to_onnx_dtype_mapping())
+
+ExpectedType = TypeVar("ExpectedType")
+
+
+@overload
+def expect_identical(value: ExpectedType, *others: ExpectedType) -> ExpectedType | None:
+    ...
+
+
+@overload
+def expect_identical(value: Any, *others: Any, expecting_type: type[ExpectedType]) -> ExpectedType | None:
+    ...
+
+
+def expect_identical(value: Any, *others: Any, expecting_type: type[ExpectedType] | None = None) -> ExpectedType | None:
+    """Compare multiple values for equality and optionally check their type.
+
+    Args:
+        value (Any): First value to compare
+        *others (Any): Additional values to compare against the first value
+        expecting_type (type[ExpectedType] | None): Optional type to validate all values against.
+            If None, no type checking is performed.
+
+    Returns:
+        ExpectedType | None: The first value if all values are equal and match the specified type (if provided).
+            None if any values are not equal or don't match the type.
+    """
+    if expecting_type is not None and not all(verify(v, as_type=expecting_type) is not None for v in (value, *others)):
+        return None
+    if all(v == value for v in others):
+        return value
+    return None

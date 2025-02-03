@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, TypeVar, overload
-
 import tensorrt as trt
 import torch
 from loguru import logger
@@ -21,10 +19,9 @@ from torch.fx import GraphModule
 from typing_extensions import Self
 
 from ...debug import save_for_debug
-from ...types import DataType, StrictlyTyped, SymbolicShape
+from ...types import DataType, StrictlyTyped, SymbolicShape, expect_identical
 from ..nodes import GetAttr, Permute, Reshape, ScaledDotProductAttention, ToCopy
-from ..subgraphs import FusedLinear, TrailingReformatPath
-from ..subgraphs.linear import Linear, find_nearest_linear_projection
+from ..subgraphs import FusedLinear, Linear, TrailingReformatPath
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
 from ..utils import get_tensor_metadata
 from .infra import GraphOptimizationPass, PassResult
@@ -67,7 +64,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 )
 
             if global_plugin_inputs is None:
-                logger.debug(f"Computing RoPE constants for layer {layer_idx}")
+                logger.debug(f"Computing RoPE constants at layer {layer_idx}")
                 rotary_inv_freq, rotary_cos_sin = (
                     torch.nn.Parameter(torch.from_numpy(x)) for x in global_rope_config.compute_rope_constants()
                 )
@@ -175,12 +172,13 @@ class MHAConfig(StrictlyTyped):
         q = TrailingReformatPath.configure_from(q_rope.all_input_nodes[0]).top
         k = TrailingReformatPath.configure_from(k_rope.all_input_nodes[0]).top
         v = v_seq.top
+
         if not (
             q_rope.target in FAKE_ROPE_TARGETS.values()
             and k_rope.target in FAKE_ROPE_TARGETS.values()
-            and (q_proj := find_nearest_linear_projection(sdpa.query))
-            and (k_proj := find_nearest_linear_projection(sdpa.key))
-            and (v_proj := find_nearest_linear_projection(sdpa.value))
+            and (q_proj := Linear.find_nearest(sdpa.query))
+            and (k_proj := Linear.find_nearest(sdpa.key))
+            and (v_proj := Linear.find_nearest(sdpa.value))
             and q_proj.output_node == k_proj.output_node == v_proj.output_node
             and (fused_linear := FusedLinear.configure_from(q_proj.mm.node))
             and tuple(s.node for s in fused_linear.slices) == (q, k, v)
@@ -204,35 +202,3 @@ class MHAConfig(StrictlyTyped):
             num_kv_heads=num_kv_heads,
             output_shape=(*query.shape[:-1], value.shape[-1]),
         )
-
-
-T = TypeVar("T")
-
-
-@overload
-def expect_identical(value: T, *others: T) -> T | None:
-    ...
-
-
-@overload
-def expect_identical(value: Any, *others: Any, expecting_type: type[T]) -> T | None:
-    ...
-
-
-def expect_identical(value: Any, *others: Any, expecting_type: type[T] | None = None) -> T | None:
-    """Compare multiple values for equality and optionally check their type.
-
-    Args:
-        value: First value to compare
-        *others: Additional values to compare against the first value
-        expecting_type: Optional type to validate all values against. If None, no type checking is performed.
-
-    Returns:
-        The first value if all values are equal and match the specified type (if provided).
-        None if any values are not equal or don't match the type.
-    """
-    if expecting_type is not None and not all(isinstance(v, expecting_type) for v in (value, *others)):
-        return None
-    if all(v == value for v in others):
-        return value
-    return None

@@ -16,8 +16,8 @@ import torch
 from loguru import logger
 from typing_extensions import Self
 
+from ...literals import PluginFlag
 from ...types import StrictlyTyped
-from .literals import PluginFlag
 
 
 class TRTLLMPluginConfig(StrictlyTyped):

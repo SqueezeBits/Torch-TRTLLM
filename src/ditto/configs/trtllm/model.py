@@ -14,14 +14,24 @@
 
 from pydantic import Field
 
+from ...literals import DTypeLiteral, KVCacheTypeLiteral
 from ...types import StrictlyTyped
-from .literals import DTypeLiteral, KVCacheTypeLiteral
 from .lora import TRTLLMLoraConfig
 from .plugin import TRTLLMPluginConfig
 
 
 class TRTLLMModelConfig(StrictlyTyped):
-    """A subset of properties in `trtllm.BuildConfig` related to model configuration required at runtime."""
+    """A subset of properties in `trtllm.BuildConfig` related to model configuration required at runtime.
+
+    Attributes:
+        max_prompt_embedding_table_size (int): Maximum size of the prompt embedding table.
+        kv_cache_type (KVCacheTypeLiteral): Type of KV cache to use ('PAGED', 'CONTIGUOUS' or 'DISABLED').
+        logits_dtype (DTypeLiteral): Data type for logits.
+        gather_context_logits (bool): Whether to gather context logits.
+        gather_generation_logits (bool): Whether to gather generation logits.
+        lora_config (TRTLLMLoraConfig): Configuration for LoRA adapters.
+        plugin_config (TRTLLMPluginConfig): Configuration for TRT-LLM plugins.
+    """
 
     max_prompt_embedding_table_size: int = 0
     kv_cache_type: KVCacheTypeLiteral = "PAGED"

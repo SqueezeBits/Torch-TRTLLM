@@ -48,7 +48,7 @@ from .infra import (
     PassResult,
     ReplaceAllUses,
     ReplaceAmongInputs,
-    inject_stack_trace_from,
+    propagate_metadata_from,
 )
 
 
@@ -59,6 +59,7 @@ class DeferUnsqueeze(GraphOptimizationPass):
 
     @cached_property
     def pass_manager(self) -> PassManager:
+        """The pass manager for subpasses."""
         return PassManager(
             passes=[
                 SwapUnsqueezeWithEmbedding(depth=self.depth + 1),
@@ -72,6 +73,14 @@ class DeferUnsqueeze(GraphOptimizationPass):
         )
 
     def call(self, graph_module: GraphModule) -> PassResult:
+        """Call the pass manager on the given graph module.
+
+        Args:
+            graph_module (GraphModule): The graph module to process.
+
+        Returns:
+            PassResult: The result of the pass.
+        """
         return self.pass_manager(graph_module)
 
 
@@ -79,7 +88,15 @@ SomeATenOp = TypeVar("SomeATenOp", bound=ATenOp)
 
 
 class EarlyExit(Exception):  # noqa: N818
+    """Exception to handle early exit with pass results."""
+
     def __init__(self, pass_results: dict[Node, NodewisePassResult], *args: object) -> None:
+        """Initialize the EarlyExit exception.
+
+        Args:
+            pass_results (dict[Node, NodewisePassResult]): The pass results to return.
+            *args (object): Additional arguments.
+        """
         super().__init__(*args)
         self.replacements = pass_results
 
@@ -92,12 +109,21 @@ with warnings.catch_warnings():
 
         @classmethod
         def parent_keys(cls) -> tuple[str, ...]:
+            """Return the parent keys."""
             return ("this",)
 
         @classmethod
         def verify_child(cls, node: Node) -> SomeATenOp | None:
+            """Verify if the given node is a valid child.
+
+            Args:
+                node (Node): The node to verify.
+
+            Returns:
+                SomeATenOp | None: The specialized child node if valid, otherwise None.
+            """
             # pylint: disable-next=no-member
-            type_arg = get_args(cls.__orig_bases__[0])[0]  # type: ignore[attr-defined]  # noqa: N806
+            type_arg = get_args(cls.__orig_bases__[0])[0]  # noqa: N806
             if isinstance(type_arg, UnionType):
                 type_args = get_args(type_arg)
             else:
@@ -107,11 +133,19 @@ with warnings.catch_warnings():
                     type_arg, NodeSpecialization
                 ), f"Wrong specialization of {cls.__name__} with type parameter {type_arg}"
                 if n := type_arg.specialize_from(node):
-                    return n  # type: ignore[return-value]
+                    return n
             return None
 
         @classmethod
         def verify_parents(cls, child: SomeATenOp) -> dict[str, Unsqueeze]:
+            """Verify the parents of the given child node.
+
+            Args:
+                child (SomeATenOp): The child node to verify.
+
+            Returns:
+                dict[str, Unsqueeze]: A dictionary of valid parent unsqueeze nodes.
+            """
             parents: dict[str, Unsqueeze] = {}
             for input_name in cls.parent_keys():
                 assert hasattr(child, input_name), (
@@ -136,17 +170,16 @@ with warnings.catch_warnings():
             """Get the hotfix for the new child node and the unsqueeze dimension for the new unsqueeze node.
 
             Args:
-                parents (dict[str, UnsqueezeArguments]): the parent unsqueezes
-                child (ATenOpArgumentsType): the child node of the unsqueezes
+                parents (dict[str, Unsqueeze]): The parent unsqueezes.
+                child (SomeATenOp): The child node of the unsqueezes.
 
             Raises:
-                EarlyExit:
-                    i) when no parents are available
-                    ii) when there are more than one parents with different `dim` or output dimension size
+                EarlyExit: When no parents are available or when there are more than one parents with different `dim`
+                    or output dimension size.
 
             Returns:
-                tuple[dict[str, Any], int]: the hotfix for the new child node and the unsqueeze dimension for the new
-                    unsqueeze node
+                tuple[dict[str, Any], int]: The hotfix for the new child node and the unsqueeze dimension for the new
+                    unsqueeze node.
             """
             if not parents:
                 raise EarlyExit({})
@@ -155,6 +188,14 @@ with warnings.catch_warnings():
             return hotfix, first_unsqueeze.dim
 
         def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+            """Rewrite the given node.
+
+            Args:
+                node (Node): The node to rewrite.
+
+            Returns:
+                dict[Node, NodewisePassResult]: The result of the rewrite.
+            """
             if not ((child := self.verify_child(node)) and (unsqueezes := self.verify_parents(child))):
                 return {}
 
@@ -166,7 +207,7 @@ with warnings.catch_warnings():
             graph = node.graph
             with graph.inserting_before(child.node):
                 new_child = graph.call_function(child.target, *child.args_kwargs(**hotfix))
-                inject_stack_trace_from(child, to=new_child)
+                propagate_metadata_from(child, to=new_child)
                 new_unsqueeze = Unsqueeze.create(graph, new_child, unsqueeze_dim)
             return {child.node: ReplaceAllUses(by=new_unsqueeze.node)}
 
@@ -175,6 +216,7 @@ with warnings.catch_warnings():
 
         @classmethod
         def parent_keys(cls) -> tuple[str, ...]:
+            """Return the parent keys."""
             return ("indices",)
 
     class SwapUnsqueezeWithIndexSelectOrSlice(SwapUnsqueezeWith[IndexSelect | Slice]):
@@ -206,17 +248,16 @@ with warnings.catch_warnings():
             ```
 
             Args:
-                parents (dict[str, UnsqueezeArguments]): the parent unsqueezes
-                child (IndexSelectNode | Slice): the child node of the unsqueezes
+                parents (dict[str, Unsqueeze]): The parent unsqueezes.
+                child (IndexSelect | Slice): The child node of the unsqueezes.
 
             Raises:
-                EarlyExit:
-                    i) when no tensor metadata found in one of child or the first parent
-                    ii) when unsqueeze dimension is the same as the index_select dimension
+                EarlyExit: When no tensor metadata found in one of child or the first parent, or when unsqueeze
+                    dimension is the same as the index_select dimension.
 
             Returns:
-                tuple[dict[str, Any], int]: the hotfix for the new child node and the unsqueeze dimension for the new
-                    unsqueeze node
+                tuple[dict[str, Any], int]: The hotfix for the new child node and the unsqueeze dimension for the new
+                    unsqueeze node.
             """
             hotfix, _ = super().get_hotfix_and_unsqueeze_dim(parents, child)
             first_unsqueeze = [*parents.values()][0]
@@ -262,17 +303,16 @@ with warnings.catch_warnings():
             ```
 
             Args:
-                parents (dict[str, UnsqueezeArguments]): the parent unsqueezes
-                child (ReductionIntListArguments): the child node of the unsqueezes
+                parents (dict[str, Unsqueeze]): The parent unsqueezes.
+                child (Reduction): The child node of the unsqueezes.
 
             Raises:
-                EarlyExit:
-                    i) when no tensor metadata found in one of child or the first parent
-                    ii) when unsqueeze dimension is the same as the reduction dimension
+                EarlyExit: When no tensor metadata found in one of child or the first parent, or when unsqueeze
+                    dimension is the same as the reduction dimension.
 
             Returns:
-                tuple[dict[str, Any], int]: the hotfix for the new child node and the unsqueeze dimension for the new
-                    unsqueeze node
+                tuple[dict[str, Any], int]: The hotfix for the new child node and the unsqueeze dimension for the new
+                    unsqueeze node.
             """
             hotfix, _ = super().get_hotfix_and_unsqueeze_dim(parents, child)
             first_unsqueeze = [*parents.values()][0]
@@ -298,10 +338,19 @@ with warnings.catch_warnings():
 
         @classmethod
         def parent_keys(cls) -> tuple[str, ...]:
+            """Return the parent keys."""
             return ("this", "other")
 
         @classmethod
         def verify_parents(cls, child: BinaryElementwise) -> dict[str, Unsqueeze]:
+            """Verify the parents of the given binary elementwise child node.
+
+            Args:
+                child (BinaryElementwise): The child node to verify.
+
+            Returns:
+                dict[str, Unsqueeze]: A dictionary of valid parent unsqueeze nodes.
+            """
             unsqueezes = super().verify_parents(child)
             # for a binary elementwise child, the pass should run only if the inputs must be one of the form:
             # i) (unsqueeze, unsqueeze_1)
@@ -352,6 +401,19 @@ with warnings.catch_warnings():
             parents: dict[str, Unsqueeze],
             child: SymSizeInt,
         ) -> tuple[dict[str, Any], int]:
+            """Further handle axes while swapping an unsqueeze and a sym_size.int node.
+
+            Args:
+                parents (dict[str, Unsqueeze]): The parent unsqueezes.
+                child (SymSizeInt): The child node of the unsqueezes.
+
+            Raises:
+                EarlyExit: When unsqueeze dimension is the same as the sym_size.int dimension.
+
+            Returns:
+                tuple[dict[str, Any], int]: The hotfix for the new child node and the unsqueeze dimension for the new
+                    unsqueeze node.
+            """
             first_unsqueeze = [*parents.values()][0]
             if (
                 (child_dim := child.nonnegative_dim) is None
@@ -370,5 +432,14 @@ with warnings.catch_warnings():
 
 
 def get_squeezed_shape(shape: torch.Size, dim: int) -> torch.Size:
+    """Return the squeezed shape by removing the specified dimension.
+
+    Args:
+        shape (torch.Size): The original shape.
+        dim (int): The dimension to remove.
+
+    Returns:
+        torch.Size: The squeezed shape.
+    """
     assert 0 <= dim < len(shape)
     return torch.Size((*shape[:dim], *shape[dim + 1 :]))

@@ -13,11 +13,13 @@
 # limitations under the License.
 
 from .add_trtllm_inputs import AddTRTLLMInputs
+from .bind_unmatched_lora_protos import BindUnmatchedLoraProtos
 from .canonicalize_copy import CanonicalizeCopy
 from .cast_mm_to_fp32 import CastMMToFP32
 from .cast_output_logits import CastOutputLogits
 from .constant_folding import ConstantFolding
 from .decompose_addmm import DecomposeAddMM
+from .defer_cast import DeferCast
 from .defer_unsqueeze import DeferUnsqueeze
 from .eliminate_nop_cat_or_stack import EliminateNopCatOrStack
 from .eliminate_nop_permute import EliminateNopPermute
@@ -34,11 +36,14 @@ from .fuse_consecutive_slice_concat import FuseConsecutiveSliceConcat
 from .fuse_consecutive_split_concat import FuseConsecutiveSplitConcat
 from .fuse_consecutive_to_copys import FuseConsecutiveToCopys
 from .fuse_equivalent_nodes import FuseEquivalentNodes
+from .fuse_gated_mlp_projections import FuseGatedMLPProjections
 from .fuse_qkv_projections import FuseQKVProjections
 from .fuse_reciprocal_mul import FuseReciprocalMul
 from .herd_constants_to_the_right import HerdConstantsToTheRight
+from .index_layers import IndexLayers
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
 from .parallelize_linear import ParallelizeLinear
+from .pop_lora_plugins import PopLoraPlugins
 from .propagate_tensor_parallelism import PropagateTensorParallelism
 from .replace_mm_by_fake_gemm_plugin import ReplaceMMByFakeGemmPlugin
 from .replace_sdpa_by_fake_gpt_attention_plugin import ReplaceSDPAByFakeGPTAttentionPlugin
@@ -48,5 +53,7 @@ from .rewrite_fp_literals_as_nodes import RewriteFloatingPointLiteralsAsNodes
 from .rewrite_index_as_single_slice import RewriteIndexAsSingleSlice
 from .rewrite_pow_as_mul import RewritePowAsMul
 from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
+from .rewrite_split_as_slices import RewriteSplitAsSlices
+from .stash_lora_subgraphs import StashLoraSubgraphs
 from .wrap_rope_subgraphs import WrapRoPESubgraphs
 from .wrap_sdpa_subgraphs import WrapSDPASubgraphs

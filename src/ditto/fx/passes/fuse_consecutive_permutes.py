@@ -15,7 +15,7 @@
 from torch.fx import Node
 
 from ..nodes import Permute
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class FuseConsecutivePermutes(NodewiseOptimizationPass):
@@ -41,6 +41,6 @@ class FuseConsecutivePermutes(NodewiseOptimizationPass):
             dims = [permute.dims[child_permute.dims[i]] for i in range(permute.ndim)]
             with graph.inserting_after(child_node := child_permute.node):
                 fused_permute = Permute.create(graph, permute.this, dims)
-                inject_stack_trace_from(child_permute, permute, to=fused_permute)
+                propagate_metadata_from(child_permute, permute, to=fused_permute)
             results[child_node] = ReplaceAllUses(by=fused_permute.node)
         return results

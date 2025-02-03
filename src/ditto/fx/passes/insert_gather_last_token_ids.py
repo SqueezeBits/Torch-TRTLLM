@@ -17,7 +17,7 @@ from torch.fx import Graph, GraphModule, Node
 
 from ...constants import INPUT_IDS_UNSQUEEZE_DIM
 from ..nodes import IndexSelect, SubScalar, SymSizeInt
-from ..subgraphs.linear import find_last_linear
+from ..subgraphs.linear import Linear
 from ..utils import forget_all_descendant_fake_tensors
 from .infra import GraphOptimizationPass, PassResult
 
@@ -32,7 +32,7 @@ class InsertGatherLastTokenIds(GraphOptimizationPass):
             (last_token_ids := placeholders.get("last_token_ids"))
             and (num_tokens_node := find_or_create_placeholder_sym_size(graph, "input_ids"))
             and (batch_size_node := find_or_create_placeholder_sym_size(graph, "last_token_ids"))
-            and (lm_head := find_last_linear(graph))
+            and (lm_head := Linear.find_last(graph))
         ):
             return PassResult(graph_module=graph_module, modified=False)
 

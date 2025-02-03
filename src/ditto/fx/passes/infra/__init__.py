@@ -23,4 +23,4 @@ from .node_wise_pass import (
 )
 from .pass_manager import PassManager
 from .pass_result import PassResult
-from .stack_trace import inject_stack_trace_from
+from .stack_trace import propagate_metadata_from

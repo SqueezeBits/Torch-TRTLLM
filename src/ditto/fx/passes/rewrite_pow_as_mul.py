@@ -15,7 +15,7 @@
 from torch.fx import Node
 
 from ..nodes import MulTensor, PowTensorScalar
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class RewritePowAsMul(NodewiseOptimizationPass):
@@ -30,7 +30,7 @@ class RewritePowAsMul(NodewiseOptimizationPass):
 
             with graph.inserting_before(node):
                 equivalent_mul = MulTensor.create(graph, power.this, power.this)
-                inject_stack_trace_from(node, to=equivalent_mul.node)
+                propagate_metadata_from(node, to=equivalent_mul.node)
 
             return {node: ReplaceAllUses(by=equivalent_mul.node)}
         return {}

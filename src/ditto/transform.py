@@ -25,12 +25,12 @@ from torch_tensorrt.dynamo.lowering.passes import (
 
 from .arguments import TRTLLMArgumentHint
 from .configs import TRTLLMMapping, TRTLLMModelConfig
-from .constants import PassName
 from .contexts import ignore_symbolic_shapes_warning
 from .debug import save_for_debug
 from .fx import (
     ForgetSubmodules,
     ParallelizeLinear,
+    Plugin,
     PropagateTensorParallelism,
     ResetCodeGen,
     fake_tensor_prop_on_node_creation,
@@ -38,7 +38,7 @@ from .fx import (
     get_optimization_transform,
     update_argument_hint,
 )
-from .fx.targets import Plugin
+from .literals import PassName
 
 
 # pylint: disable=duplicate-code
@@ -121,23 +121,24 @@ def parallelize(
         Generator[tuple[int, GraphModule], None, None]:
             A generator that yields the parallelized graph module for each rank
     """
-    if mapping.world_size > 1:
-        logger.info("Parallelizing the graph module")
-        save_for_debug("graph_module_before_parallelization", graph_module)
-        for rank in range(mapping.world_size):
-            logger.debug(f"Running parallelize passes for rank {rank}")
-            copied_graph_module = copy_graph_module(graph_module)
-            mapping_with_rank = mapping.copy_with_rank(rank)
-            parallelize_pass_manager = DynamoPassManager.build_from_passlist(
-                [
-                    PropagateTensorParallelism(mapping=mapping_with_rank).as_transform(),
-                    ParallelizeLinear(mapping=mapping_with_rank).as_transform(),
-                ]
-            )
-            with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
-                yield rank, parallelize_pass_manager(copied_graph_module)
-    else:
+    if mapping.world_size == 1:
         yield 0, graph_module
+        return
+
+    logger.info("Parallelizing the graph module")
+    save_for_debug("graph_module_before_parallelization", graph_module)
+    for rank in range(mapping.world_size):
+        logger.debug(f"Running parallelize passes for rank {rank}")
+        copied_graph_module = copy_graph_module(graph_module)
+        mapping_with_rank = mapping.copy_with_rank(rank)
+        parallelize_pass_manager = DynamoPassManager.build_from_passlist(
+            [
+                PropagateTensorParallelism(mapping=mapping_with_rank).as_transform(),
+                ParallelizeLinear(mapping=mapping_with_rank).as_transform(),
+            ]
+        )
+        with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
+            yield rank, parallelize_pass_manager(copied_graph_module)
 
 
 def copy_graph_module(graph_module: GraphModule) -> GraphModule:

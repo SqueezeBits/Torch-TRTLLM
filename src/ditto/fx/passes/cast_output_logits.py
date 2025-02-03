@@ -14,7 +14,7 @@
 import torch
 from torch.fx import GraphModule
 
-from ...configs.trtllm.literals import DTypeLiteral
+from ...literals import DTypeLiteral
 from ...types import DataType
 from ..nodes import ToCopy
 from ..utils import find_output_node, get_tensor_metadata

@@ -80,7 +80,7 @@ from .reformatting import (
 )
 from .slice import Slice
 from .softmax import SafeSoftmax, Softmax, SoftmaxDefault
-from .split import Split
+from .split import Split, SplitDefault, SplitSizes, SplitTensor
 from .sym_size import SymSizeInt
 from .unary import Unary
 from .unary_elementwise import (

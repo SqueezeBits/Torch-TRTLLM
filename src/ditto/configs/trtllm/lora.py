@@ -14,13 +14,26 @@
 
 from pydantic import Field
 
+from ...literals import LoraCheckpointLiteral, LoraPluginInputPrefix
 from ...types import StrictlyTyped
-from .literals import LoraCheckpointLiteral
 
 
 class TRTLLMLoraConfig(StrictlyTyped):
+    """LoRA config for TRT-LLM.
+
+    Attributes:
+        lora_dir (list[str]): Directories with LoRA checkpoints. Defaults to an empty list.
+        lora_ckpt_source (LoraCheckpointLiteral): Source format ('hf' for HuggingFace, 'nemo' for Nemo).
+            Defaults to 'hf'.
+        max_lora_rank (int): Max rank for LoRA adapters. Defaults to 64.
+        lora_target_modules (list[LoraPluginInputPrefix]): Module prefixes for LoRA application.
+            Defaults to an empty list.
+        trtllm_modules_to_hf_modules (dict[LoraPluginInputPrefix, str]): Map from TRT-LLM prefixes to HF names.
+            Defaults to an empty dictionary.
+    """
+
     lora_dir: list[str] = Field(default_factory=list)
     lora_ckpt_source: LoraCheckpointLiteral = "hf"
     max_lora_rank: int = 64
-    lora_target_modules: list[str] = Field(default_factory=list)
-    trtllm_modules_to_hf_modules: dict[str, str] = Field(default_factory=dict)
+    lora_target_modules: list[LoraPluginInputPrefix] = Field(default_factory=list)
+    trtllm_modules_to_hf_modules: dict[LoraPluginInputPrefix, str] = Field(default_factory=dict)

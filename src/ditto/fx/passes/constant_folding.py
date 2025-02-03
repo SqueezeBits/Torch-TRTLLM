@@ -21,13 +21,15 @@ from loguru import logger
 from torch.fx import GraphModule, Node
 
 from ..nodes import ATenOp, GetAttr
-from .infra import GraphOptimizationPass, PassResult, inject_stack_trace_from
+from .infra import GraphOptimizationPass, PassResult, propagate_metadata_from
 from .infra.cleanup import cleanup
 
 
 # TODO: fix memory leak from constant folding
 class ConstantFolding(GraphOptimizationPass):
-    @torch.inference_mode()
+    """Fold constant nodes in the graph."""
+
+    @torch.inference_mode()  # type: ignore[misc]
     def call(self, graph_module: GraphModule) -> PassResult:
         graph = graph_module.graph
         foldable_nodes: dict[Node, torch.Tensor] = {}
@@ -75,7 +77,7 @@ class ConstantFolding(GraphOptimizationPass):
             name = get_qualname()
             with graph.inserting_after(node):
                 get_attr = GetAttr.create(graph, name, foldable_nodes.pop(node))
-                inject_stack_trace_from(node, to=get_attr)
+                propagate_metadata_from(node, to=get_attr)
                 node.replace_all_uses_with(get_attr.node)
                 graph.erase_node(node)
 
@@ -89,6 +91,16 @@ class ConstantFolding(GraphOptimizationPass):
 
 
 def remove_unused_constants(graph_module: GraphModule) -> GraphModule:
+    """Remove unused constants from the graph module.
+
+    Note that this function modifies graph module in-place.
+
+    Args:
+        graph_module (GraphModule): The graph module to process
+
+    Returns:
+        GraphModule: The graph module given as input
+    """
     referenced_attr_names = {
         target for node in graph_module.graph.nodes if node.op == "get_attr" and isinstance(target := node.target, str)
     }

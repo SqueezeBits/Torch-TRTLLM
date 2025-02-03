@@ -1,24 +1,72 @@
 #!/usr/bin/env python
 
+import argparse
 import os
+import sys
 
 from huggingface_hub import snapshot_download
-from typer import Typer
+from transformers import AutoModelForCausalLM
+from transformers.file_utils import default_cache_path
 
-app = Typer()
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments.
+
+    Returns:
+        argparse.Namespace: Parsed arguments containing the model ID.
+    """
+    parser = argparse.ArgumentParser(description="Get snapshot directory for Hugging Face model")
+    parser.add_argument("model_id", help="Hugging Face model ID (e.g. meta-llama/Llama-2-7b-chat-hf)")
+    return parser.parse_args()
 
 
-@app.command()
-def main(repo_ids: list[str], output_dir: str = "") -> None:
-    """Download model snapshots from the HuggingFace Hub."""
-    if not output_dir:
-        output_dir = "downloads"
-    for repo_id in repo_ids:
-        repo_output_dir = os.path.join(output_dir, repo_id)
-        os.makedirs(repo_output_dir, exist_ok=True)
-        result = snapshot_download(repo_id=repo_id, local_dir=repo_output_dir)
-        print(f"Downloaded {repo_id} at {result}")
+def get_snapshot_dir(model_id: str) -> str:
+    """Get the directory of the snapshot for a given Hugging Face model ID.
+
+    Args:
+        model_id (str): The Hugging Face model ID.
+
+    Returns:
+        str: The path to the snapshot directory.
+    """
+    if os.path.isdir(model_id):
+        return model_id
+
+    org, model = model_id.split("/")
+    snapshot_dir = f"{default_cache_path}/models--{org}--{model}/snapshots"
+    if not (os.path.isdir(snapshot_dir) and (hashes := get_hashes(snapshot_dir))):
+        try:
+            _ = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True)
+            hashes = get_hashes(snapshot_dir)
+        except Exception as e:
+            print(f"Failed to download {model_id} due to {e}", file=sys.stderr)
+            print(f"Falling back to snapshot download for {model_id} ...", file=sys.stderr)
+            return snapshot_download(repo_id=model_id)
+
+    if not hashes:
+        raise ValueError(f"No hashes found in snapshot directory {snapshot_dir} for {model_id}")
+
+    chosen_hash = sorted(hashes, key=lambda h: os.path.getmtime(os.path.join(snapshot_dir, h)), reverse=True)[0]
+    return f"{snapshot_dir}/{chosen_hash}"
+
+
+def main() -> None:
+    """Execute the main job."""
+    args = parse_args()
+    print(get_snapshot_dir(args.model_id), end="")
+
+
+def get_hashes(snapshot_dir: str) -> list[str]:
+    """Get a list of hash directories in the snapshot directory.
+
+    Args:
+        snapshot_dir (str): The path to the snapshot directory.
+
+    Returns:
+        list[str]: A list of hash directories.
+    """
+    return [entry for entry in os.listdir(snapshot_dir) if os.path.isdir(os.path.join(snapshot_dir, entry))]
 
 
 if __name__ == "__main__":
-    app()
+    main()

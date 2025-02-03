@@ -25,7 +25,7 @@ from torch_tensorrt.dynamo.conversion._ConverterRegistry import dynamo_tensorrt_
 from torch_tensorrt.dynamo.conversion.converter_utils import get_trt_tensor
 
 from ..debug import enable_plugin_debug_info_hook
-from ..fx.targets import AllGatherPlugin, AllReducePlugin, GemmPlugin, GPTAttentionPlugin, Plugin
+from ..fx.targets import AllGatherPlugin, AllReducePlugin, GemmPlugin, GPTAttentionPlugin, LoraPlugin, Plugin
 
 
 @dynamo_tensorrt_converter(
@@ -154,6 +154,34 @@ def convert_gpt_attention_plugin(
     )
 
 
+@dynamo_tensorrt_converter(
+    LoraPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_lora_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a LoraPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The LoraPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, LoraPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="lora")
+
+
 def _convert_plugin(
     ctx: ConversionContext,
     target: Plugin,
@@ -194,6 +222,8 @@ def _convert_plugin(
         if isinstance(x, trt.ITensor | np.ndarray)
     ]
 
-    layer = ctx.net.add_plugin_v2(plugin_inputs, plugin)
+    layer: trt.IPluginV2Layer = ctx.net.add_plugin_v2(plugin_inputs, plugin)
     layer.name = name
-    return layer.get_output(0)
+    if layer.num_outputs == 1:
+        return layer.get_output(0)
+    return [layer.get_output(i) for i in range(layer.num_outputs)]

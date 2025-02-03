@@ -15,7 +15,7 @@
 from torch.fx import Node
 
 from ..nodes.aten import BinaryElementwise
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class FixBinaryElementwiseOpOverloads(NodewiseOptimizationPass):
@@ -41,5 +41,5 @@ class FixBinaryElementwiseOpOverloads(NodewiseOptimizationPass):
                 )
             ):
                 return {}
-        inject_stack_trace_from(node, to=replacement)
+        propagate_metadata_from(node, to=replacement)
         return {node: ReplaceAllUses(by=replacement.node)}

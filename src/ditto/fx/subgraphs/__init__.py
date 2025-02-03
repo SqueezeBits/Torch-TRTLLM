@@ -14,7 +14,9 @@
 
 from .activations import ActivationSubgraph, Silu
 from .fused_linear import FusedLinear
+from .gated_mlp import GatedMLP
 from .linear import Linear
+from .lora import Lora, LoraProto, MultiLora
 from .path import TrailingReformatPath
 from .rope import RoPESubgraph
 from .sdpa import ScaledDotProductAttentionSubgraph

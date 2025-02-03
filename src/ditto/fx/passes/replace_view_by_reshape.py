@@ -15,7 +15,7 @@
 from torch.fx import Node
 
 from ..nodes import Reshape, View
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, inject_stack_trace_from
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
 class ReplaceViewByReshape(NodewiseOptimizationPass):
@@ -26,5 +26,5 @@ class ReplaceViewByReshape(NodewiseOptimizationPass):
             return {}
         with (graph := node.graph).inserting_after(node):
             reshape = Reshape.create(graph, view.this, view.size)
-            inject_stack_trace_from(view, to=reshape)
+            propagate_metadata_from(view, to=reshape)
         return {view.node: ReplaceAllUses(by=reshape.node)}

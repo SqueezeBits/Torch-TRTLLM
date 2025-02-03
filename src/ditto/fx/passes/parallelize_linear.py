@@ -14,19 +14,20 @@
 
 import tensorrt as trt
 import torch
+from pydantic import Field
 from tensorrt_llm.functional import AllReduceConfig, AllReduceFusionOp, AllReduceStrategy
 from torch.fx import Graph, GraphModule, Node
 
-from ...configs.trtllm.pretrained import TRTLLMMapping
+from ...configs import TRTLLMMapping
 from ...types import DataType
 from ..nodes import GetAttr, Permute, Reshape
-from ..subgraphs.linear import Linear, find_last_linear
+from ..subgraphs import Linear
 from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs, GPTAttentionPlugin
 from ..utils import forget_all_descendant_fake_tensors, get_val
 from .infra import (
     GraphOptimizationPass,
     PassResult,
-    inject_stack_trace_from,
+    propagate_metadata_from,
 )
 from .propagate_tensor_parallelism import TensorParallelType
 
@@ -42,28 +43,23 @@ class ParallelizeLinear(GraphOptimizationPass):
         mapping (TRTLLMMapping): The mapping of the model
     """
 
-    mapping: TRTLLMMapping
+    mapping: TRTLLMMapping = Field(frozen=True)
 
     def call(self, graph_module: GraphModule) -> PassResult:
         first_node_rewritten: Node | None = None
         overall_modified = False
-        for node in graph_module.graph.nodes:
-            if not (
-                (linear := Linear.configure_from(node)) and (weight := GetAttr.specialize_from(linear.weight_node))
-            ):
+        graph = graph_module.graph
+        lm_head = Linear.find_last(graph)
+        for node in graph.nodes:
+            if not (linear := Linear.configure_from(node)):
                 continue
 
             tp_type = node.meta.get("tp_type", TensorParallelType.NONE)
-            in_features = weight.tensor.shape[1 if linear.has_transposed_weight else 0]
-            out_features = weight.tensor.shape[0 if linear.has_transposed_weight else 1]
             if tp_type == TensorParallelType.COLUMN:
                 gpt_attn_plugin = get_gpt_plugin(linear)
                 self.parallelize_column_linear(
-                    graph_module.graph,
                     linear,
-                    in_features,
-                    out_features,
-                    gather_output=is_lm_head(linear, graph_module.graph),
+                    gather_output=linear == lm_head,
                     is_qkv=gpt_attn_plugin is not None,
                     q_dim=-1
                     if gpt_attn_plugin is None
@@ -73,19 +69,15 @@ class ParallelizeLinear(GraphOptimizationPass):
                     else self.mapping.tp_size * gpt_attn_plugin.num_kv_heads * gpt_attn_plugin.head_size,
                 )
             elif tp_type == TensorParallelType.ROW:
-                self.parallelize_row_linear(
-                    graph_module.graph,
-                    linear,
-                    in_features,
-                    out_features,
-                )
+                self.parallelize_row_linear(linear)
 
             if first_node_rewritten is None:
                 first_node_rewritten = node
 
             overall_modified = True
 
-        forget_all_descendant_fake_tensors(first_node_rewritten)
+        if first_node_rewritten is not None:
+            forget_all_descendant_fake_tensors(first_node_rewritten)
 
         return PassResult(graph_module=graph_module, modified=overall_modified, require_fake_tensor_prop=True)
 
@@ -103,10 +95,7 @@ class ParallelizeLinear(GraphOptimizationPass):
     # pylint: disable-next=too-many-locals,too-many-statements
     def parallelize_column_linear(
         self,
-        graph: Graph,
         linear: Linear,
-        in_features: int,
-        out_features: int,
         *,
         gather_output: bool = True,
         is_qkv: bool = False,
@@ -116,22 +105,20 @@ class ParallelizeLinear(GraphOptimizationPass):
         """Parallelize the linear subgraph in column direction.
 
         Args:
-            graph (Graph): The graph to insert the parallelized linear subgraph into
             linear (Linear): The linear subgraph to be parallelized
-            in_features (int): The input feature size
-            out_features (int): The output feature size
             gather_output (bool, optional): Whether to gather the output. Defaults to True.
             is_qkv (bool, optional): Whether the linear subgraph is a QKV linear. Defaults to False.
             q_dim (int, optional): The dimension of the query. Defaults to -1.
             kv_dim (int, optional): The dimension of the key/value. Defaults to -1.
         """
-        weight = GetAttr.specialize_from(linear.weight_node)
-        local_out_features = out_features // self.mapping.tp_size
+        if not (weight := GetAttr.specialize_from(linear.weight_node)):
+            return
+        local_out_features = linear.out_features // self.mapping.tp_size
         if is_qkv:
             # qkv weight is already merged, so it needs to be split
-            assert q_dim % self.mapping.tp_size == 0 and kv_dim % self.mapping.tp_size == 0, (
-                "q_dim and kv_dim must be divisible by tp_size"
-            )
+            assert (
+                q_dim % self.mapping.tp_size == 0 and kv_dim % self.mapping.tp_size == 0
+            ), "q_dim and kv_dim must be divisible by tp_size"
             q_slice_size = q_dim // self.mapping.tp_size
             kv_slice_size = kv_dim // self.mapping.tp_size
             if linear.has_transposed_weight:
@@ -169,21 +156,33 @@ class ParallelizeLinear(GraphOptimizationPass):
                     :, slice_size * self.mapping.tp_rank : slice_size * (self.mapping.tp_rank + 1)
                 ]
 
-        assert parallelized_weight_tensor.ndim == 2 and tuple(parallelized_weight_tensor.shape) == (
-            local_out_features if linear.has_transposed_weight else in_features,
-            in_features if linear.has_transposed_weight else local_out_features,
+        assert (
+            parallelized_weight_tensor.shape
+            == (
+                local_out_features,
+                linear.in_features,
+            )
+            if linear.has_transposed_weight
+            else (
+                linear.in_features,
+                local_out_features,
+            )
         ), "unexpected shape of parallelized weight"
 
+        graph = weight.node.graph
         with graph.inserting_before(weight.node):
             parallelized_weight = GetAttr.create(
                 graph, self.get_name_of_attr(weight.target), parallelized_weight_tensor
             )
-            inject_stack_trace_from(weight, to=parallelized_weight)
+            propagate_metadata_from(weight, to=parallelized_weight)
         weight.node.replace_all_uses_with(parallelized_weight.node)
         linear.mm.other = parallelized_weight.node
 
-        if linear.bias_node is not None:
-            bias = GetAttr.specialize_from(linear.bias_node)
+        if (
+            linear.bias_node is not None
+            and linear.add is not None
+            and (bias := GetAttr.specialize_from(linear.bias_node))
+        ):
             if is_qkv:
                 q_bias = bias.tensor[:q_dim]
                 q_bias_slices = [q_bias[q_slice_size * i : q_slice_size * (i + 1)] for i in range(self.mapping.tp_size)]
@@ -211,7 +210,7 @@ class ParallelizeLinear(GraphOptimizationPass):
 
             with graph.inserting_before(bias.node):
                 parallelized_bias = GetAttr.create(graph, self.get_name_of_attr(bias.target), parallelized_bias_tensor)
-                inject_stack_trace_from(bias, to=parallelized_bias)
+                propagate_metadata_from(bias, to=parallelized_bias)
             bias.node.replace_all_uses_with(parallelized_bias.node)
             linear.add.other = parallelized_bias.node
 
@@ -220,23 +219,17 @@ class ParallelizeLinear(GraphOptimizationPass):
 
     def parallelize_row_linear(
         self,
-        graph: Graph,
         linear: Linear,
-        in_features: int,
-        out_features: int,
         *,
         strategy: AllReduceStrategy = AllReduceStrategy.AUTO,
-        config: AllReduceConfig = AllReduceConfig(0),
+        config: AllReduceConfig = AllReduceConfig(0),  # noqa: B008
         fusion_op: AllReduceFusionOp = AllReduceFusionOp.NONE,
         eps: float = 1e-5,
     ) -> None:
         """Parallelize the linear subgraph in row direction.
 
         Args:
-            graph (Graph): The graph to insert the parallelized linear subgraph into
             linear (Linear): The linear subgraph to be parallelized
-            in_features (int): The input feature size
-            out_features (int): The output feature size
             strategy (AllReduceStrategy, optional): The strategy of the allreduce plugin.
                 Defaults to AllReduceStrategy.AUTO.
             config (AllReduceConfig, optional): The config of the allreduce plugin. Defaults to AllReduceConfig(0).
@@ -244,28 +237,37 @@ class ParallelizeLinear(GraphOptimizationPass):
                 Defaults to AllReduceFusionOp.NONE.
             eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
         """
-        weight = GetAttr.specialize_from(linear.weight_node)
-        local_in_features = in_features // self.mapping.tp_size
-        slice_size = local_in_features
+        if not (weight := GetAttr.specialize_from(linear.weight_node)):
+            return
+        local_in_features = linear.in_features // self.mapping.tp_size
         if linear.has_transposed_weight:
             parallelized_weight_tensor = weight.tensor[
-                :, slice_size * self.mapping.tp_rank : slice_size * (self.mapping.tp_rank + 1)
+                :, local_in_features * self.mapping.tp_rank : local_in_features * (self.mapping.tp_rank + 1)
             ]
         else:
             parallelized_weight_tensor = weight.tensor[
-                slice_size * self.mapping.tp_rank : slice_size * (self.mapping.tp_rank + 1), :
+                local_in_features * self.mapping.tp_rank : local_in_features * (self.mapping.tp_rank + 1), :
             ]
 
-        assert parallelized_weight_tensor.ndim == 2 and tuple(parallelized_weight_tensor.shape) == (
-            out_features if linear.has_transposed_weight else local_in_features,
-            local_in_features if linear.has_transposed_weight else out_features,
+        assert (
+            parallelized_weight_tensor.shape
+            == (
+                linear.out_features,
+                local_in_features,
+            )
+            if linear.has_transposed_weight
+            else (
+                local_in_features,
+                linear.out_features,
+            )
         ), "unexpected shape of parallelized weight"
 
+        graph = weight.node.graph
         with graph.inserting_before(weight.node):
             parallelized_weight = GetAttr.create(
                 graph, self.get_name_of_attr(weight.target), parallelized_weight_tensor
             )
-            inject_stack_trace_from(weight, to=parallelized_weight)
+            propagate_metadata_from(weight, to=parallelized_weight)
         weight.node.replace_all_uses_with(parallelized_weight.node)
         linear.mm.other = parallelized_weight.node
 
@@ -315,7 +317,7 @@ def insert_allreduce_plugin(
     group: list[int],
     *,
     strategy: AllReduceStrategy = AllReduceStrategy.AUTO,
-    config: AllReduceConfig = AllReduceConfig(0),
+    config: AllReduceConfig = AllReduceConfig(0),  # noqa: B008
     fusion_op: AllReduceFusionOp = AllReduceFusionOp.NONE,
     eps: float = 1e-5,
 ) -> Node:
@@ -335,9 +337,10 @@ def insert_allreduce_plugin(
     Returns:
         Node: The allreduce plugin node
     """
+    assert (to_val := get_val(to, torch.Tensor)) is not None, f"Failed to get tensor value from {to.format_node()}"
     allreduce_plugin = AllReducePlugin(
         group=group,
-        type_id=DataType(dtype=get_val(to).dtype).to(trt.DataType),
+        type_id=DataType(dtype=to_val.dtype).to(trt.DataType),
         strategy=strategy,
         config=config,
         fusion_op=fusion_op,
@@ -363,22 +366,9 @@ def get_gpt_plugin(linear: Linear) -> GPTAttentionPlugin | None:
     Returns:
         GPTAttentionPlugin | None: The GPTAttentionPlugin from the linear node
     """
-    is_qkv = len(users := list(linear.output_node.users)) == 1 and isinstance(users[0].target, GPTAttentionPlugin)
-    return users[0].target if is_qkv else None
-
-
-def is_lm_head(linear: Linear, graph: Graph) -> bool:
-    """Check if the linear node is the last linear node in the graph.
-
-    It assumes that the last linear node is the lm_head node.
-
-    Args:
-        linear (Linear): The linear node to check
-        graph (Graph): The graph to get the last linear node from
-
-    Returns:
-        bool: Whether the linear node is the last linear node in the graph
-    """
-    if not (last_linear := find_last_linear(graph)):
-        return False
-    return linear == last_linear
+    return (
+        target
+        if len(users := list(linear.output_node.users)) == 1
+        and isinstance(target := users[0].target, GPTAttentionPlugin)
+        else None
+    )

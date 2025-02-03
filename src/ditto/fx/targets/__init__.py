@@ -23,7 +23,11 @@ from .gpt_attention_plugin import (
     Llama3ScalingConfig,
     ROPEConfig,
 )
-from .plugin import Plugin
-from .rope import (
-    FAKE_ROPE_TARGETS,
+from .lora_plugin import (
+    LoraPlugin,
+    LoraPluginInputPair,
+    LoraPluginInputs,
+    LoraProto,
 )
+from .plugin import Plugin
+from .rope import FAKE_ROPE_TARGETS

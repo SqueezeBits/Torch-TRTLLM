@@ -20,14 +20,17 @@ from torch.fx import GraphModule
 
 from ..arguments import TRTLLMArgumentHint
 from ..configs import TRTLLMModelConfig
-from ..constants import FX_TRANSFORM_MAXIMUM_ITERATION, PassName
+from ..constants import FX_TRANSFORM_MAXIMUM_ITERATION
+from ..literals import PassName
 from .passes import (
     AddTRTLLMInputs,
+    BindUnmatchedLoraProtos,
     CanonicalizeCopy,
     CastMMToFP32,
     CastOutputLogits,
     ConstantFolding,
     DecomposeAddMM,
+    DeferCast,
     DeferUnsqueeze,
     EliminateNopCatOrStack,
     EliminateNopPermute,
@@ -43,10 +46,13 @@ from .passes import (
     FuseConsecutiveSplitConcat,
     FuseConsecutiveToCopys,
     FuseEquivalentNodes,
+    FuseGatedMLPProjections,
     FuseQKVProjections,
     FuseReciprocalMul,
     HerdConstantsToTheRight,
+    IndexLayers,
     InsertGatherLastTokenIds,
+    PopLoraPlugins,
     ReplaceMMByFakeGemmPlugin,
     ReplaceSDPAByFakeGPTAttentionPlugin,
     ReplaceViewByReshape,
@@ -54,6 +60,8 @@ from .passes import (
     RewriteIndexAsSingleSlice,
     RewritePowAsMul,
     RewriteReshapeAsUnsqueeze,
+    RewriteSplitAsSlices,
+    StashLoraSubgraphs,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
 )
@@ -137,6 +145,8 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     ReplaceViewByReshape,
     DecomposeAddMM,
     WrapSDPASubgraphs,
+    DeferCast,
+    RewriteSplitAsSlices,
 )
 
 # passes required after the TRT-LLM conversion passes
@@ -193,10 +203,15 @@ def get_trtllm_conversion_transform(
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
         AddTRTLLMInputs(argument_hint=argument_hint),
         *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
+        StashLoraSubgraphs,
         FuseQKVProjections,
+        FuseGatedMLPProjections,
         WrapRoPESubgraphs,
         RewriteIndexAsSingleSlice,
         ReplaceSDPAByFakeGPTAttentionPlugin(dtype=dtype),
+        IndexLayers,
+        BindUnmatchedLoraProtos,
+        PopLoraPlugins(argument_hint=argument_hint),
         ReplaceMMByFakeGemmPlugin,
         CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]

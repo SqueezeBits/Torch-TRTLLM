@@ -47,3 +47,6 @@ class FusedLinear(Subgraph):
         ):
             return None
         return cls(linear=linear, slices=tuple(slices))
+
+    def __len__(self) -> int:
+        return len(self.slices)

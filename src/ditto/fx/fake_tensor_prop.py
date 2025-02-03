@@ -14,13 +14,13 @@
 
 import contextlib
 from collections.abc import Generator
-from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
 from loguru import logger
-from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule, Node
+from torch.fx.node import Argument
 
 from .nodes import GetAttr
 from .utils import get_fake_mode
@@ -28,6 +28,14 @@ from .utils import get_fake_mode
 
 @contextlib.contextmanager
 def fake_tensor_prop_on_node_creation(graph_module: GraphModule) -> Generator[None, None, None]:
+    """Register fake tensor propagation hook on node creation.
+
+    Args:
+        graph_module (GraphModule): Graph module to register hook on
+
+    Yields:
+        Generator[None, None, None]: Context manager that registers and unregisters the hook
+    """
     graph_module._register_create_node_hook(run_fake_tensor_prop)
     try:
         yield None
@@ -36,6 +44,11 @@ def fake_tensor_prop_on_node_creation(graph_module: GraphModule) -> Generator[No
 
 
 def run_fake_tensor_prop(node: Node) -> None:
+    """Run fake tensor propagation on a node.
+
+    Args:
+        node (Node): Node to run propagation on
+    """
     if (fake_mode := get_fake_mode(node.graph)) is None:
         logger.warning(
             f"Failed to run shape inference for {node.format_node()} as as no fake mode has been found in the graph"
@@ -53,38 +66,53 @@ def run_fake_tensor_prop(node: Node) -> None:
 
 
 def run_fake_get_attr_prop(fake_mode: FakeTensorMode, node: GetAttr) -> None:
+    """Run fake tensor propagation for a GetAttr node.
+
+    Args:
+        fake_mode (FakeTensorMode): Fake tensor mode to use
+        node (GetAttr): GetAttr node to run propagation on
+    """
     with fake_mode:
         logger.trace(f"Running fake tensor prop for {node}")
-        node.output = node.tensor.clone()  # type: ignore[assignment]
+        node.output = node.tensor.clone()
         logger.trace(f"Fake tensor prop result: {node.output}")
 
 
 def run_fake_call_function_prop(fake_mode: FakeTensorMode, node: Node) -> None:
-    assert node.op == "call_function" and callable(node.target)
-    flat_args, spec = pytree.tree_flatten((node.args, node.kwargs))
-    flat_values: list[Any] = []
-    for x in flat_args:
-        if isinstance(x, Node):
-            val = x.meta.get("val")
-            if not isinstance(val, torch.SymInt | FakeTensor):
-                logger.error(
-                    f"Failed to find fake tensor or symbolic integer value from input {x.format_node()} "
-                    f"while running shape inference for {node.format_node()} ({val=})"
-                )
-                return
-            if isinstance(val, FakeTensor):
-                if val.fake_mode is not fake_mode:
-                    logger.error(f"{val=} from {x.format_node} belongs is defined under different fake mode.")
-                    return
-                with fake_mode:
-                    val = val.cpu()
-            flat_values.append(val)
-        else:
-            flat_values.append(x)
+    """Run fake tensor propagation for a call_function node.
 
-    args_, kwargs_ = pytree.tree_unflatten(flat_values, spec)
+    Args:
+        fake_mode (FakeTensorMode): Fake tensor mode to use
+        node (Node): Node to run propagation on
+    """
+    assert node.op == "call_function" and callable(node.target)
     with fake_mode:
+        args_, kwargs_ = pytree.tree_map(as_value_on_cpu, (node.args, node.kwargs))
         logger.trace(f"Running fake tensor prop for {node.format_node()} with {args_=}, {kwargs_=}")
         output = node.target(*args_, **kwargs_)
         logger.trace(f"Fake tensor prop result: {output}")
     node.meta["val"] = output
+
+
+def as_value_on_cpu(argument: Argument) -> Argument | torch.Tensor:
+    """Move node argument value to CPU if it is a tensor.
+
+    Args:
+        argument (Argument): Node argument to convert
+
+    Returns:
+        Argument | torch.Tensor: CPU tensor value or original argument
+
+    Raises:
+        KeyError: If the argument is a node and has no 'val' in meta
+    """
+    if isinstance(argument, Node):
+        if "val" not in argument.meta:
+            raise KeyError(
+                f"No 'val' found in the meta of the input node {argument.format_node()}, where:\n"
+                f"{argument}.meta = {argument.meta}"
+            )
+        val = argument.meta["val"]
+        return pytree.tree_map(lambda x: x.cpu() if isinstance(x, torch.Tensor) else x, val)
+
+    return argument
