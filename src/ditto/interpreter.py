@@ -40,7 +40,7 @@ from .debug import (
     save_for_debug,
 )
 from .fx.targets import Plugin
-from .fx.utils import get_tensor_metadata
+from .fx.utils import find_output_node, get_tensor_metadata
 from .types import DataType
 
 
@@ -182,7 +182,7 @@ def infer_module_output_dtypes(
     module: GraphModule,
     truncate_double: bool = False,
 ) -> tuple[dtype, ...]:
-    the_output = [n for n in module.graph.nodes if n.op == "output"][0]
+    the_output = find_output_node(module)
     output_dtypes: list[dtype] = []
     for node in the_output.all_input_nodes:
         if not (tensor_meta := get_tensor_metadata(node)):

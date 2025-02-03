@@ -15,14 +15,17 @@
 from pydantic import Field
 
 from ...types import StrictlyTyped
-from .literals import KVCacheTypeLiteral
+from .literals import DTypeLiteral, KVCacheTypeLiteral
 from .lora import TRTLLMLoraConfig
 from .plugin import TRTLLMPluginConfig
 
 
 class TRTLLMModelConfig(StrictlyTyped):
+    """A subset of properties in `trtllm.BuildConfig` related to model configuration required at runtime."""
+
     max_prompt_embedding_table_size: int = 0
     kv_cache_type: KVCacheTypeLiteral = "PAGED"
+    logits_dtype: DTypeLiteral = "float32"
     gather_context_logits: bool = False
     gather_generation_logits: bool = False
     lora_config: TRTLLMLoraConfig = Field(default_factory=TRTLLMLoraConfig)

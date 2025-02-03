@@ -15,7 +15,7 @@
 # pylint: disable=unused-import, invalid-name
 from collections.abc import Callable
 from functools import cache
-from typing import ClassVar, TypeVar, cast
+from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
 
 import tensorrt as trt
 import torch
@@ -32,6 +32,9 @@ Number = int | float | bool
 SymbolicInteger = torch.SymInt | int
 SymbolicShape = tuple[SymbolicInteger, ...]  # type: ignore[valid-type]
 ShapeArg = list[int | Node]
+
+if TYPE_CHECKING:
+    from .configs import DTypeLiteral
 
 
 class StrictlyTyped(BaseModel):
@@ -53,9 +56,9 @@ class UnsupportedDataTypeConversionError(TypeError):
     """Error indicating unsupported data type conversion between two different frameworks."""
 
 
-FromDataType = TypeVar("FromDataType", torch.dtype, trt.DataType, int)
-OtherDataType = TypeVar("OtherDataType", torch.dtype, trt.DataType, int)
-ToDataType = TypeVar("ToDataType", torch.dtype, trt.DataType, int)
+FromDataType = TypeVar("FromDataType", torch.dtype, trt.DataType, int, str)
+OtherDataType = TypeVar("OtherDataType", torch.dtype, trt.DataType, int, str)
+ToDataType = TypeVar("ToDataType", torch.dtype, trt.DataType, int, str)
 
 
 class DataType:
@@ -74,7 +77,7 @@ class DataType:
     MAPPING: ClassVar[dict[tuple[type, type], dict]] = {}
 
     def __init__(self, dtype: FromDataType) -> None:
-        self.dtype: torch.dtype | trt.DataType | int = dtype
+        self.dtype: torch.dtype | trt.DataType | int | DTypeLiteral = dtype
 
     def to(self, data_type: type[ToDataType]) -> ToDataType:
         """Convert the stored data type to a specified target type.
@@ -95,7 +98,9 @@ class DataType:
                 return cast(TensorProto.DataType, self.dtype)
         elif isinstance(self.dtype, data_type):
             return self.dtype
-        actual_type: type = int if data_type is TensorProto.DataType else data_type
+        actual_type: type = (
+            int if data_type is TensorProto.DataType else str if isinstance(data_type, str) else data_type
+        )
         assert (
             type_pair := (type(self.dtype), actual_type)
         ) in self.MAPPING, f"Conversion from {type_pair[0]} to {type_pair[1]} is not defined"
@@ -227,5 +232,29 @@ def torch_to_onnx_dtype_mapping() -> dict[torch.dtype, int]:
     }
 
 
+@DataType.define_from
+def literal_to_torch_mapping() -> dict[str, torch.dtype]:
+    """Create `DTypeLiteral` to `torch.dtype` compatibility map.
+
+    * All strings in DTypeLiteral can be mapped to a PyTorch data type.
+
+    Returns:
+        dict[str, torch.dtype]: the compatibility map.
+    """
+    return {
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+        "int8": torch.int8,
+        "int32": torch.int32,
+        "int64": torch.int64,
+        "bool": torch.bool,
+        "fp8": torch.float8_e4m3fn,
+    }
+
+
 # All PyTorch data types converted from TensorRT data types can be mapped to ONNX data types.
 DataType.define_by_composition(trt_to_torch_dtype_mapping(), torch_to_onnx_dtype_mapping())
+
+# All PyTorch data types converted from DTypeLiteral can be mapped to ONNX data types.
+DataType.define_by_composition(literal_to_torch_mapping(), torch_to_onnx_dtype_mapping())

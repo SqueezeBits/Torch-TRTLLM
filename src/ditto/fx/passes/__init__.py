@@ -15,6 +15,7 @@
 from .add_trtllm_inputs import AddTRTLLMInputs
 from .canonicalize_copy import CanonicalizeCopy
 from .cast_mm_to_fp32 import CastMMToFP32
+from .cast_output_logits import CastOutputLogits
 from .constant_folding import ConstantFolding
 from .decompose_addmm import DecomposeAddMM
 from .defer_unsqueeze import DeferUnsqueeze

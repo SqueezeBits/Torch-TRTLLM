@@ -24,7 +24,7 @@ from torch_tensorrt.dynamo.lowering.passes import (
 )
 
 from .arguments import TRTLLMArgumentHint
-from .configs import TRTLLMMapping
+from .configs import TRTLLMMapping, TRTLLMModelConfig
 from .constants import PassName
 from .contexts import ignore_symbolic_shapes_warning
 from .debug import save_for_debug
@@ -41,9 +41,11 @@ from .fx import (
 from .fx.targets import Plugin
 
 
+# pylint: disable=duplicate-code
 def transform(
     graph_module: GraphModule,
     argument_hint: TRTLLMArgumentHint,
+    model_config: TRTLLMModelConfig,
     dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
@@ -56,6 +58,7 @@ def transform(
     Args:
         graph_module (GraphModule): The input PyTorch GraphModule to transform
         argument_hint (TRTLLMArgumentHint): Hints about the arguments for optimization
+        model_config (TRTLLMModelConfig): Model configurations
         dtype (torch.dtype): The target data type for the transformed model
         skipped_optimizers (list[PassName] | None, optional): List of optimizer passes to skip. Defaults to None.
         run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
@@ -90,6 +93,7 @@ def transform(
         [
             get_optimization_transform(
                 argument_hint,
+                model_config,
                 dtype,
                 skipped_optimizers=skipped_optimizers,
                 run_matmuls_in_fp32=run_matmuls_in_fp32,
