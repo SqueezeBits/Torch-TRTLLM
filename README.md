@@ -15,6 +15,10 @@
 
 Ditto is an open-source framework that enables **building TensorRT engines directly from PyTorch HuggingFace models**. Traditionally, building a TensorRT engine for a new transformer model requires implementing the model definition with TensorRT networks and converting the checkpoint into the corresponding format. Ditto eliminates the intermediate steps, allowing transformer models to be directly converted into TensorRT engines without additional effort. By simplifying this process, **Ditto aims to maximize efficiency in deploying transformer models on TensorRT**.
 
+<div align="center">
+<img src="./docs/assets/ditto_flow.png" alt="Ditto logo" width="800"/>
+<div align="left">
+
 ## Key Advantages
 - Directly converting new HF models into TensorRT engines that are not supported by TensorRT-LLM.
     - As of the publication date of this document (February 10, 2025), [Helium](https://huggingface.co/kyutai/helium-1-preview-2b) is supported in Ditto, while it is not in TensorRT-LLM.
