@@ -233,5 +233,6 @@ nohup.out
 # JSON files
 *.json
 
-# debug artifacts
+# debug artifacts and engines
 artifacts/*
+engines
