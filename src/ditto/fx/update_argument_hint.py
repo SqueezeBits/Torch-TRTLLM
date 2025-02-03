@@ -26,6 +26,12 @@ def update_argument_hint(
     argument_hint: TRTLLMArgumentHint,
     graph_module: GraphModule,
 ) -> None:
+    """Update the argument hint from graph module.
+
+    Args:
+        argument_hint (TRTLLMArgumentHint): The argument hint to update
+        graph_module (GraphModule): The graph module to update the argument hint
+    """
     match_input_ids_dynamic_dims(argument_hint, graph_module)
     argument_hint.num_attn_layers = len(
         graph_module.graph.find_nodes(
@@ -36,6 +42,12 @@ def update_argument_hint(
 
 
 def match_input_ids_dynamic_dims(argument_hint: TRTLLMArgumentHint, graph_module: GraphModule) -> None:
+    """Match the dynamic dimensions of the input IDs tensor.
+
+    Args:
+        argument_hint (TRTLLMArgumentHint): The argument hint to update
+        graph_module (GraphModule): The graph module to update the argument hint
+    """
     if num_tokens_sym_int := get_input_ids_dynamic_dim(graph_module):
         argument_hint.num_tokens.sym_int = num_tokens_sym_int
         with detailed_sym_node_str():
@@ -45,6 +57,14 @@ def match_input_ids_dynamic_dims(argument_hint: TRTLLMArgumentHint, graph_module
 
 
 def get_input_ids_dynamic_dim(graph_module: GraphModule) -> torch.SymInt | None:
+    """Get the dynamic dimension of the input IDs tensor.
+
+    Args:
+        graph_module (GraphModule): The graph module to get the dynamic dimension
+
+    Returns:
+        torch.SymInt | None: The dynamic dimension of the input IDs tensor
+    """
     if (
         (placeholders := {p.name: p for p in graph_module.graph.find_nodes(op="placeholder")})
         and INPUT_IDS in placeholders

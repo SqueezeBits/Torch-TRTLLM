@@ -43,6 +43,7 @@ from .transform import parallelize, transform
 from .types import BuiltInConstant
 
 
+# pylint: disable=too-many-locals,too-many-arguments
 def trtllm_build(
     model: PreTrainedModel,
     output_dir: str,
@@ -56,6 +57,11 @@ def trtllm_build(
     run_activations_in_model_dtype: bool = True,
     debug_node_names: list[str] | None = None,
     engine_cache: BaseEngineCache | None = None,
+    max_batch_size: int = 256,
+    max_seq_len: int | None = None,
+    max_num_tokens: int = 8192,
+    opt_num_tokens: int | None = None,
+    max_beam_width: int = 1,
 ) -> None:
     """Build a TensorRT-LLM engine from a PyTorch model.
 
@@ -71,11 +77,24 @@ def trtllm_build(
         run_activations_in_model_dtype (bool): Whether to run activations in model dtype
         debug_node_names (list[str] | None): List of node names to output for debugging
         engine_cache (BaseEngineCache | None): Cache for TensorRT engines
+        max_batch_size (int): Maximum batch size for TensorRT engine
+        max_seq_len (int | None): Maximum sequence length for TensorRT engine
+        max_num_tokens (int): Maximum number of tokens for TensorRT engine
+        opt_num_tokens (int | None): Optimized number of tokens for TensorRT engine
+        max_beam_width (int): Maximum beam width for TensorRT engine
     """
     network_name = type(model).__name__
     mapping = mapping or TRTLLMMapping()
     plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model.config.torch_dtype, mapping.world_size)
-    profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(model.config, plugin_config)
+    profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(
+        model.config,
+        plugin_config,
+        max_batch_size=max_batch_size,
+        max_seq_len=max_seq_len,
+        max_num_tokens=max_num_tokens,
+        opt_num_tokens=opt_num_tokens,
+        max_beam_width=max_beam_width,
+    )
     argument_hint = TRTLLMArgumentHint.configure(profile_config, tp_size=mapping.tp_size)
 
     logger.info("Exporting the model into graph module and building TensorRT engine")
