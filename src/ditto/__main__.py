@@ -13,11 +13,12 @@
 # limitations under the License.
 
 # mypy: disable-error-code=misc
-# pylint: disable=dangerous-default-value, too-many-positional-arguments
+# pylint: disable=dangerous-default-value, too-many-positional-arguments, too-many-arguments, too-many-locals
 import os
 import time
 from typing import Annotated, Literal
 
+import click
 import torch
 from loguru import logger
 from transformers import (
@@ -33,6 +34,7 @@ from .api import trtllm_build
 from .configs import TRTLLMMapping
 from .constants import DEFAULT_DEVICE, DISABLE_TRANSFORMER_PATCHES
 from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
+from .literals import DTypeLiteral
 from .peft import load_peft_adapters
 from .types import trt_to_torch_dtype_mapping
 
@@ -129,13 +131,24 @@ def build(
     peft_ids: list[str] = [],  # noqa: B006
     output_dir: str = "",
     dtype: str = "auto",
-    tp_size: int = 1,
     verbose_failure: bool = False,
     trust_remote_code: bool = False,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
+    max_batch_size: int = 256,
+    max_seq_len: int | None = None,
+    max_num_tokens: int = 8192,
+    opt_num_tokens: int | None = None,
+    max_beam_width: int = 1,
+    tp_size: int = 1,
+    logits_dtype: Annotated[DTypeLiteral, Option(click_type=click.Choice(["float16", "float32"]))] = "float32",
+    gather_context_logits: bool = False,
+    gather_generation_logits: bool = False,
+    gather_all_logits: bool = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
+    if gather_all_logits:
+        gather_context_logits = gather_generation_logits = True
     output_dir = resolve_output_dir(output_dir, model_id)
     app.pretty_exceptions_show_locals = verbose_failure
 
@@ -165,6 +178,14 @@ def build(
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         debug_node_names=add_output,
+        max_batch_size=max_batch_size,
+        max_seq_len=max_seq_len,
+        max_num_tokens=max_num_tokens,
+        opt_num_tokens=opt_num_tokens,
+        max_beam_width=max_beam_width,
+        logits_dtype=logits_dtype,
+        gather_context_logits=gather_context_logits,
+        gather_generation_logits=gather_generation_logits,
     )
     minutes, seconds = divmod(int(time.perf_counter() - start_time), 60)
     logger.info(f"Build completed in {minutes:02d}:{seconds:02d}")

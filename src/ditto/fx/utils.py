@@ -12,12 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Iterable
 from typing import TypeVar, cast, overload
 from weakref import WeakKeyDictionary
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.fx import Graph, Node
+from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
 
 from ..contexts import detailed_sym_node_str
@@ -242,3 +243,47 @@ def find_sym_size_node(graph: Graph, s: torch.SymInt) -> Node:
 
     with detailed_sym_node_str():
         raise RuntimeError(f"Failed to find a node producing the symbolic integer {s}")
+
+
+# pylint: disable-next=invalid-name
+ElementType = TypeVar("ElementType")
+
+
+def get_first_element(iterable: Iterable[ElementType]) -> ElementType | None:
+    """Get first element of an iterable.
+
+    Useful hack to get the first element of any iterable, especially when retrieving
+        a `Node` from `dict[Node, ElementType]`.
+
+    Args:
+        iterable (Iterable[ElementType]): Any iterable object
+
+    Returns:
+        ElementType | None: The first element of an iterable if one exists, None otherwise
+    """
+    try:
+        return next(iter(iterable))
+    except StopIteration:
+        return None
+
+
+def find_output_node(graph_or_graph_module: Graph | GraphModule) -> Node:
+    """Find the single output node in a computational graph.
+
+    Args:
+        graph_or_graph_module (Graph | GraphModule): The graph or graph module to search for the output node
+
+    Returns:
+        Node: The output node in the graph
+
+    Raises:
+        RuntimeError: If the graph contains multiple output nodes or no output nodes
+    """
+    graph = graph_or_graph_module if isinstance(graph_or_graph_module, Graph) else graph_or_graph_module.graph
+
+    output_nodes = graph.find_nodes(op="output")
+    if len(output_nodes) != 1 or not (output_node := get_first_element(output_nodes)):
+        print(graph)
+        raise RuntimeError("Graph contains either multiple output nodes or no output nodes")
+
+    return output_node

@@ -19,6 +19,7 @@ from loguru import logger
 from torch.fx import GraphModule
 
 from ..arguments import TRTLLMArgumentHint
+from ..configs import TRTLLMModelConfig
 from ..constants import FX_TRANSFORM_MAXIMUM_ITERATION
 from ..literals import PassName
 from .passes import (
@@ -26,6 +27,7 @@ from .passes import (
     BindUnmatchedLoraProtos,
     CanonicalizeCopy,
     CastMMToFP32,
+    CastOutputLogits,
     ConstantFolding,
     DecomposeAddMM,
     DeferCast,
@@ -67,8 +69,10 @@ from .passes.defer_unsqueeze import SwapUnsqueezeWithSymSizeInt
 from .passes.infra import GraphOptimizationPass, PassManager
 
 
+# pylint: disable=duplicate-code
 def get_optimization_transform(
     argument_hint: TRTLLMArgumentHint,
+    model_config: TRTLLMModelConfig,
     dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
@@ -79,6 +83,7 @@ def get_optimization_transform(
 
     Args:
         argument_hint (TRTLLMArgumentHint): the type hints for TRTLLM inputs
+        model_config (TRTLLMModelConfig): Model configurations
         dtype (torch.dtype): the data type for the plugins
         skipped_optimizers (list[PassName] | None, optional): the names of optimization passes to skip.
             Defaults to None.
@@ -92,8 +97,9 @@ def get_optimization_transform(
     """
     return compose(
         get_trtllm_conversion_transform(
-            argument_hint,
-            dtype,
+            argument_hint=argument_hint,
+            model_config=model_config,
+            dtype=dtype,
             skipped_optimizers=skipped_optimizers,
             run_matmuls_in_fp32=run_matmuls_in_fp32,
             run_activations_in_model_dtype=run_activations_in_model_dtype,
@@ -155,8 +161,26 @@ LEVEL2_PASSES: tuple[type[GraphOptimizationPass], ...] = (
 )
 
 
+def get_trtllm_output_adaptation_passes(gather_context_logits: bool) -> list[type[GraphOptimizationPass]]:
+    """Get the list of graph optimization passes for adapting TensorRT-LLM outputs.
+
+    Args:
+        gather_context_logits (bool): Whether to gather all the context logits
+
+    Returns:
+        list[type[GraphOptimizationPass]]: A list of graph optimization pass to apply.
+    """
+    if gather_context_logits:
+        return []
+    return [
+        SwapUnsqueezeWithSymSizeInt,  # required for `InsertGatherLastTokenIds`
+        InsertGatherLastTokenIds,
+    ]
+
+
 def get_trtllm_conversion_transform(
     argument_hint: TRTLLMArgumentHint,
+    model_config: TRTLLMModelConfig,
     dtype: torch.dtype,
     *,
     skipped_optimizers: list[PassName] | None = None,
@@ -166,19 +190,19 @@ def get_trtllm_conversion_transform(
     """Create a transform that converts a graph module to TensorRT-LLM compatible format.
 
     Args:
-        argument_hint: Type hints for TRTLLM inputs
-        dtype: Data type for plugins
-        skipped_optimizers: Names of optimization passes to skip
-        run_matmuls_in_fp32: Whether to run matrix multiplications in FP32
-        run_activations_in_model_dtype: Whether to run activations in model dtype
+        argument_hint (TRTLLMArgumentHint): Type hints for TRTLLM inputs
+        model_config (TRTLLMModelConfig): Model configurations
+        dtype (torch.dtype): Data type for plugins
+        skipped_optimizers (list[PassName] | None): Names of optimization passes to skip
+        run_matmuls_in_fp32 (bool): Whether to run matrix multiplications in FP32
+        run_activations_in_model_dtype (bool): Whether to run activations in model dtype
 
     Returns:
         A function that applies TRT-LLM conversion passes to a graph module
     """
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
         AddTRTLLMInputs(argument_hint=argument_hint),
-        SwapUnsqueezeWithSymSizeInt,  # required for `InsertGatherLastTokenIds`
-        InsertGatherLastTokenIds,
+        *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
         StashLoraSubgraphs,
         FuseQKVProjections,
         FuseGatedMLPProjections,
@@ -189,6 +213,7 @@ def get_trtllm_conversion_transform(
         BindUnmatchedLoraProtos,
         PopLoraPlugins(argument_hint=argument_hint),
         ReplaceMMByFakeGemmPlugin,
+        CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]
 
     if run_matmuls_in_fp32:
@@ -273,6 +298,6 @@ def get_transform(
         pass_manager.add_pass(fx_pass)
 
     if skipped_optimizers:
-        logger.warning(f"Unrecognized skipped optmizer names: {skipped_optimizers}")
+        logger.warning(f"Unrecognized skipped optimizer names: {skipped_optimizers}")
 
     return pass_manager.as_transform()

@@ -28,39 +28,48 @@ from .dynamic_dim import DynamicDimension, DynamicDimensionType
 from .tensor_type_hint import TensorTypeHint
 
 
+# pylint: disable=too-many-public-methods
 class TRTLLMArgumentHint(StrictlyTyped):
     """Configuration for TensorRT-LLM model input arguments.
 
     Args:
         batch_size (DynamicDimensionType): Batch size dimension
+        max_len (DynamicDimensionType): Maximum sequence length dimension
         num_tokens (DynamicDimensionType): Number of tokens dimension
-        kv_cache_block_size (DynamicDimensionType): KV cache block size dimension
+        max_blocks_per_seq (DynamicDimensionType): Maximum number of blocks per sequence dimension
         beam_width (DynamicDimensionType | int): Beam width dimension or fixed value
-        attention_window_size (DynamicDimensionType): Attention window size dimension
         num_attn_layers (int | None): Number of attention layers. Defaults to None.
         tp_size (int): Tensor parallel size. Defaults to 1.
+        last_token_ids (TensorTypeHint | None): Last token IDs tensor hint. Defaults to None.
         lora_input_hints (dict[str, TensorTypeHint]): LoRA input tensor hints. Defaults to empty dict.
     """
 
     batch_size: DynamicDimensionType = Field(frozen=True, exclude=True)
+    max_len: DynamicDimensionType = Field(frozen=True, exclude=True)
     num_tokens: DynamicDimensionType = Field(frozen=True, exclude=True)
-    kv_cache_block_size: DynamicDimensionType = Field(frozen=True, exclude=True)
+    max_blocks_per_seq: DynamicDimensionType = Field(frozen=True, exclude=True)
     beam_width: DynamicDimensionType | int = Field(frozen=True, exclude=True)
-    attention_window_size: DynamicDimensionType = Field(frozen=True, exclude=True)
     num_attn_layers: int | None = Field(default=None, exclude=True, ge=0)
     tp_size: int = Field(default=1, exclude=True, gt=0)
+    last_token_ids: TensorTypeHint | None = Field(default=None)
     lora_input_hints: dict[str, TensorTypeHint] = Field(default_factory=dict, exclude=True)
 
     @classmethod
-    def configure(cls, profile_config: TRTLLMOptimizationProfileConfig, *, tp_size: int = 1) -> Self:
-        """Create argument hints from optimization profile config.
+    def configure(
+        cls,
+        profile_config: TRTLLMOptimizationProfileConfig,
+        *,
+        gather_context_logits: bool,
+        tp_size: int = 1,
+    ) -> Self:
+        """Configure the argument hint.
 
         Args:
-            profile_config (TRTLLMOptimizationProfileConfig): Optimization profile configuration
-            tp_size (int, optional): Tensor parallel size. Defaults to 1.
-
+            profile_config (TRTLLMOptimizationProfileConfig): The optimization profile configuration
+            gather_context_logits (bool): Whether to gather context logits
+            tp_size (int): The Tensor Parallelism size
         Returns:
-            Self: Configured argument hints
+            Self: The configured argument hint
         """
         batch_size = DynamicDimension(
             name="batch_size",
@@ -68,12 +77,20 @@ class TRTLLMArgumentHint(StrictlyTyped):
             opt=profile_config.opt_batch_size,
             max=profile_config.max_batch_size,
         )
-        ops_s = profile_config.opt_num_tokens // 8
-        max_s = profile_config.max_num_tokens // 8
-        s = DynamicDimension(name="s", min=0, opt=ops_s, max=max_s)
-        num_tokens = 8 * s
-        kv_cache_block_size = DynamicDimension(
-            name="kv_cache_block_size",
+        max_len = DynamicDimension(
+            name="max_len",
+            min=1,
+            opt=profile_config.opt_seq_len,
+            max=profile_config.max_seq_len,
+        )
+        num_tokens = DynamicDimension(
+            name="num_tokens",
+            min=1,
+            opt=profile_config.opt_num_tokens,
+            max=profile_config.max_num_tokens,
+        )
+        max_blocks_per_seq = DynamicDimension(
+            name="max_blocks_per_seq",
             min=1,
             opt=profile_config.opt_kv_cache_block_size,
             max=profile_config.max_kv_cache_block_size,
@@ -88,19 +105,15 @@ class TRTLLMArgumentHint(StrictlyTyped):
                 max=profile_config.max_beam_width,
             )
         )
-        attention_window_size = DynamicDimension(
-            name="attention_window_size",
-            min=1,
-            opt=profile_config.opt_attention_window_size,
-            max=profile_config.max_attention_window_size,
-        )
+        last_token_ids = None if gather_context_logits else TensorTypeHint(shape=(batch_size,), dtype=torch.int32)
         return cls(
             batch_size=batch_size,
+            max_len=max_len,
             num_tokens=num_tokens,
-            kv_cache_block_size=kv_cache_block_size,
+            max_blocks_per_seq=max_blocks_per_seq,
             beam_width=beam_width,
-            attention_window_size=attention_window_size,
             tp_size=tp_size,
+            last_token_ids=last_token_ids,
         )
 
     def as_dict(self) -> dict[str, TensorTypeHint | None]:
@@ -132,21 +145,15 @@ class TRTLLMArgumentHint(StrictlyTyped):
 
     @computed_field
     @property
-    def last_token_ids(self) -> TensorTypeHint:
-        """Tensor type hint for last token IDs with shape (batch_size,)."""
-        return TensorTypeHint(shape=(self.batch_size,), dtype=torch.int32)
-
-    @computed_field
-    @property
     def kv_cache_block_offsets(self) -> TensorTypeHint:
         """Tensor type hint for KV cache block offsets with shape (1, batch_size, 2, kv_cache_block_size)."""
-        return TensorTypeHint(shape=(1, self.batch_size, 2, self.kv_cache_block_size), dtype=torch.int32)
+        return TensorTypeHint(shape=(1, self.batch_size, 2, self.max_blocks_per_seq), dtype=torch.int32)
 
     @computed_field
     @property
     def host_kv_cache_block_offsets(self) -> TensorTypeHint:
         """Tensor type hint for host KV cache block offsets with shape (1, batch_size, 2, kv_cache_block_size)."""
-        return TensorTypeHint(shape=(1, self.batch_size, 2, self.kv_cache_block_size), dtype=torch.int32)
+        return TensorTypeHint(shape=(1, self.batch_size, 2, self.max_blocks_per_seq), dtype=torch.int32)
 
     @computed_field
     @property
@@ -208,7 +215,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     def cache_indirection(self) -> TensorTypeHint:
         """Tensor type hint for cache indirection with shape (batch_size, beam_width, attention_window_size)."""
         return TensorTypeHint(
-            shape=(self.batch_size, self.beam_width, self.attention_window_size),
+            shape=(self.batch_size, self.beam_width, self.max_len),
             dtype=torch.int32,
         )
 

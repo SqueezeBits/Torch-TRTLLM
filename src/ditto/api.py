@@ -40,12 +40,14 @@ from .convert import convert
 from .debug import get_memory_footprint, save_for_debug
 from .export import export
 from .fx import generate_trtllm_engine_config
+from .fx.utils import find_output_node
 from .inline import inline
-from .literals import PassName
+from .literals import DTypeLiteral, PassName
 from .transform import parallelize, transform
 from .types import BuiltInConstant, verify
 
 
+# pylint: disable=too-many-locals,too-many-arguments
 def trtllm_build(
     model: PreTrainedModel | PeftModel,
     output_dir: str,
@@ -58,6 +60,14 @@ def trtllm_build(
     run_activations_in_model_dtype: bool = True,
     debug_node_names: list[str] | None = None,
     engine_cache: BaseEngineCache | None = None,
+    max_batch_size: int = 256,
+    max_seq_len: int | None = None,
+    max_num_tokens: int = 8192,
+    opt_num_tokens: int | None = None,
+    max_beam_width: int = 1,
+    logits_dtype: DTypeLiteral = "float32",
+    gather_context_logits: bool = False,
+    gather_generation_logits: bool = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a PyTorch model.
 
@@ -78,15 +88,42 @@ def trtllm_build(
         run_activations_in_model_dtype (bool): Whether to run activations in model dtype
         debug_node_names (list[str] | None): List of node names to output for debugging
         engine_cache (BaseEngineCache | None): Cache for TensorRT engines
+        max_batch_size (int): Maximum batch size for TensorRT engine
+        max_seq_len (int | None): Maximum sequence length for TensorRT engine
+        max_num_tokens (int): Maximum number of tokens for TensorRT engine
+        opt_num_tokens (int | None): Optimized number of tokens for TensorRT engine
+        max_beam_width (int): Maximum beam width for TensorRT engine
+        logits_dtype (DTypeLiteral): Dtype of the output logits
+        gather_context_logits (bool): Whether to gather context token logits for benchmark
+        gather_generation_logits (bool): Whether to gather generation token logits for benchmark
     """
     mapping = mapping or TRTLLMMapping()
     plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model.config.torch_dtype, mapping.world_size)
-    profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(model.config, plugin_config)
-    argument_hint = TRTLLMArgumentHint.configure(profile_config, tp_size=mapping.tp_size)
+    profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(
+        model.config,
+        plugin_config,
+        max_batch_size=max_batch_size,
+        max_seq_len=max_seq_len,
+        max_num_tokens=max_num_tokens,
+        opt_num_tokens=opt_num_tokens,
+        max_beam_width=max_beam_width,
+    )
+    model_config = TRTLLMModelConfig(
+        plugin_config=plugin_config,
+        gather_context_logits=gather_context_logits,
+        gather_generation_logits=gather_generation_logits,
+        logits_dtype=logits_dtype,
+    )
+    argument_hint = TRTLLMArgumentHint.configure(
+        profile_config,
+        gather_context_logits=gather_context_logits,
+        tp_size=mapping.tp_size,
+    )
 
     graph_module = trtllm_export(
         model,
         argument_hint,
+        model_config,
         model.config.torch_dtype,
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
@@ -115,6 +152,7 @@ def trtllm_build(
 def trtllm_export(
     model: PreTrainedModel | PeftModel,
     argument_hint: TRTLLMArgumentHint,
+    model_config: TRTLLMModelConfig,
     dtype: torch.dtype,
     *,
     run_matmuls_in_fp32: bool = False,
@@ -133,6 +171,7 @@ def trtllm_export(
     Args:
         model (PreTrainedModel | PeftModel): The PyTorch model to export
         argument_hint (TRTLLMArgumentHint): Configuration for input arguments
+        model_config (TRTLLMModelConfig): Model configurations
         dtype (torch.dtype): Data type for the model
         run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
         run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
@@ -172,6 +211,7 @@ def trtllm_export(
     return transform(
         graph_module,
         argument_hint=argument_hint,
+        model_config=model_config,
         dtype=dtype,
         skipped_optimizers=skipped_optimizers,
         run_matmuls_in_fp32=run_matmuls_in_fp32,
@@ -316,12 +356,7 @@ def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
             RuntimeError: If output node is not found or specified nodes don't exist
         """
         nodes = {n.name: n for n in gm.graph.nodes}
-        for node in reversed(gm.graph.nodes):
-            if node.op == "output":
-                break
-        else:
-            gm.print_readable()
-            raise RuntimeError("No output node found in the graph module")
+        node = find_output_node(gm)
 
         try:
             outputs = node.args[0] + tuple(nodes[name] for name in names)
