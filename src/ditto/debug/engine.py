@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# mypy: disable-error-code=misc
+
 import json
 import keyword
 import re
-from collections import OrderedDict
 from collections.abc import Callable
 from functools import cache
+from inspect import isclass
 from types import NoneType, UnionType
 from typing import Any, ClassVar, Literal, get_args
 
@@ -151,23 +153,42 @@ class ELayer(NamedEngineComponent):
 
     @classmethod
     def from_layer(cls, layer: trt.ILayer) -> Self:
-        attrs = OrderedDict()
+        attrs: dict[str, Any] = {}
+
         # set common attributes of ILayer
         for key in dir(layer):
             if not (key.startswith("_") or callable(getattr(layer, key))):
                 attrs[key] = str(getattr(layer, key))
+
         # set attributes of the specific layer type
-        layer.__class__ = layer_type_to_class(layer)
+        if concrete_class := get_concrete_class(layer):
+            concrete_name = concrete_class.__name__.removeprefix("I").removesuffix("Layer")
+            layer_type = f"trt::{concrete_name}"
+            layer.__class__ = concrete_class
+        else:
+            layer_type = layer.type.name.lower()
+
+        base_class_attrs = dir(trt.ILayer)
         for key in dir(layer):
-            if key in dir(trt.ILayer) and key != "type":
+            if key in base_class_attrs and key != "type":
                 continue
             if key == "type" and not isinstance(layer.type, trt.LayerType):
+                # Required for trt.IActivationLayer
                 attrs["algo-type"] = str(layer.type)
                 continue
-            attrs[key] = str(getattr(layer, key))
+            attr = getattr(layer, key)
+            if isinstance(attr, trt.IPluginV2):
+                attrs[key] = [
+                    f"namespace: {attr.plugin_namespace}",
+                    f"type: {attr.plugin_type}",
+                    f"version: {attr.plugin_version}",
+                ]
+            else:
+                attrs[key] = str(attr)
+
         return cls(
             name=layer.name,
-            layer_type=layer.type.name.lower(),
+            layer_type=layer_type,
             inputs=[ETensor.from_tensor(layer.get_input(i)) for i in range(layer.num_inputs)],
             outputs=[ETensor.from_tensor(layer.get_output(i)) for i in range(layer.num_outputs)],
             attributes=attrs,
@@ -368,23 +389,24 @@ def get_shape_ranges(
     ]
 
 
-def layer_type_to_class(layer: trt.ILayer) -> type[trt.ILayer]:
+def get_concrete_class(layer: trt.ILayer) -> type[trt.ILayer] | None:
     """Get the class of the layer type."""
-    layer_type_name = str(layer.type).rsplit(".", maxsplit=1)[-1]
-    if layer_type_name == "ELEMENTWISE":
-        return trt.IElementWiseLayer
-    if layer_type_name == "LRN":
-        return trt.ILRNLayer
-    if layer_type_name == "NMS":
-        return trt.INMSLayer
-    if layer_type_name == "PARAMETRIC_RELU":
-        return trt.IParametricReLULayer
-    if layer_type_name == "RAGGED_SOFTMAX":
-        return trt.IRaggedSoftMaxLayer
-    if layer_type_name == "SOFTMAX":
-        return trt.ISoftMaxLayer
-    if layer_type_name == "TOPK":
-        return trt.ITopKLayer
+    trt_layer_type_to_class = get_trt_layer_type_to_class()
+    if (layer_type_name := layer.type.name) in trt_layer_type_to_class:
+        return trt_layer_type_to_class[layer_type_name]
+    return None
 
-    name = "".join(name[0] + name[1:].lower() for name in layer_type_name.split("_"))
-    return trt.__builtins__["getattr"](trt, f"I{name}Layer")
+
+@cache
+def get_trt_layer_type_to_class() -> dict[str, type[trt.ILayer]]:
+    """Get the mapping from layer type name to the corresponding trt.ILayer subclass."""
+    trt_layer_classes = {
+        name.lower().removeprefix("i").removesuffix("layer"): value
+        for name, value in vars(trt).items()
+        if isclass(value) and value is not trt.ILayer and issubclass(value, trt.ILayer)
+    }
+    return {
+        name: trt_layer_classes[lower_cased_name]
+        for name in trt.LayerType.__members__
+        if (lower_cased_name := name.lower().replace("_", "")) in trt_layer_classes
+    }
