@@ -37,6 +37,14 @@ from .constant import make_constant
 
 
 class EngineComponent(StrictlyTyped):
+    """Represents a component of an engine with configurable attributes.
+
+    Attributes:
+        model_config (dict): Configuration for the model.
+        KEY_MAP (ClassVar[dict[str, str]]): Mapping of key names.
+        attributes (dict[str, Any]): Additional attributes for the component.
+    """
+
     model_config = {"extra": "allow"}
     KEY_MAP: ClassVar[dict[str, str]] = {}
 
@@ -45,17 +53,27 @@ class EngineComponent(StrictlyTyped):
     @model_validator(mode="before")
     @classmethod
     def resolve(cls, values: Any) -> Any:
+        """Resolve and validate model fields.
+
+        Args:
+            values (Any): Input values to resolve.
+
+        Returns:
+            Any: Resolved values.
+        """
         attributes: dict[str, Any] | None = None
 
         def _resolve(name: str, value: Any) -> tuple[str, Any] | None:
             nonlocal attributes
             _name = cls.KEY_MAP.get(name, name)
             # Put all unrecognized keys in attributes
+            # pylint: disable-next=unsupported-membership-test
             if _name not in cls.model_fields:
                 if attributes is None:
                     attributes = {}
                 attributes[_name] = value
                 return None
+            # pylint: disable-next=unsubscriptable-object
             _type = cls.model_fields[_name].annotation
             if (  # handling type annotation of the form `T | None`
                 isinstance(_type, UnionType) and len(_type_args := get_args(_type)) == 2 and _type_args[1] is NoneType
@@ -81,6 +99,14 @@ class EngineComponent(StrictlyTyped):
 
     @model_serializer(mode="wrap")
     def serialize_model(self, original_serializer: Callable[[Self], dict[str, Any]]) -> dict[str, Any]:
+        """Serialize the model to a dictionary.
+
+        Args:
+            original_serializer (Callable[[Self], dict[str, Any]]): Original serializer function.
+
+        Returns:
+            dict[str, Any]: Serialized model data.
+        """
         data = original_serializer(self)
         attributes = data.pop("attributes", None)
         if isinstance(attributes, dict):
@@ -96,14 +122,30 @@ class EngineComponent(StrictlyTyped):
 
 
 class NamedEngineComponent(EngineComponent):
+    """Represents a named engine component.
+
+    Attributes:
+        name (str): Name of the engine component.
+    """
+
     name: str
 
     @property
     def identifier(self) -> str:
+        """Identifier for the named engine component."""
         return make_as_identifier(self.name)
 
 
 class ETensor(NamedEngineComponent):
+    """Represents a tensor in the engine.
+
+    Attributes:
+        KEY_MAP (ClassVar[dict[str, str]]): Mapping of key names.
+        shape (trt.Dims): Shape of the tensor.
+        dtype (trt.DataType | None): Data type of the tensor.
+        location (trt.TensorLocation | None): Location of the tensor.
+    """
+
     KEY_MAP = {
         "Name": "name",
         "Format/Datatype": "dtype",
@@ -117,6 +159,11 @@ class ETensor(NamedEngineComponent):
     @classmethod
     @cache
     def make_none(cls) -> Self:
+        """Create a tensor representing 'None'.
+
+        Returns:
+            Self: A tensor with 'None' values.
+        """
         return cls(
             name="None",
             shape=trt.Dims(),
@@ -125,6 +172,14 @@ class ETensor(NamedEngineComponent):
 
     @classmethod
     def from_tensor(cls, tensor: trt.ITensor | None) -> Self:
+        """Create an ETensor instance from a trt.ITensor.
+
+        Args:
+            tensor (trt.ITensor | None): Tensor to convert.
+
+        Returns:
+            Self: Converted ETensor instance.
+        """
         if tensor is None:
             return cls.make_none()
         return cls(
@@ -141,6 +196,15 @@ class ETensor(NamedEngineComponent):
 
 
 class ELayer(NamedEngineComponent):
+    """Represents a layer in the engine.
+
+    Attributes:
+        KEY_MAP (ClassVar[dict[str, str]]): Mapping of key names.
+        inputs (list[ETensor]): List of input tensors.
+        outputs (list[ETensor]): List of output tensors.
+        layer_type (str): Type of the layer.
+    """
+
     KEY_MAP = {
         "Name": "name",
         "Inputs": "inputs",
@@ -153,6 +217,14 @@ class ELayer(NamedEngineComponent):
 
     @classmethod
     def from_layer(cls, layer: trt.ILayer) -> Self:
+        """Create an ELayer instance from a trt.ILayer.
+
+        Args:
+            layer (trt.ILayer): Layer to convert.
+
+        Returns:
+            Self: Converted ELayer instance.
+        """
         attrs: dict[str, Any] = {}
 
         # set common attributes of ILayer
@@ -196,6 +268,14 @@ class ELayer(NamedEngineComponent):
 
 
 class EngineInfo(EngineComponent):
+    """Represents information about the engine.
+
+    Attributes:
+        KEY_MAP (ClassVar[dict[str, str]]): Mapping of key names.
+        bindings (list[str]): List of binding names.
+        layers (list[ELayer]): List of layers in the engine.
+    """
+
     KEY_MAP = {
         "Bindings": "bindings",
         "Layers": "layers",
@@ -205,6 +285,14 @@ class EngineInfo(EngineComponent):
 
     @classmethod
     def from_network_definition(cls, network: trt.INetworkDefinition) -> Self:
+        """Create an EngineInfo instance from a network definition.
+
+        Args:
+            network (trt.INetworkDefinition): Network definition to convert.
+
+        Returns:
+            Self: Converted EngineInfo instance.
+        """
         return cls(
             bindings=[
                 *(network.get_input(i).name for i in range(network.num_inputs)),
@@ -213,11 +301,21 @@ class EngineInfo(EngineComponent):
             layers=[ELayer.from_layer(network.get_layer(i)) for i in range(network.num_layers)],
         )
 
+    # pylint: disable-next=too-many-locals
     def as_onnx(
         self,
         profiles: list[trt.IOptimizationProfile] | None = None,
         network_flags: dict[str, bool] | None = None,
     ) -> onnx.ModelProto:
+        """Convert engine information to an ONNX model.
+
+        Args:
+            profiles (list[trt.IOptimizationProfile] | None): List of optimization profiles. Defaults to None.
+            network_flags (dict[str, bool] | None): Network flags. Defaults to None.
+
+        Returns:
+            onnx.ModelProto: Converted ONNX model.
+        """
         nodes: dict[str, gs.Node] = {}
         degenerate_layers: dict[str, ELayer] = {}
         tensors: dict[str, gs.Constant | gs.Variable] = {}
@@ -335,6 +433,14 @@ class EngineInfo(EngineComponent):
 
 
 def make_as_identifier(s: str) -> str:
+    """Generate a valid Python identifier from a string.
+
+    Args:
+        s (str): Input string.
+
+    Returns:
+        str: Valid Python identifier.
+    """
     # Remove invalid characters and replace them with underscores
     s = re.sub(r"\W|^(?=\d)", "_", s)
 
@@ -350,8 +456,8 @@ def padstr(msg: str, token: str = "-", length: int = 40) -> str:
 
     Args:
         msg (str): message
-        token (str): token to pad, must be single character
-        length (int | None, optional): the length of the padded result. Defaults to None.
+        token (str): token to pad, must be single character. Defaults to "-".
+        length (int): the length of the padded result. Defaults to 40.
 
     Returns:
         str: padded string
@@ -371,6 +477,15 @@ def get_shape_ranges(
     input_names: list[str],
     optimization_profiles: list[trt.IOptimizationProfile],
 ) -> list[ShapeRanges]:
+    """Get shape ranges for input names from optimization profiles.
+
+    Args:
+        input_names (list[str]): List of input names.
+        optimization_profiles (list[trt.IOptimizationProfile]): List of optimization profiles.
+
+    Returns:
+        list[ShapeRanges]: List of shape ranges for each profile.
+    """
     logger.info(
         "You can ignore the following error messages 'IOptimizationProfile::getDimensions: Error Code 4: "
         "API Usage Error (...)', which are caused by inputs and outputs without optimization profiles."
@@ -390,7 +505,14 @@ def get_shape_ranges(
 
 
 def get_concrete_class(layer: trt.ILayer) -> type[trt.ILayer] | None:
-    """Get the class of the layer type."""
+    """Get the class of the layer type.
+
+    Args:
+        layer (trt.ILayer): Layer to get the class for.
+
+    Returns:
+        type[trt.ILayer] | None: Class of the layer type, or None if not found.
+    """
     trt_layer_type_to_class = get_trt_layer_type_to_class()
     if (layer_type_name := layer.type.name) in trt_layer_type_to_class:
         return trt_layer_type_to_class[layer_type_name]
@@ -399,7 +521,11 @@ def get_concrete_class(layer: trt.ILayer) -> type[trt.ILayer] | None:
 
 @cache
 def get_trt_layer_type_to_class() -> dict[str, type[trt.ILayer]]:
-    """Get the mapping from layer type name to the corresponding trt.ILayer subclass."""
+    """Get the mapping from layer type name to the corresponding trt.ILayer subclass.
+
+    Returns:
+        dict[str, type[trt.ILayer]]: Mapping from layer type name to trt.ILayer subclass.
+    """
     trt_layer_classes = {
         name.lower().removeprefix("i").removesuffix("layer"): value
         for name, value in vars(trt).items()
