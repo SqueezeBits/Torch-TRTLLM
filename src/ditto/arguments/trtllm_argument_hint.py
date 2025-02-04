@@ -83,12 +83,13 @@ class TRTLLMArgumentHint(StrictlyTyped):
             opt=profile_config.opt_seq_len,
             max=profile_config.max_seq_len,
         )
-        num_tokens = DynamicDimension(
+        s = DynamicDimension(
             name="num_tokens",
-            min=1,
-            opt=profile_config.opt_num_tokens,
-            max=profile_config.max_num_tokens,
+            min=0,
+            opt=profile_config.opt_num_tokens // 8,
+            max=profile_config.max_num_tokens // 8,
         )
+        num_tokens = 8 * s
         max_blocks_per_seq = DynamicDimension(
             name="max_blocks_per_seq",
             min=1,
