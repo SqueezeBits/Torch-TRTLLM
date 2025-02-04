@@ -527,7 +527,7 @@ native_build() {
                 --model-dir $BASE_MODEL_DIR \
                 --output-model-dir $TRTLLM_CKPT_DIR \
                 --dtype $DTYPE \
-                --tp_size $TP_SIZE"
+                --world-size $TP_SIZE"
         else
             local convert_cmd="python $convert_script \
                 --model_dir $BASE_MODEL_DIR \
