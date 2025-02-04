@@ -136,10 +136,7 @@ def trtllm_build(
     for filename, component in build_trtllm_engine_components(
         graph_module,
         argument_hint,
-        build_config=TRTLLMBuildConfig.merge(
-            profile_config or TRTLLMOptimizationProfileConfig(),
-            TRTLLMModelConfig(plugin_config=plugin_config),
-        ),
+        build_config=TRTLLMBuildConfig.merge(profile_config, model_config),
         mapping=mapping,
         trt_config=trt_config,
         engine_cache=engine_cache,
