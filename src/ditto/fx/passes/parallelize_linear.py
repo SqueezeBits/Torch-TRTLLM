@@ -257,15 +257,11 @@ class ParallelizeLinear(GraphOptimizationPass):
         Args:
             slice_node (Slice): The slice node to be parallelized
         """
-        input_tensor, dim, start, end, *remains = slice_node.node.args
-        new_args = (
-            input_tensor,
-            dim,
-            start // self.mapping.tp_size,
-            end // self.mapping.tp_size,
-            *remains,
-        )
-        slice_node.node.args = new_args
+        new_start = slice_node.start // self.mapping.tp_size
+        new_end = slice_node.end // self.mapping.tp_size
+        args, kwargs = slice_node.args_kwargs(start=new_start, end=new_end)
+        slice_node.node.args = args
+        slice_node.node.kwargs = kwargs
 
     def slice_weight(
         self, weight: torch.Tensor, slice_dim_sizes: list[int], is_transposed: bool
