@@ -32,7 +32,9 @@ class TensorTypeHint(StrictlyTyped):
 
     def as_spec(self, name: str) -> Input:
         if self.shape == (int_shape := tuple(s for s in self.shape if isinstance(s, int))):
-            return Input.from_tensor(torch.zeros(int_shape, dtype=self.dtype))
+            spec = Input.from_tensor(torch.zeros(int_shape, dtype=self.dtype))
+            spec.name = name
+            return spec
         min_shape = tuple(s if isinstance(s, int) else s.min for s in self.shape)
         min_shape = tuple(max(1, s) for s in min_shape)
         opt_shape = tuple(s if isinstance(s, int) else s.opt for s in self.shape)

@@ -48,6 +48,9 @@ def convert(
     )
     logger.opt(lazy=True).debug("input_specs:\n{x}", x=lambda: "\n".join(str(spec) for spec in input_specs))
 
+    assert len(placeholders := graph_module.graph.find_nodes(op="placeholder")) == len(input_specs)
+    assert all(p.name == i.name for p, i in zip(placeholders, input_specs))
+
     try:
         interpreter = TRTLLMInterpreter(
             graph_module,
