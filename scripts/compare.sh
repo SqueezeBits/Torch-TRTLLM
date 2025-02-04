@@ -298,21 +298,6 @@ parse_args() {
     PEFT_IDS=("${ARGS[@]}")  # Remaining arguments are PEFT_IDs
 }
 
-# Function to extract author names and create output dir suffix
-get_output_suffix() {
-    local suffix=""
-    for peft_id in "$@"; do
-        # Split by '/' and get the penultimate token
-        local author=$(echo $peft_id | tr '/' '\n' | tail -n 2 | head -n 1)
-        if [ -z "$suffix" ]; then
-            suffix=$author
-        else
-            suffix="${suffix}+${author}"
-        fi
-    done
-    echo $suffix
-}
-
 # Build PEFT_IDS arguments string for ditto
 build_peft_args() {
     local args=""
@@ -349,14 +334,39 @@ build_trt_lora_args() {
 }
 
 # Append suffix to directory if not empty
-append_suffix() {
-    local dir=$1
-    local suffix=$2
+get_argument_suffix() {
+    local dir=$MODEL_ID
+    local suffix=""
+    # Build suffix from PEFT_IDS concatenating author names
+    for peft_id in "${PEFT_IDS[@]}"; do
+        # Split by '/' and get the penultimate token
+        local author=$(echo $peft_id | tr '/' '\n' | tail -n 2 | head -n 1)
+        if [ -z "$suffix" ]; then
+            suffix=$author
+        else
+            suffix="${suffix}+${author}"
+        fi
+    done
     if [ ! -z "$suffix" ]; then
         echo "${dir}+${suffix}"
     else
         echo "$dir"
     fi
+}
+
+# Append dtype and tp_size suffixes to directory
+append_option_suffix() {
+    local dir=$1
+
+    if [ "$DTYPE" != "auto" ]; then
+        dir="${dir}_${DTYPE}"
+    fi
+
+    if [ "$TP_SIZE" -gt 1 ]; then
+        dir="${dir}_tp${TP_SIZE}"
+    fi
+
+    echo "$dir"
 }
 
 # Extract output from run log
@@ -370,33 +380,20 @@ extract_output() {
 
 # Set engine and artifact directories based on model ID and suffix
 set_directories() {
-    local model_id=$1
-    local output_suffix=$(get_output_suffix "${PEFT_IDS[@]}")
+    local model_id=$MODEL_ID
 
-    DITTO_ENGINE_DIR=$(append_suffix "engines/ditto/${model_id}" "$output_suffix")
-    TRTLLM_ENGINE_DIR=$(append_suffix "engines/trtllm/${model_id}" "$output_suffix")
+    DITTO_ENGINE_DIR="engines/ditto/$(get_argument_suffix)"
+    TRTLLM_ENGINE_DIR="engines/trtllm/$(get_argument_suffix)"
+
+    DITTO_ENGINE_DIR=$(append_option_suffix "$DITTO_ENGINE_DIR")
+    TRTLLM_ENGINE_DIR=$(append_option_suffix "$TRTLLM_ENGINE_DIR")
 
     if [ "$DEBUG_MODE" = true ]; then
-        DITTO_ARTIFACTS_DIR=$(append_suffix "artifacts/ditto/${model_id}" "$output_suffix")
-        TRTLLM_ARTIFACTS_DIR=$(append_suffix "artifacts/trtllm/${model_id}" "$output_suffix")
-    fi
+        DITTO_ARTIFACTS_DIR="artifacts/ditto/$(get_argument_suffix)"
+        TRTLLM_ARTIFACTS_DIR="artifacts/trtllm/$(get_argument_suffix)"
 
-    if [ "$DTYPE" != "auto" ]; then
-        DITTO_ENGINE_DIR="${DITTO_ENGINE_DIR}_${DTYPE}"
-        TRTLLM_ENGINE_DIR="${TRTLLM_ENGINE_DIR}_${DTYPE}"
-        if [ "$DEBUG_MODE" = true ]; then
-            DITTO_ARTIFACTS_DIR="${DITTO_ARTIFACTS_DIR}_${DTYPE}"
-            TRTLLM_ARTIFACTS_DIR="${TRTLLM_ARTIFACTS_DIR}_${DTYPE}"
-        fi
-    fi
-
-    if [ "$TP_SIZE" -gt 1 ]; then
-        DITTO_ENGINE_DIR="${DITTO_ENGINE_DIR}_tp${TP_SIZE}"
-        TRTLLM_ENGINE_DIR="${TRTLLM_ENGINE_DIR}_tp${TP_SIZE}"
-        if [ "$DEBUG_MODE" = true ]; then
-            DITTO_ARTIFACTS_DIR="${DITTO_ARTIFACTS_DIR}_tp${TP_SIZE}"
-            TRTLLM_ARTIFACTS_DIR="${TRTLLM_ARTIFACTS_DIR}_tp${TP_SIZE}"
-        fi
+        DITTO_ARTIFACTS_DIR=$(append_option_suffix "$DITTO_ARTIFACTS_DIR")
+        TRTLLM_ARTIFACTS_DIR=$(append_option_suffix "$TRTLLM_ARTIFACTS_DIR")
     fi
 
     mkdir -p $DITTO_ENGINE_DIR $TRTLLM_ENGINE_DIR
@@ -439,6 +436,10 @@ run_engine() {
         --tokenizer_dir ${model_id} \
         --input_text \"$PROMPT\" \
         --max_output_len 100"
+    
+    if [ "$TP_SIZE" -gt 1 ]; then
+        base_cmd="mpirun -n $TP_SIZE $base_cmd"
+    fi
 
     # Only run if output file doesn't exist or is empty or rerun flag is true
     OUTPUT_FILE="$engine_dir/output.log"
@@ -479,11 +480,8 @@ native_build() {
         return 0
     fi
 
-    BASE_MODEL_DIR=$(get_hf_cache_dir ${model_id})
-    TRTLLM_CKPT_DIR="${BASE_MODEL_DIR}/trtllm-ckpts"
-    if [ "$DTYPE" != "auto" ]; then
-        TRTLLM_CKPT_DIR="${TRTLLM_CKPT_DIR}/${DTYPE}"
-    fi
+    local BASE_MODEL_DIR=$(get_hf_cache_dir ${model_id})
+    local TRTLLM_CKPT_DIR=$(append_option_suffix "${BASE_MODEL_DIR}/trtllm-ckpts")
     mkdir -p $TRTLLM_CKPT_DIR
     if [ ! -f "$TRTLLM_CKPT_DIR/config.json" ]; then
 
@@ -491,9 +489,7 @@ native_build() {
         if [[ "$BASE_MODEL_DIR" == *EXAONE* ]]; then
             BASE_MODEL_ROOT_DIR=`dirname $(dirname $BASE_MODEL_DIR)`
             EXAONE_DIR="$(dirname $BASE_MODEL_ROOT_DIR)/exaone"
-            echo "EXAONE_DIR: $EXAONE_DIR"
             SYMLINK_PATH="./$(basename $BASE_MODEL_ROOT_DIR)"
-            echo "SYMLINK_PATH: $SYMLINK_PATH"
             if [ ! -e "$EXAONE_DIR" ]; then
                 ln -s "./$(basename $BASE_MODEL_ROOT_DIR)" $EXAONE_DIR
             fi
@@ -530,12 +526,14 @@ native_build() {
                 --ckpt-type hf \
                 --model-dir $BASE_MODEL_DIR \
                 --output-model-dir $TRTLLM_CKPT_DIR \
-                --dtype $DTYPE"
+                --dtype $DTYPE \
+                --world-size $TP_SIZE"
         else
             local convert_cmd="python $convert_script \
                 --model_dir $BASE_MODEL_DIR \
                 --output_dir $TRTLLM_CKPT_DIR \
-                --dtype $DTYPE"
+                --dtype $DTYPE \
+                --tp_size $TP_SIZE"
         fi
 
         rich_execute "$convert_cmd" "$TRTLLM_CKPT_DIR/convert.log" "convert checkpoint"
@@ -649,7 +647,7 @@ main() {
     NUM_PEFTS=${#PEFT_IDS[@]}
 
     # Set global directory variables
-    set_directories "$MODEL_ID"
+    set_directories
 
     if [ "$SKIP_DITTO_BUILD" = false ]; then
         ditto_build "$MODEL_ID" "${PEFT_IDS[@]}"

@@ -9,7 +9,7 @@ main() {
         "meta-llama/Llama-2-7b-chat-hf"
         "meta-llama/Meta-Llama-3-8B-Instruct"
         "meta-llama/Llama-3.1-8B-Instruct"
-        "mistralai/Mistral-7B-Instruct-v0.3"
+        "mistralai/Mistral-7B-Instruct-v0.3 --model-type llama"
         "google/gemma-2-9b-it"
         "Qwen/Qwen2-7B-Instruct"
         "microsoft/Phi-3.5-mini-instruct"
@@ -28,6 +28,13 @@ main() {
             ArmaanSeth/Llama-2-7b-chat-hf-adapters-mental-health-counselling \
             ketchup123/llama-2-7b-chat-hf-safety-1000-HF \
             tricktreat/Llama-2-7b-chat-hf-guanaco-lora"
+        # TP
+        "meta-llama/Llama-3.1-8B-Instruct --tp-size 2"
+        "mistralai/Mistral-7B-Instruct-v0.3 --model-type llama --tp-size 2"
+        "google/gemma-2-9b-it --tp-size 2"
+        "Qwen/Qwen2-7B-Instruct --tp-size 2"
+        "microsoft/phi-4 --tp-size 2"
+        "CohereForAI/aya-expanse-8b --model-type commandr --tp-size 2"
     )
 
     for MODEL_SPECIFIC_ARG in "${MODEL_SPECIFIC_ARGS[@]}"; do

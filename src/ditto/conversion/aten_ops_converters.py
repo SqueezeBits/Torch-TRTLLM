@@ -233,10 +233,6 @@ def aten_ops_slice(
         )
     layer = ctx.net.add_slice(inputs.x, inputs.start_as_dims, inputs.shape_as_dims, inputs.step_as_dims)
     layer.set_input(5, get_trt_tensor(ctx, np.array([inputs.dim]), f"{name}_axes"))
-    # Though it is not used, `layer.axes` must be set to prevent warning of the form:
-    # "<slice layer name>: dynamic axes detected, getAxes works only for static axes."
-    # Moreover, `layer.axes` must be set after `layer.set_input` call, otherwise it will be ignored.
-    layer.axes = trt.Dims([inputs.dim])
     set_layer_name(layer, target, name, SourceIR.ATEN)
     return layer.get_output(0)
 

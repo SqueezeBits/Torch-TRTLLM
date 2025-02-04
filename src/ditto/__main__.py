@@ -147,6 +147,7 @@ def build(
     gather_all_logits: bool = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
+    assert not (tp_size > 1 and peft_ids), "Tensor Parallelism is not supported with LoRA"
     if gather_all_logits:
         gather_context_logits = gather_generation_logits = True
     output_dir = resolve_output_dir(output_dir, model_id)
