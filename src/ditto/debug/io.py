@@ -116,6 +116,9 @@ def save_for_debug(
         item (ExportedProgram | GraphModule | trt.INetworkDefinition | trt.ICudaEngine | trt.IHostMemory): Item to save
         profiles (list[trt.IOptimizationProfile] | None, optional): TensorRT optimization profiles. Defaults to None
     """
+    if not should_save_debug_artifacts():
+        return
+
     if isinstance(item, ExportedProgram):
         save_exported_program_for_debug(name, item)
         return
