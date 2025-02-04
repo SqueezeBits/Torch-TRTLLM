@@ -439,6 +439,10 @@ run_engine() {
         --tokenizer_dir ${model_id} \
         --input_text \"$PROMPT\" \
         --max_output_len 100"
+    
+    if [ "$TP_SIZE" -gt 1 ]; then
+        base_cmd="mpirun -n $TP_SIZE $base_cmd"
+    fi
 
     # Only run if output file doesn't exist or is empty or rerun flag is true
     OUTPUT_FILE="$engine_dir/output.log"
@@ -482,7 +486,10 @@ native_build() {
     BASE_MODEL_DIR=$(get_hf_cache_dir ${model_id})
     TRTLLM_CKPT_DIR="${BASE_MODEL_DIR}/trtllm-ckpts"
     if [ "$DTYPE" != "auto" ]; then
-        TRTLLM_CKPT_DIR="${TRTLLM_CKPT_DIR}/${DTYPE}"
+        TRTLLM_CKPT_DIR="${TRTLLM_CKPT_DIR}_${DTYPE}"
+    fi
+    if [ "$TP_SIZE" -gt 1 ]; then
+        TRTLLM_CKPT_DIR="${TRTLLM_CKPT_DIR}_tp${TP_SIZE}"
     fi
     mkdir -p $TRTLLM_CKPT_DIR
     if [ ! -f "$TRTLLM_CKPT_DIR/config.json" ]; then
@@ -530,12 +537,14 @@ native_build() {
                 --ckpt-type hf \
                 --model-dir $BASE_MODEL_DIR \
                 --output-model-dir $TRTLLM_CKPT_DIR \
-                --dtype $DTYPE"
+                --dtype $DTYPE \
+                --tp_size $TP_SIZE"
         else
             local convert_cmd="python $convert_script \
                 --model_dir $BASE_MODEL_DIR \
                 --output_dir $TRTLLM_CKPT_DIR \
-                --dtype $DTYPE"
+                --dtype $DTYPE \
+                --tp_size $TP_SIZE"
         fi
 
         rich_execute "$convert_cmd" "$TRTLLM_CKPT_DIR/convert.log" "convert checkpoint"
