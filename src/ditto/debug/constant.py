@@ -47,6 +47,17 @@ def make_constant(
     shape: tuple[int, ...] | None = None,
     dtype: torch.dtype | None = None,
 ) -> gs.Constant:
+    """Create a constant node from a tensor with shape and dtype.
+
+    Args:
+        name (str): The name of the constant node.
+        tensor (torch.Tensor | None): The tensor to create the constant node from.
+        shape (tuple[int, ...] | None): The shape of the constant node.
+        dtype (torch.dtype | None): The dtype of the constant node.
+
+    Returns:
+        gs.Constant: The constant node.
+    """
     if tensor is None:
         assert shape is not None and dtype is not None
         tensor = torch.zeros(shape, dtype=dtype)
@@ -56,6 +67,15 @@ def make_constant(
 
 
 def make_lazy_values(name: str, tensor: torch.Tensor) -> LazyValues:
+    """Create a lazy values object from a tensor.
+
+    Args:
+        name (str): The name of the tensor.
+        tensor (torch.Tensor): The tensor to create the lazy values object from.
+
+    Returns:
+        LazyValues: The lazy values object.
+    """
     tensor_proto = TensorProto(
         name=name,
         dims=(*tensor.shape,),
