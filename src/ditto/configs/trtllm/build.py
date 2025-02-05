@@ -28,6 +28,15 @@ class TRTLLMBuildConfig(RuntimeTRTLLMOptimizationProfileConfig, TRTLLMModelConfi
         profile_config: TRTLLMOptimizationProfileConfig,
         model_config: TRTLLMModelConfig,
     ) -> Self:
+        """Create a new instance by merging the profile and model configurations.
+
+        Args:
+            profile_config (TRTLLMOptimizationProfileConfig): The profile configuration.
+            model_config (TRTLLMModelConfig): The model configuration.
+
+        Returns:
+            Self: The merged configuration.
+        """
         return cls.model_validate(
             {
                 **profile_config.runtime().model_dump(),
@@ -41,6 +50,9 @@ class TRTLLMBuildConfig(RuntimeTRTLLMOptimizationProfileConfig, TRTLLMModelConfi
 
         The criterions and error messages are adopted from `tensorrt_llm._common.check_max_num_tokens`.
         While TRT-LLM tries to adjust the wrong values provided by the user, we will simply reject them.
+
+        Returns:
+            Self: The validated instance.
         """
         assert self.plugin_config.context_fmha or self.max_num_tokens >= self.max_input_len, (
             f"When {self.plugin_config.context_fmha=}, {self.max_num_tokens=}) "

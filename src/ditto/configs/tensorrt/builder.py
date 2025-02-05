@@ -33,6 +33,35 @@ from .flags import BitmaskFlags, TensorRTBuilderFlags, TensorRTQuantizationFlags
 
 
 class TensorRTBuilderConfig(StrictlyTyped):
+    """Configuration for TensorRT builder.
+
+    Args:
+        DLA_core (int): The DLA core to use. Defaults to -1.
+        algorithm_selector (trt.IAlgorithmSelector | None): The algorithm selector to use. Defaults to None.
+        avg_timing_iterations (int): The number of timing iterations to use. Defaults to 1.
+        builder_optimization_level (int): The builder optimization level to use. Defaults to 3.
+        default_device_type (trt.DeviceType): The default device type to use. Defaults to trt.DeviceType.GPU
+        engine_capability (trt.EngineCapability): The engine capability to use.
+            Defaults to trt.EngineCapability.STANDARD.
+        flags (TensorRTBuilderFlags): The flags to use. Defaults to TensorRTBuilderFlags().
+        hardware_compatibility_level (trt.HardwareCompatibilityLevel): The hardware compatibility level to use.
+            Defaults to trt.HardwareCompatibilityLevel.NONE.
+        int8_calibrator (trt.IInt8Calibrator | None): The int8 calibrator to use. Defaults to None.
+        max_aux_streams (int): The maximum number of auxiliary streams to use. Defaults to -1.
+        plugins_to_serialize (list[str]): The plugins to serialize. Defaults to an empty list.
+        profile_stream (int): The profile stream to use. Defaults to 0.
+        profiling_verbosity (trt.ProfilingVerbosity): The profiling verbosity to use.
+            Defaults to DEFAULT_TRT_PROFILING_VERBOSITY.
+        progress_monitor (trt.IProgressMonitor | None): The progress monitor to use. Defaults to None.
+        quantization_flags (TensorRTQuantizationFlags): The quantization flags to use.
+            Defaults to TensorRTQuantizationFlags().
+        runtime_platform (trt.RuntimePlatform): The runtime platform to use.
+            Defaults to trt.RuntimePlatform.SAME_AS_BUILD.
+        memory_pool_limits (dict[trt.MemoryPoolType, int]): The memory pool limits to use. Defaults to an empty dict.
+        optimization_profiles (list[trt.IOptimizationProfile]): The optimization profiles to use.
+            Defaults to an empty list.
+    """
+
     DLA_core: int = -1
     algorithm_selector: trt.IAlgorithmSelector | None = None
     avg_timing_iterations: int = 1
@@ -53,6 +82,11 @@ class TensorRTBuilderConfig(StrictlyTyped):
     optimization_profiles: list[trt.IOptimizationProfile] = Field(default_factory=list, exclude=True)
 
     def copy_to(self, native_config: trt.IBuilderConfig) -> None:
+        """Copy the configuration to a native TensorRT builder configuration.
+
+        Args:
+            native_config (trt.IBuilderConfig): The native TensorRT builder configuration to copy the configuration to.
+        """
         for name, value in self.model_dump().items():
             # Skip deprecated option `int8_calibrator` if its value is None
             # Otherwise, the TensorRT will let the user know the option is deprecated
@@ -74,6 +108,14 @@ class TensorRTBuilderConfig(StrictlyTyped):
         *,
         device_config: Device | None = None,
     ) -> CompilationSettings:
+        """Create compilation settings for the TensorRT builder.
+
+        Args:
+            device_config (Device | None): The device configuration to use. Defaults to None.
+
+        Returns:
+            CompilationSettings: Compilation settings for the TensorRT builder.
+        """
         device_config = device_config or default_device()
         device_config.dla_core = self.DLA_core
         if self.DLA_core > 0:
@@ -99,6 +141,11 @@ class TensorRTBuilderConfig(StrictlyTyped):
 
     @model_validator(mode="after")
     def adjust_progress_monitor(self) -> Self:
+        """Set the progress monitor if the profiling verbosity is 'DETAILED' after the model instantiation.
+
+        Returns:
+            Self: The validated instance.
+        """
         if self.profiling_verbosity == trt.ProfilingVerbosity.DETAILED and self.progress_monitor is None:
             logger.info(
                 f"Automatically setting progress monitor to {BuildMonitor.__name__.removeprefix('_')} "
@@ -109,11 +156,27 @@ class TensorRTBuilderConfig(StrictlyTyped):
 
     @field_serializer("flags", "quantization_flags", return_type=int)
     def serialize_bitmask_flags(self, flags: BitmaskFlags) -> int:
+        """Serialize the bitmask flags to an integer.
+
+        Args:
+            flags (BitmaskFlags): The bitmask flags to serialize.
+
+        Returns:
+            int: The serialized bitmask flags.
+        """
         return flags.bitmask
 
     @field_validator("flags", mode="before")
     @classmethod
     def validate_flags(cls, flags: Any) -> Any:
+        """Validate the flags.
+
+        Args:
+            flags (Any): The flags to validate.
+
+        Returns:
+            Any: The validated flags.
+        """
         if isinstance(flags, int):
             return TensorRTBuilderFlags.from_bitmask(flags)
         return flags
@@ -121,6 +184,14 @@ class TensorRTBuilderConfig(StrictlyTyped):
     @field_validator("quantization_flags", mode="before")
     @classmethod
     def validate_quantization_flags(cls, flags: Any) -> Any:
+        """Validate the quantization flags.
+
+        Args:
+            flags (Any): The quantization flags to validate.
+
+        Returns:
+            Any: The validated quantization flags.
+        """
         if isinstance(flags, int):
             return TensorRTQuantizationFlags.from_bitmask(flags)
         return flags

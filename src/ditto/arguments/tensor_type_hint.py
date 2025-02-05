@@ -23,14 +23,34 @@ from .dynamic_dim import DerivedDynamicDimension, DynamicDimension, DynamicDimen
 
 
 class TensorTypeHint(StrictlyTyped):
+    """A type hint for a tensor.
+
+    Attributes:
+        shape (tuple[int | DynamicDimensionType, ...]): The shape of the tensor.
+        dtype (torch.dtype): The data type of the tensor.
+    """
+
     shape: tuple[int | DynamicDimensionType, ...]
     dtype: torch.dtype
 
     @property
     def symbolic_shape(self) -> SymbolicShape:
+        """Get the symbolic shape of the tensor.
+
+        Returns:
+            SymbolicShape: The symbolic shape of the tensor.
+        """
         return tuple(s.sym_int if isinstance(s, DynamicDimensionType) else s for s in self.shape)
 
     def as_spec(self, name: str) -> Input:
+        """Convert the tensor type hint to an Input specification.
+
+        Args:
+            name (str): The name of the input.
+
+        Returns:
+            Input: The input specification.
+        """
         if self.shape == (int_shape := tuple(s for s in self.shape if isinstance(s, int))):
             spec = Input.from_tensor(torch.zeros(int_shape, dtype=self.dtype))
             spec.name = name
@@ -52,11 +72,27 @@ class TensorTypeHint(StrictlyTyped):
 
     @field_serializer("shape")
     def serialize_shape(self, shape: tuple[int | DynamicDimensionType, ...]) -> tuple[int | dict[str, Any], ...]:
+        """Serialize the shape of the tensor.
+
+        Args:
+            shape (tuple[int | DynamicDimensionType, ...]): The shape of the tensor.
+
+        Returns:
+            tuple[int | dict[str, Any], ...]: The serialized shape of the tensor.
+        """
         return tuple(s.model_dump() if isinstance(s, DynamicDimensionType) else s for s in shape)
 
     @field_validator("shape", mode="before")
     @classmethod
     def validate_shape(cls, shape: Any) -> tuple[int | DynamicDimensionType, ...]:
+        """Validate the shape of the tensor.
+
+        Args:
+            shape (Any): The shape of the tensor.
+
+        Returns:
+            tuple[int | DynamicDimensionType, ...]: The validated shape of the tensor.
+        """
         if isinstance(shape, tuple):
             return tuple(
                 s if isinstance(s, int) else TypeAdapter(DynamicDimension | DerivedDynamicDimension).validate_python(s)
