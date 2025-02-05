@@ -36,12 +36,21 @@ from .infra import (
 
 
 class FixActivationPrecision(GraphOptimizationPass):
-    """Fix the activation layer precisions."""
+    """Fix the activation layer precisions.
+
+    Attributes:
+        dtype (torch.dtype): The dtype to fix the activation layer precisions to.
+    """
 
     dtype: torch.dtype
 
     @cached_property
     def pass_manager(self) -> PassManager:
+        """The pass manager for the fix activation precision passes.
+
+        Returns:
+            PassManager: The pass manager that contains the fix activation precision passes.
+        """
         return PassManager(
             passes=[
                 FixSiluPrecision(dtype=self.dtype, depth=self.depth + 1),
@@ -55,6 +64,12 @@ class FixActivationPrecision(GraphOptimizationPass):
 
 
 class FixPrecision(NodewiseOptimizationPass):
+    """Fix the precision of the activation layer.
+
+    Attributes:
+        dtype (torch.dtype): The dtype to fix the activation layer precisions to.
+    """
+
     dtype: torch.dtype
 
 
@@ -65,11 +80,14 @@ with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=GenericBeforeBaseModelWarning)
 
     class FixActivationSubgraphPrecision(Generic[SubgraphType], FixPrecision):
+        """Fix the precision of the activation subgraph."""
+
         @property
         def subgraph_class(self) -> type[ActivationSubgraph]:
+            """The class of the activation subgraph."""
             cls = type(self)
             # pylint: disable-next=no-member
-            type_arg = get_args(cls.__orig_bases__[0])[0]  # type: ignore[attr-defined]  # noqa: N806
+            type_arg = get_args(cls.__orig_bases__[0])[0]  # noqa: N806
             assert isclass(type_arg) and issubclass(
                 type_arg, ActivationSubgraph
             ), f"Wrong specialization of {cls.__name__} with type parameter {type_arg}"
@@ -84,15 +102,17 @@ with warnings.catch_warnings():
                 and input_meta.dtype != self.dtype
             ):
                 return {}
-            insert_cast_before(subgraph.input, self.dtype)
-            insert_cast_before(subgraph.output, self.dtype)
+            insert_cast_after(subgraph.input, self.dtype)
+            insert_cast_after(subgraph.output, self.dtype)
             return {node: ModifiedInsideThePass()}
 
     class FixSiluPrecision(FixActivationSubgraphPrecision[Silu]):
-        ...
+        """Fix the precision of the silu subgraph."""
 
 
 class FixActivationNodePrecision(FixPrecision):
+    """Fix the precision of the activation node."""
+
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (activation := Activation.specialize_from(node))
@@ -102,12 +122,18 @@ class FixActivationNodePrecision(FixPrecision):
             and input_meta.dtype != self.dtype
         ):
             return {}
-        insert_cast_before(activation.this, self.dtype)
-        insert_cast_before(activation.node, self.dtype)
+        insert_cast_after(activation.this, self.dtype)
+        insert_cast_after(activation.node, self.dtype)
         return {node: ModifiedInsideThePass()}
 
 
-def insert_cast_before(x: Node, dtype: torch.dtype) -> None:
+def insert_cast_after(x: Node, dtype: torch.dtype) -> None:
+    """Insert a cast after the node.
+
+    Args:
+        x (Node): The node to insert the cast after.
+        dtype (torch.dtype): The dtype to cast to.
+    """
     with x.graph.inserting_after(x):
         input_cast = ToCopy.create(x.graph, x, dtype=dtype).node
     for user in [*x.users]:
