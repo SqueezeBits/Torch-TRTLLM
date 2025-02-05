@@ -85,7 +85,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
         )
         s = DynamicDimension(
             name="num_tokens",
-            min=1,
+            min=0,
             opt=profile_config.opt_num_tokens // 8,
             max=profile_config.max_num_tokens // 8,
         )
