@@ -20,5 +20,12 @@ from .flags import TensorRTNetworkCreationFlags
 
 
 class TensorRTConfig(StrictlyTyped):
+    """Configuration for TensorRT.
+
+    Attributes:
+        network_creation_flags (TensorRTNetworkCreationFlags): The network creation flags.
+        builder_config (TensorRTBuilderConfig): The builder configuration.
+    """
+
     network_creation_flags: TensorRTNetworkCreationFlags = Field(default_factory=TensorRTNetworkCreationFlags)
     builder_config: TensorRTBuilderConfig = Field(default_factory=TensorRTBuilderConfig)
