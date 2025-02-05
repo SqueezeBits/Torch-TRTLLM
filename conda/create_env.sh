@@ -28,8 +28,12 @@ main() {
     CONDA=${CONDA:-conda}
     echo "Using `realpath ${CONDA}` to create environment named ${name}"
     $CONDA env create -f ${script_dir}/environment.yml -n ${name} $@ || (echo "Failed to create environment" && exit 1)
+    echo "Installing TensorRT-LLM ..."
+    $CONDA run -n ${name} pip install tensorrt-llm==0.17.0 --extra-index-url https://pypi.nvidia.com || (echo "Failed to install TensorRT-LLM" && exit 1)
     echo "Installing Torch-TensorRT ..."
     $CONDA run -n ${name} pip install torch-tensorrt==2.5.0 --no-deps || (echo "Failed to install Torch-TensorRT" && exit 1)
+    echo "Installing Ditto ..."
+    $CONDA run -n ${name} pip install -e $(realpath ${script_dir}/..) || (echo "Failed to install Ditto" && exit 1)
 }
 
 main $@

@@ -276,10 +276,11 @@ parse_args() {
     # Handle TensorRT-LLM repository path
     if [ -z "$TRTLLM_REPO" ]; then
         # Get default TensorRT-LLM directory only if --trtllm-repo was not specified
+        pip install platformdirs
         DEFAULT_TRTLLM_DIR=$(python -c 'from platformdirs import user_cache_dir; print(f"{user_cache_dir()}/tensorrt-llm", end="")')
         if [ ! -d "$DEFAULT_TRTLLM_DIR" ]; then
             # Extract TensorRT-LLM version from pyproject.toml
-            TRTLLM_VERSION=$(grep -Po 'tensorrt-llm = "\K[^"]*' "${SCRIPT_DIR}/../pyproject.toml")
+            TRTLLM_VERSION=$(python -c "import tensorrt_llm as t; print(t.__version__)" | tail -1)
             echo "Cloning TensorRT-LLM repository version ${TRTLLM_VERSION} to ${DEFAULT_TRTLLM_DIR} ..."
             git clone \
                 -b v${TRTLLM_VERSION} \
@@ -364,6 +365,11 @@ append_option_suffix() {
 
     if [ "$TP_SIZE" -gt 1 ]; then
         dir="${dir}_tp${TP_SIZE}"
+    fi
+
+    TRTLLM_VERSION=$(python -c "import tensorrt_llm as t; print(t.__version__)" | tail -1)
+    if [ "$TRTLLM_VERSION" != "0.16.0" ]; then
+        dir="${dir}_trtllm${TRTLLM_VERSION}"
     fi
 
     echo "$dir"
