@@ -62,6 +62,14 @@ def builder_config_as_dict(builder_config: trt.IBuilderConfig) -> dict[str, Any]
 
 
 def get_human_readable_flags(network: trt.INetworkDefinition) -> dict[str, bool]:
+    """Get the human-readable flags of a TensorRT network.
+
+    Args:
+        network (trt.INetworkDefinition): The TensorRT network to get the flags of.
+
+    Returns:
+        dict[str, bool]: The human-readable flags of the TensorRT network.
+    """
     return {
         f"{flag.value:02d}:{name}": network.get_flag(flag)
         for name, flag in trt.NetworkDefinitionCreationFlag.__members__.items()
