@@ -40,7 +40,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
         beam_width (DynamicDimensionType | int): Beam width dimension or fixed value
         num_attn_layers (int | None): Number of attention layers. Defaults to None.
         tp_size (int): Tensor parallel size. Defaults to 1.
-        last_token_ids (TensorTypeHint | None): Last token IDs tensor hint. Defaults to None.
+        gather_context_logits (bool): Whether to gather context logits. Defaults to False.
         lora_input_hints (dict[str, TensorTypeHint]): LoRA input tensor hints. Defaults to empty dict.
     """
 
@@ -51,7 +51,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     beam_width: DynamicDimensionType | int = Field(frozen=True, exclude=True)
     num_attn_layers: int | None = Field(default=None, exclude=True, ge=0)
     tp_size: int = Field(default=1, exclude=True, gt=0)
-    last_token_ids: TensorTypeHint | None = Field(default=None)
+    gather_context_logits: bool = Field(default=False, exclude=True)
     lora_input_hints: dict[str, TensorTypeHint] = Field(default_factory=dict, exclude=True)
 
     @classmethod
@@ -85,7 +85,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
         )
         s = DynamicDimension(
             name="num_tokens",
-            min=0,
+            min=1,
             opt=profile_config.opt_num_tokens // 8,
             max=profile_config.max_num_tokens // 8,
         )
@@ -106,7 +106,6 @@ class TRTLLMArgumentHint(StrictlyTyped):
                 max=profile_config.max_beam_width,
             )
         )
-        last_token_ids = None if gather_context_logits else TensorTypeHint(shape=(batch_size,), dtype=torch.int32)
         return cls(
             batch_size=batch_size,
             max_len=max_len,
@@ -114,7 +113,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
             max_blocks_per_seq=max_blocks_per_seq,
             beam_width=beam_width,
             tp_size=tp_size,
-            last_token_ids=last_token_ids,
+            gather_context_logits=gather_context_logits,
         )
 
     def as_dict(self) -> dict[str, TensorTypeHint | None]:
@@ -143,6 +142,14 @@ class TRTLLMArgumentHint(StrictlyTyped):
     def position_ids(self) -> TensorTypeHint:
         """Tensor type hint for position IDs with shape (num_tokens,)."""
         return TensorTypeHint(shape=(self.num_tokens,), dtype=torch.int32)
+
+    @computed_field
+    @property
+    def last_token_ids(self) -> TensorTypeHint | None:
+        """Tensor type hint for last token IDs with shape (num_tokens,), None if gather context logits is True."""
+        if self.gather_context_logits:
+            return None
+        return TensorTypeHint(shape=(self.batch_size,), dtype=torch.int32)
 
     @computed_field
     @property
