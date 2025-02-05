@@ -21,15 +21,34 @@ from .aten_op import ATenOp, FinalATenOp
 
 
 class Softmax(ATenOp):
+    """Base class for softmax operations.
+
+    Attributes:
+        this (Node): The input node.
+        dim (int): The dimension to apply the softmax to.
+    """
+
     this: Node
     dim: int
 
 
 @Softmax.register(torch.ops.aten._softmax.default)
 class SoftmaxDefault(Softmax, FinalATenOp):
+    """Specialization for the softmax operator.
+
+    Attributes:
+        half_to_float (bool): Whether to convert the input to float.
+    """
+
     half_to_float: bool
 
 
 @Softmax.register(torch.ops.aten._safe_softmax.default)
 class SafeSoftmax(Softmax, FinalATenOp):
+    """Specialization for the safe softmax operator.
+
+    Attributes:
+        dtype (torch.dtype | None): The dtype of the safe softmax.
+    """
+
     dtype: torch.dtype | None = None

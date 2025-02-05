@@ -25,10 +25,18 @@ from ....types import StrictlyTyped
 from .graph_pass import GraphOptimizationPass
 from .pass_result import PassResult
 
-PassType = Callable[[GraphModule], PassResult] | GraphOptimizationPass
+PassType = Callable[[GraphModule], PassResult] | type[GraphOptimizationPass]
 
 
 class PassManager(StrictlyTyped):
+    """The manager for the passes.
+
+    Attributes:
+        steps (int): The number of steps to run the passes.
+        passes (list[PassType]): The passes to run.
+        warn_on_partial_convergence (bool): Whether to warn on partial convergence.
+    """
+
     steps: int = Field(default=FX_TRANSFORM_MAXIMUM_ITERATION, ge=0)
     passes: list[PassType] = Field(default_factory=list)
     warn_on_partial_convergence: bool = True
@@ -58,11 +66,22 @@ class PassManager(StrictlyTyped):
         return PassResult(graph_module=graph_module, modified=overall_modified)
 
     def add_pass(self, p: PassType | type[GraphOptimizationPass]) -> None:
+        """Add a pass to the manager.
+
+        Args:
+            p (PassType | type[GraphOptimizationPass]): The pass to add.
+        """
         if isclass(p):
             assert issubclass(p, GraphOptimizationPass)
             self.passes.append(p())
             return
-        self.passes.append(p)  # type: ignore[arg-type]
+        self.passes.append(p)
 
     def as_transform(self) -> Callable[[GraphModule], GraphModule]:
+        """Convert the manager to a callable that applies the passes to a graph module.
+
+        Returns:
+            Callable[[GraphModule], GraphModule]: The callable that takes a graph module and
+                returns the transformed graph module.
+        """
         return lambda graph_module: self(graph_module).graph_module

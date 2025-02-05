@@ -260,7 +260,7 @@ def create_random_layer_prefix(*seeds: int | str | bytes | None) -> str:
     """Create a random layer prefix from food-related words.
 
     Args:
-        *seeds: Seeds for random number generation
+        *seeds (int | str | bytes | None): Seeds for random number generation
 
     Returns:
         str: A randomly generated layer prefix string
@@ -357,7 +357,7 @@ def create_random_module_prefix(*seeds: int | str | bytes | None) -> str:
     """Create a random module prefix from animal names.
 
     Args:
-        *seeds: Seeds for random number generation
+        *seeds (int | str | bytes | None): Seeds for random number generation
 
     Returns:
         str: A randomly generated module prefix string

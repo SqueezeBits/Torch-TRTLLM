@@ -28,6 +28,16 @@ from .utils import has_same_values, make_axis_nonnegative, make_dim_nonnegative
 
 @ATenOp.register(torch.ops.aten.slice.Tensor)
 class Slice(FinalATenOp):
+    """Specialization for the slice operator.
+
+    Attributes:
+        this (Node): The tensor to slice.
+        dim (int): The dimension to slice along.
+        start (SymbolicInteger | Node | None): The start of the slice.
+        end (SymbolicInteger | Node | None): The end of the slice.
+        step (SymbolicInteger | Node): The step of the slice.
+    """
+
     this: Node
     dim: int = 0
     start: SymbolicInteger | Node | None = None
@@ -36,6 +46,14 @@ class Slice(FinalATenOp):
 
     @classmethod
     def sort(cls, slices: Sequence[Self]) -> list[Self]:
+        """Sort the slices by the start of the slice.
+
+        Args:
+            slices (Sequence[Self]): The slices to sort.
+
+        Returns:
+            list[Self]: The sorted slices.
+        """
         return sorted(slices, key=lambda s: start if isinstance(start := s.start, int) else 0)
 
     @classmethod
@@ -51,7 +69,7 @@ class Slice(FinalATenOp):
         6. The final slice's end matches the original dimension size
 
         Args:
-            slices: A sequence of Slice operations to check
+            slices (Sequence[Self]): A sequence of Slice operations to check
 
         Returns:
             bool: True if the slices are consecutive, False otherwise
@@ -70,30 +88,55 @@ class Slice(FinalATenOp):
 
     @property
     def dim_size(self) -> int | None:
+        """The size of the dimension to slice along.
+
+        Returns:
+            int | None: The size of the dimension to slice along.
+        """
         if (t := get_tensor_metadata(self.this)) and isinstance(s := t.shape[self.dim], int):
             return s
         return None
 
     @property
     def ndim(self) -> int | None:
+        """The number of dimensions of the tensor.
+
+        Returns:
+            int | None: The number of dimensions of the tensor.
+        """
         if t := get_tensor_metadata(self.this):
             return len(t.shape)
         return None
 
     @property
     def nonnegative_dim(self) -> int | None:
+        """The non-negative dimension of the tensor.
+
+        Returns:
+            int | None: The non-negative dimension of the tensor.
+        """
         if (ndim := self.ndim) is not None:
             return make_dim_nonnegative(self.dim, ndim=ndim)
         return None
 
     @property
     def nonnegative_start(self) -> int | None:
+        """The non-negative start of the slice.
+
+        Returns:
+            int | None: The non-negative start of the slice.
+        """
         if isinstance(self.start, int) and (dim_size := self.dim_size) is not None:
             return make_axis_nonnegative(self.start, dim_size=dim_size)
         return None
 
     @property
     def nonnegative_end(self) -> int | None:
+        """The non-negative end of the slice.
+
+        Returns:
+            int | None: The non-negative end of the slice.
+        """
         if isinstance(self.end, int) and (dim_size := self.dim_size) is not None:
             return make_axis_nonnegative(self.end, dim_size=dim_size)
         return None

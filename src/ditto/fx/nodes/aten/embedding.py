@@ -23,6 +23,16 @@ from .aten_op import ATenOp, FinalATenOp
 
 @ATenOp.register(torch.ops.aten.embedding.default)
 class Embedding(FinalATenOp):
+    """Specialization for the embedding operator.
+
+    Attributes:
+        weight (Node): The weight of the embedding.
+        indices (Node): The indices of the embedding.
+        padding_idx (SymbolicInteger): The padding index of the embedding.
+        scale_grad_by_freq (bool): Whether to scale the gradient by the frequency of the indices.
+        sparse (bool): Whether to use sparse gradient.
+    """
+
     weight: Node
     indices: Node
     padding_idx: SymbolicInteger = -1

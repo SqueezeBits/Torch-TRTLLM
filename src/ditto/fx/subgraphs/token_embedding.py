@@ -20,6 +20,14 @@ from .subgraph import Subgraph
 
 
 class TokenEmbedding(Subgraph):
+    """The token embedding subgraph.
+
+    Args:
+        embedding (Embedding): The embedding node.
+        input_ids (Placeholder): The input ids placeholder.
+        weights (GetAttr): The weights attribute.
+    """
+
     embedding: Embedding
     input_ids: Placeholder
     weights: GetAttr
@@ -37,8 +45,18 @@ class TokenEmbedding(Subgraph):
 
     @property
     def vocab_size(self) -> int:
+        """The vocabulary size of the token embedding.
+
+        Returns:
+            int: The vocabulary size of the token embedding.
+        """
         return self.weights.parameter.shape[0]
 
     @property
     def hidden_size(self) -> int:
+        """The hidden size of the token embedding.
+
+        Returns:
+            int: The hidden size of the token embedding.
+        """
         return self.weights.parameter.shape[1]
