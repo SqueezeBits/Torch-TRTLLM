@@ -28,7 +28,11 @@ from .infra import GraphOptimizationPass, PassResult
 
 
 class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
-    """Replace F.scaled_dot_product_attention by FakeGPTAttentionPlugin (required for trtllm)."""
+    """Replace F.scaled_dot_product_attention by FakeGPTAttentionPlugin (required for trtllm).
+
+    Attributes:
+        dtype (torch.dtype): The data type of the input tensor
+    """
 
     dtype: torch.dtype
 
@@ -115,7 +119,16 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
 
 
 class MHAConfig(StrictlyTyped):
-    """Multi-Head Attention configuration."""
+    """Multi-Head Attention configuration.
+
+    Attributes:
+        rope_config (ROPEConfig): The RoPE configuration
+        num_attn_groups (int): The number of attention groups
+        num_heads (int): The number of attention heads
+        embed_dim (int): The embedding dimension
+        num_kv_heads (int): The number of KV heads
+        output_shape (SymbolicShape): The output shape
+    """
 
     rope_config: ROPEConfig
     num_attn_groups: int
@@ -126,7 +139,11 @@ class MHAConfig(StrictlyTyped):
 
     @property
     def num_kv_heads_per_group(self) -> int:
-        """Number of KV heads per attention group."""
+        """Number of KV heads per attention group.
+
+        Returns:
+            int: The number of KV heads per attention group
+        """
         return self.num_kv_heads // self.num_attn_groups
 
     @classmethod  # pylint: disable-next=too-many-locals
@@ -152,15 +169,16 @@ class MHAConfig(StrictlyTyped):
         - Number of KV heads must be divisible by number of attention groups
 
         Args:
-            sdpa: The ScaledDotProductAttention node to analyze
+            sdpa (ScaledDotProductAttention): The ScaledDotProductAttention node to analyze
 
         Returns:
-            If all requirements are met:
-                A tuple containing:
-                - The fused linear projection node that generates Q,K,V
-                - A MHAConfig object with the extracted configuration
-            If any requirement fails:
-                None
+            tuple[Linear, MHAConfig] | None:
+                If all requirements are met:
+                    A tuple containing:
+                    - The fused linear projection node that generates Q,K,V
+                    - A MHAConfig object with the extracted configuration
+                If any requirement fails:
+                    None
         """
         if not (
             (query := get_tensor_metadata(sdpa.query))

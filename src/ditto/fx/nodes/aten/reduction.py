@@ -25,6 +25,16 @@ from .utils import make_dim_nonnegative
 
 
 class Reduction(ATenOp):
+    """Base class for nodes that performs reduction operations.
+
+    Attributes:
+        this (Node): The tensor to reduce.
+        dim (list[int]): The dimensions to reduce.
+        keepdim (bool): Whether to keep the reduced dimensions.
+        asterick (None): The asterick of the reduction.
+        dtype (torch.dtype | None): The dtype of the reduction.
+    """
+
     this: Node
     dim: list[int] = Field(max_length=1, min_length=1)
     keepdim: bool = False
@@ -33,12 +43,22 @@ class Reduction(ATenOp):
 
     @property
     def input_ndim(self) -> int | None:
+        """The number of dimensions of the input tensor.
+
+        Returns:
+            int | None: The number of dimensions of the input tensor.
+        """
         if t := get_tensor_metadata(self.this):
             return len(t.shape)
         return None
 
     @property
     def nonnegative_dim(self) -> int | None:
+        """The non-negative dimension of the input tensor.
+
+        Returns:
+            int | None: The non-negative dimension of the input tensor.
+        """
         if (ndim := self.input_ndim) is not None:
             return make_dim_nonnegative(self.dim[0], ndim=ndim)
         return None
@@ -46,9 +66,9 @@ class Reduction(ATenOp):
 
 @Reduction.register(torch.ops.aten.mean.dim)
 class MeanDim(Reduction, FinalATenOp):
-    ...
+    """Specialization for the mean operator."""
 
 
 @Reduction.register(torch.ops.aten.sum.dim_IntList)
 class SumDimIntList(Reduction, FinalATenOp):
-    ...
+    """Specialization for the sum operator."""

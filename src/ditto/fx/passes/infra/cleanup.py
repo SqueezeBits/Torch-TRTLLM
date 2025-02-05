@@ -24,6 +24,12 @@ from ...utils import get_fake_mode
 
 
 def cleanup(graph_module: GraphModule, run_fake_tensor_prop: bool = False) -> None:
+    """Clean up the graph module.
+
+    Args:
+        graph_module (GraphModule): The graph module to clean up.
+        run_fake_tensor_prop (bool): Whether to run FakeTensorProp.
+    """
     graph = graph_module.graph
     graph.eliminate_dead_code()
     graph.lint()
@@ -33,6 +39,11 @@ def cleanup(graph_module: GraphModule, run_fake_tensor_prop: bool = False) -> No
 
 
 def fake_tensor_prop(graph_module: GraphModule) -> None:
+    """Run FakeTensorProp on the graph module.
+
+    Args:
+        graph_module (GraphModule): The graph module to run FakeTensorProp on.
+    """
     if fake_mode := get_fake_mode(graph := graph_module.graph):
         logger.debug("Running FakeTensorProp")
         interpreter = FakeTensorPropOnCPU(graph_module, fake_mode)
@@ -40,6 +51,8 @@ def fake_tensor_prop(graph_module: GraphModule) -> None:
 
 
 class FakeTensorPropOnCPU(FakeTensorProp):
+    """Run FakeTensorProp on the graph module on CPU."""
+
     def fetch_args_kwargs_from_env(self, n: Node) -> tuple[tuple[Any], dict[str, Any]]:
         args, kwargs = super().fetch_args_kwargs_from_env(n)
         return pytree.tree_map(move_to_cpu_if_tensor, (args, kwargs))
@@ -53,6 +66,14 @@ class FakeTensorPropOnCPU(FakeTensorProp):
 
 
 def move_to_cpu_if_tensor(leaf: Any) -> Any:
+    """Move the leaf to the CPU if it is a tensor.
+
+    Args:
+        leaf (Any): The leaf to move to the CPU if it is a tensor.
+
+    Returns:
+        Any: The given leaf to be moved to the CPU or not.
+    """
     if isinstance(leaf, torch.Tensor) and leaf.device != torch.device("cpu"):
         return leaf.cpu()
     return leaf

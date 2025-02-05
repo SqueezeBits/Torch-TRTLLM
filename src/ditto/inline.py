@@ -30,6 +30,16 @@ def inline(
     class_name: str | None = None,
     enable_experimental_decompositions: bool = False,
 ) -> GraphModule:
+    """Inline the exported program.
+
+    Args:
+        exported_program (ExportedProgram): The exported program to inline.
+        class_name (str | None): The name of the class to use for the inline graph module. Defaults to None.
+        enable_experimental_decompositions (bool): Whether to enable experimental decompositions. Defaults to False.
+
+    Returns:
+        GraphModule: The inline graph module.
+    """
     pretrained_config = exported_program.graph_module.meta.get("pretrained_config", None)
     pre_inline_pass_manager = DynamoPassManager.build_from_passlist(ATEN_PRE_LOWERING_PASSES.passes)
 
@@ -40,7 +50,7 @@ def inline(
         logger.debug("Running aten decomposition passes")
         exported_program = exported_program.run_decompositions(get_decompositions(enable_experimental_decompositions))
         logger.debug("Inlining the exported program")
-        graph_module = exported_program.module()  # type: ignore[assignment]
+        graph_module = exported_program.module()
 
     graph_module.meta["pretrained_config"] = pretrained_config
     graph_module._forward_pre_hooks.clear()

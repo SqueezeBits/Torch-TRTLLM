@@ -22,20 +22,39 @@ from .utils import make_dim_nonnegative
 
 
 class Combine(ATenOp):
+    """Base class for nodes that combine tensors.
+
+    Attributes:
+        tensors (list[Node]): The tensors to combine.
+        dim (int): The dimension to combine along.
+    """
+
     tensors: list[Node]
     dim: int = 0
 
 
 @Combine.register(torch.ops.aten.cat.default)
 class Cat(Combine, FinalATenOp):
+    """Specialization for the cat operator."""
+
     @property
     def ndim(self) -> int | None:
+        """The number of dimensions of the output tensor.
+
+        Returns:
+            int | None: The number of dimensions of the output tensor.
+        """
         if isinstance(t := self.output, torch.Tensor):
             return t.ndim
         return None
 
     @property
     def nonnegative_dim(self) -> int | None:
+        """The non-negative dimension of the output tensor.
+
+        Returns:
+            int | None: The non-negative dimension of the output tensor.
+        """
         if (ndim := self.ndim) is not None:
             return make_dim_nonnegative(self.dim, ndim=ndim)
         return None
@@ -43,4 +62,4 @@ class Cat(Combine, FinalATenOp):
 
 @Combine.register(torch.ops.aten.stack.default)
 class Stack(Combine, FinalATenOp):
-    ...
+    """Specialization for the stack operator."""

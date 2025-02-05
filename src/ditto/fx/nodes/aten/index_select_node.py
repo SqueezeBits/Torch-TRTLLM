@@ -23,18 +23,36 @@ from .utils import make_dim_nonnegative
 
 @ATenOp.register(torch.ops.aten.index_select.default)
 class IndexSelect(FinalATenOp):
+    """Specialization for the index_select operator.
+
+    Attributes:
+        this (Node): The tensor to index select.
+        dim (int): The dimension to index select.
+        index (Node): The index to index select.
+    """
+
     this: Node
     dim: int
     index: Node
 
     @property
     def output_ndim(self) -> int | None:
+        """The number of dimensions of the output tensor.
+
+        Returns:
+            int | None: The number of dimensions of the output tensor.
+        """
         if isinstance(t := self.output, torch.Tensor):
             return t.ndim
         return None
 
     @property
     def nonnegative_dim(self) -> int | None:
+        """The non-negative dimension of the output tensor.
+
+        Returns:
+            int | None: The non-negative dimension of the output tensor.
+        """
         if (ndim := self.output_ndim) is not None:
             return make_dim_nonnegative(self.dim, ndim=ndim)
         return None

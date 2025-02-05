@@ -23,6 +23,16 @@ from .aten_op import ATenOp, FinalATenOp
 
 @ATenOp.register(torch.ops.aten.addmm.default)
 class AddMM(FinalATenOp):
+    """Specialization for the addmm operator.
+
+    Attributes:
+        this (Node): The tensor to add.
+        mat1 (Node): The matrix to multiply.
+        mat2 (Node): The matrix to multiply.
+        beta (Number): The beta of the addmm.
+        alpha (Number): The alpha of the addmm.
+    """
+
     this: Node
     mat1: Node
     mat2: Node

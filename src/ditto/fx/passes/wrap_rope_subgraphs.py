@@ -26,7 +26,11 @@ from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class WrapRoPESubgraphs(NodewiseOptimizationPass):
-    """Match and replace RoPE subgraphs by wrapped RoPE node (required for ReplaceSDPAByFakeGPTAttentionPlugin)."""
+    """Match and replace RoPE subgraphs by wrapped RoPE node (required for ReplaceSDPAByFakeGPTAttentionPlugin).
+
+    Attributes:
+        has_warned_missing_pretrained_config (bool): Whether to warn about missing pretrained config
+    """
 
     has_warned_missing_pretrained_config: bool = False
 
