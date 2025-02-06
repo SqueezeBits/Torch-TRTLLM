@@ -65,7 +65,7 @@ TBD
 - GPTAttentionPlugin
 - GemmPlugin
 - LoRAPlugin
-- AllGatherPlugin, AllReducePlugin(for Tensor Parallelism)
+- AllGatherPlugin, AllReducePlugin (for Tensor Parallelism)
 
 ## What's Next?
 - Quantization
