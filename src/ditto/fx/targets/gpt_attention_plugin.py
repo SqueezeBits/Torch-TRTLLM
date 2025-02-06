@@ -18,7 +18,7 @@ import numpy as np
 import tensorrt as trt
 import torch
 from loguru import logger
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 from tensorrt_llm.functional import (
     AttentionMaskType,
     PositionEmbeddingType,
@@ -86,6 +86,12 @@ class ROPEConfig(StrictlyTyped):
     rotary_embedding_max_positions: int = 1024
     rotary_embedding_original_max_positions: int = 1024
     llama3_scaling_config: Llama3ScalingConfig = Field(default_factory=Llama3ScalingConfig, exclude=True)
+    _longrope_scaling_short_factors: list[float] = PrivateAttr(default_factory=list)
+    _longrope_scaling_long_factors: list[float] = PrivateAttr(default_factory=list)
+    _rotary_inv_freq: np.ndarray = PrivateAttr(default_factory=lambda: np.array([]))
+    _rotary_cos_sin: np.ndarray = PrivateAttr(default_factory=lambda: np.array([]))
+    _long_rope_rotary_inv_freq: np.ndarray | None = PrivateAttr(default=None)
+    _long_rope_rotary_cos_sin: np.ndarray | None = PrivateAttr(default=None)
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, ROPEConfig):
