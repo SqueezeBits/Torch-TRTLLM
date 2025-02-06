@@ -28,11 +28,42 @@ Ditto is an open-source framework that enables **building TensorRT engines direc
 
 ## Benchmarks
 
-### Accuracy
-TBD
+Note that the quality evaluation results are benchmarked using  [TensorRT-LLM llmapi](https://github.com/NVIDIA/TensorRT-LLM/tree/main/tensorrt_llm/llmapi) with [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness/tree/main), while the performance results are benchmarked using [TensorRT-LLM gptManagerBenchmark](https://github.com/NVIDIA/TensorRT-LLM/tree/main/benchmarks/cpp). Both the GEMM plugin and the GPT attention plugin are enabled during all benchmarks.
 
-### Latency
-TBD
+
+### [meta-llama/Llama-3.3-70B-Instruct](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct)
+| | MMLU<br/>(0-shot) | wikitext2 | gpqa_main_zeroshot | arc_challenge<br/>(0-shot) |ifeval<br>(0-shot) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Ditto | 0.819 | 3.9551 | 0.5067 | 0.9283 | 0.915025 |
+| TensorRT-LLM | 0.819 | 3.9551 | 0.5067 | 0.9283 | 0.915025 |
+
+| token throughput | 4 * A100-SXM4-80GB (4 way TP) |
+| :--- | :---: |
+| TensorRT-LLM | 1751.6 (token/sec) |
+| Ditto | 1759.18 (token/sec) |
+
+### [meta-llama/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)
+| | MMLU<br/>(0-shot) | wikitext2 | gpqa_main_zeroshot | arc_challenge<br/>(0-shot) |ifeval<br>(0-shot) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Ditto | 0.6799 | 8.6402 | 0.3504 | 0.8234 | 0.8153 |
+| TensorRT-LLM | 0.6799 | 8.6402 | 0.3504 | 0.8234 | 0.8153 |
+
+| token throughput | A100-SXM4-80GB | A6000 | L40 |
+| :--- | :---: | :---: | :---: |
+| Ditto | 3357.89 (token/sec) | 1479.75 (token/sec) | 1085.23 (token/sec) |
+| TensorRT-LLM | 3317.96 (token/sec) | 1508.59 (token/sec) | 1086.53 (token/sec) |
+
+### [kyutai/helium-1-preview-2b](https://huggingface.co/kyutai/helium-1-preview-2b)
+| | MMLU<br/>(0-shot) | wikitext2 |
+| :--- | :---: | :---: |
+| Ditto | 0.486 | 11.3724 |
+| TensorRT-LLM | - | - |
+
+| token throughput | A6000 | L40 |
+| :--- | :---: | :---: |
+| Ditto | 1439.5 (token/sec) | 1340.49 (token/sec) | 
+| TensorRT-LLM | - | - | 
+
 
 ## Support Matrix
 
