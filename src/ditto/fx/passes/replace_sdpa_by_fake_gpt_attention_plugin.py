@@ -37,6 +37,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
         save_for_debug("before_attn_plugin", graph_module)
         layer_idx = -1
         graph = graph_module.graph
+        global_rope_config: ROPEConfig | None = None
         global_plugin_inputs: GPTAttentionPluginInputs | None = None
 
         modified = False
@@ -52,11 +53,23 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
             layer_idx += 1
             logger.debug(f"Replacing SDPA at layer {layer_idx} with {mha = }")
 
-            rope_inputs = mha.rope_config.compute_rope_constants()
+            if global_rope_config is None:
+                global_rope_config = mha.rope_config
+            elif global_rope_config != mha.rope_config:
+                logger.warning(
+                    f"Local RoPE config mismatched with the global one at layer {layer_idx}:\n"
+                    f"  * global: {global_rope_config}\n"
+                    f"  * query: {mha.rope_config}\n"
+                    "Will use the global RoPE config anyway."
+                )
+
             if global_plugin_inputs is None:
                 logger.debug(f"Computing RoPE constants at layer {layer_idx}")
                 rotary_inv_freq, rotary_cos_sin, long_rope_rotary_inv_freq, long_rope_rotary_cos_sin = (
-                    torch.nn.Parameter(torch.from_numpy(x)) if x is not None else None for x in rope_inputs
+                    global_rope_config.rotary_inv_freq,
+                    global_rope_config.rotary_cos_sin,
+                    global_rope_config.long_rope_rotary_inv_freq,
+                    global_rope_config.long_rope_rotary_cos_sin,
                 )
                 last_placeholder = list(graph.find_nodes(op="placeholder"))[-1]
                 with graph.inserting_after(last_placeholder):
@@ -66,7 +79,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                         _ = GetAttr.create(graph, "long_rope_rotary_inv_freq", long_rope_rotary_inv_freq)
                     if long_rope_rotary_cos_sin is not None:
                         _ = GetAttr.create(graph, "long_rope_rotary_cos_sin", long_rope_rotary_cos_sin)
-                global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph, mha.rope_config.is_rope)
+                global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph, global_rope_config.is_rope)
                 logger.debug(f"Found GPTAttentionPluginInputs for layer {layer_idx}")
 
             fake_gpt_attention_plugin = GPTAttentionPlugin(
