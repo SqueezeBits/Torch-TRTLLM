@@ -95,6 +95,42 @@ class ROPEConfig(StrictlyTyped):
         """
         return self.position_embedding_type.is_rope() and self.rotary_embedding_dim != 0
 
+    @property
+    def longrope_scaling_short_factors(self) -> np.ndarray:
+        """Get the short-range scaling factors for long RoPE.
+
+        Returns:
+            np.ndarray: Array of float32 scaling factors for short-range components.
+        """
+        return np.asarray(self._longrope_scaling_short_factors).astype(np.float32)
+
+    @longrope_scaling_short_factors.setter
+    def longrope_scaling_short_factors(self, value: list[float]) -> None:
+        """Set the short-range scaling factors for long RoPE.
+
+        Args:
+            value (list[float]): List of scaling factors for short-range components.
+        """
+        self._longrope_scaling_short_factors = value
+
+    @property
+    def longrope_scaling_long_factors(self) -> np.ndarray:
+        """Get the long-range scaling factors for long RoPE.
+
+        Returns:
+            np.ndarray: Array of float32 scaling factors for long-range components.
+        """
+        return np.asarray(self._longrope_scaling_long_factors).astype(np.float32)
+
+    @longrope_scaling_long_factors.setter
+    def longrope_scaling_long_factors(self, value: list[float]) -> None:
+        """Set the long-range scaling factors for long RoPE.
+
+        Args:
+            value (list[float]): List of scaling factors for long-range components.
+        """
+        self._longrope_scaling_long_factors = value
+
     @classmethod
     def from_pretrained_config(
         cls,
@@ -144,6 +180,7 @@ class ROPEConfig(StrictlyTyped):
             default={},
             not_found_ok=True,
         )
+
         if rope_scaling:
             rope_config.rotary_embedding_scale = rope_scaling.get("factor", rope_config.rotary_embedding_scale)
             rope_config.rotary_embedding_original_max_positions = 1024  # TODO: need to be updated for long_rope type
@@ -151,13 +188,24 @@ class ROPEConfig(StrictlyTyped):
             if rotary_scaling_type is not None:
                 rope_config.rotary_embedding_scale_type = RotaryScalingType.from_string(rotary_scaling_type)
             rope_config.llama3_scaling_config = Llama3ScalingConfig(**rope_scaling)
+            if rotary_scaling_type == "longrope":
+                assert all(factor in rope_scaling for factor in ("short_factor", "long_factor"))
+                rope_config.position_embedding_type = PositionEmbeddingType.long_rope
+                original_max_position_embeddings = lookup_attributes(
+                    pretrained_config,
+                    "original_max_position_embeddings",
+                    default=rope_config.rotary_embedding_original_max_positions,
+                )
+                rope_config.rotary_embedding_original_max_positions = original_max_position_embeddings
+                rope_config.longrope_scaling_short_factors = rope_scaling["short_factor"]
+                rope_config.longrope_scaling_long_factors = rope_scaling["long_factor"]
         if positional_embedding_type is not None:
             rope_config.position_embedding_type = positional_embedding_type
         if rotary_embedding_dim is not None:
             rope_config.rotary_embedding_dim = rotary_embedding_dim
         return rope_config
 
-    def compute_rope_constants(self) -> tuple[np.ndarray, np.ndarray]:
+    def compute_rope_constants(self) -> tuple[np.ndarray, np.ndarray, np.ndarray | None, np.ndarray | None]:
         """Compute RoPE constants for attention plugin.
 
         Returns:
@@ -166,27 +214,62 @@ class ROPEConfig(StrictlyTyped):
                 - embed_positions: Pre-computed position embeddings
         """
         # TODO: replace this by `Attention.create_attention_const_params`
-        rotary_inv_freq, embed_positions = RopeEmbeddingUtils.create_sinusoidal_positions_for_attention_plugin(
-            self.rotary_embedding_max_positions,
-            self.rotary_embedding_dim,
-            self.rotary_embedding_base,
-            self.rotary_embedding_scale,
-            self.rotary_embedding_scale_type,
-            self.llama3_scaling_config.model_dump(),
-        )
+        if self.rotary_embedding_scale_type != RotaryScalingType.longrope:
+            (
+                rotary_inv_freq,
+                embed_positions_for_gpt_attention,
+            ) = RopeEmbeddingUtils.create_sinusoidal_positions_for_attention_plugin(
+                self.rotary_embedding_max_positions,
+                self.rotary_embedding_dim,
+                self.rotary_embedding_base,
+                self.rotary_embedding_scale,
+                self.rotary_embedding_scale_type,
+                self.llama3_scaling_config.model_dump(),
+            )
+            long_rope_rotary_inv_freq, long_rope_embed_positions_for_gpt_attention = None, None
+        else:
+            (
+                _,
+                _,
+                (rotary_inv_freq, embed_positions_for_gpt_attention),
+                (long_rope_rotary_inv_freq, long_rope_embed_positions_for_gpt_attention),
+                mscale,
+            ) = RopeEmbeddingUtils.create_sinusoidal_positions_long_rope(
+                self.rotary_embedding_max_positions,
+                self.rotary_embedding_original_max_positions,
+                self.rotary_embedding_dim,
+                self.rotary_embedding_base,
+                self.longrope_scaling_short_factors,
+                self.longrope_scaling_long_factors,
+            )
+            self.rotary_embedding_short_m_scale = self.rotary_embedding_long_m_scale = mscale
+
         with open_debug_artifact("rope_inputs.pt", "wb") as f:
             if f:
+                rope_inputs = {
+                    "rotary_inv_freq": torch.from_numpy(rotary_inv_freq),
+                    "rotary_cos_sin": torch.from_numpy(embed_positions_for_gpt_attention),
+                }
+                if long_rope_rotary_inv_freq is not None:
+                    rope_inputs.update(
+                        {
+                            "long_rope_rotary_inv_freq": torch.from_numpy(long_rope_rotary_inv_freq),
+                            "long_rope_rotary_cos_sin": torch.from_numpy(long_rope_embed_positions_for_gpt_attention),
+                        }
+                    )
                 torch.save(
-                    {
-                        "rotary_inv_freq": torch.from_numpy(rotary_inv_freq),
-                        "rotary_cos_sin": torch.from_numpy(embed_positions),
-                    },
+                    rope_inputs,
                     f,
                 )
         with open_debug_artifact("rope_config.json") as f:
             if f:
                 f.write(self.model_dump_json(indent=2))
-        return rotary_inv_freq, embed_positions
+        return (
+            rotary_inv_freq,
+            embed_positions_for_gpt_attention,
+            long_rope_rotary_inv_freq,
+            long_rope_embed_positions_for_gpt_attention,
+        )
 
 
 T = TypeVar("T")
