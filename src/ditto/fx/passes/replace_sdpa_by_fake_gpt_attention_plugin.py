@@ -65,13 +65,20 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
 
             if global_plugin_inputs is None:
                 logger.debug(f"Computing RoPE constants at layer {layer_idx}")
-                rotary_inv_freq, rotary_cos_sin = (
-                    torch.nn.Parameter(torch.from_numpy(x)) for x in global_rope_config.compute_rope_constants()
+                rotary_inv_freq, rotary_cos_sin, long_rope_rotary_inv_freq, long_rope_rotary_cos_sin = (
+                    global_rope_config.rotary_inv_freq,
+                    global_rope_config.rotary_cos_sin,
+                    global_rope_config.long_rope_rotary_inv_freq,
+                    global_rope_config.long_rope_rotary_cos_sin,
                 )
                 last_placeholder = list(graph.find_nodes(op="placeholder"))[-1]
                 with graph.inserting_after(last_placeholder):
                     _ = GetAttr.create(graph, "rotary_inv_freq", rotary_inv_freq)
                     _ = GetAttr.create(graph, "rotary_cos_sin", rotary_cos_sin)
+                    if long_rope_rotary_inv_freq is not None:
+                        _ = GetAttr.create(graph, "long_rope_rotary_inv_freq", long_rope_rotary_inv_freq)
+                    if long_rope_rotary_cos_sin is not None:
+                        _ = GetAttr.create(graph, "long_rope_rotary_cos_sin", long_rope_rotary_cos_sin)
                 global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph, global_rope_config.is_rope)
                 logger.debug(f"Found GPTAttentionPluginInputs for layer {layer_idx}")
 

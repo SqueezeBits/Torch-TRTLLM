@@ -42,6 +42,9 @@ The default device for the PyTorch modules and tensors.
 DEFAULT_MAX_POS_EMBEDDING: int = 2048
 """The default maximum position embedding size."""
 
+DEFAULT_ROTARY_EMBEDDING_ORIGINAL_MAX_POSITIONS: int = 1024
+"""The default original maximum position embedding size."""
+
 DEFAULT_ONNX_PROTO_SIZE_THRESHOLD: int = int(os.getenv("DEFAULT_ONNX_PROTO_SIZE_THRESHOLD", "0"))
 """The default size threshold (bytes) for write weights in ONNX as an external data."""
 
