@@ -292,7 +292,7 @@ class ROPEConfig(StrictlyTyped):
                 assert all(factor in rope_scaling for factor in ("short_factor", "long_factor"))
                 # NOTE: The rope_config.position_embedding_type of long_rope will be overwritten by
                 #       positional_embedding_type parameter. TensorRT-LLM uses long_rope
-                #       position_embedding_type, but setting it to long_rope results in an error in
+                #       position_embedding_type for phi-3.5, but setting it to long_rope results in an error in
                 #       Ditto. However, since this doesn't affect functionality, we can ignore it for now.
                 # TODO: Fix above issue.
                 rope_config.position_embedding_type = PositionEmbeddingType.long_rope
@@ -312,12 +312,10 @@ class ROPEConfig(StrictlyTyped):
         return rope_config
 
     def compute_rope_constants(self) -> None:
-        """Compute RoPE constants for attention plugin.
+        """Compute RoPE constants used by the GPT attention plugin.
 
-        Returns:
-            tuple[np.ndarray, np.ndarray]: A tuple containing:
-                - rotary_inv_freq: Inverse frequency tensor for RoPE
-                - embed_positions: Pre-computed position embeddings
+        This method computes the inverse frequency and cosine/sine tensors needed for RoPE,
+        handling both standard RoPE and long RoPE configurations.
         """
         # TODO: replace this by `Attention.create_attention_const_params`
         if self.rotary_embedding_scale_type != RotaryScalingType.longrope:
