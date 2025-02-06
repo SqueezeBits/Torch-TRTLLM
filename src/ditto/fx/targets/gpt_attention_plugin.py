@@ -31,6 +31,7 @@ from torch.fx import Graph, Node
 from transformers import PretrainedConfig
 from typing_extensions import Self
 
+from ...constants import DEFAULT_ROTARY_EMBEDDING_ORIGINAL_MAX_POSITIONS
 from ...debug import open_debug_artifact
 from ...types import StrictlyTyped
 from .fake_tensor_mode import is_in_fake_tensor_mode
@@ -282,7 +283,7 @@ class ROPEConfig(StrictlyTyped):
 
         if rope_scaling:
             rope_config.rotary_embedding_scale = rope_scaling.get("factor", rope_config.rotary_embedding_scale)
-            rope_config.rotary_embedding_original_max_positions = 1024
+            rope_config.rotary_embedding_original_max_positions = DEFAULT_ROTARY_EMBEDDING_ORIGINAL_MAX_POSITIONS
             rotary_scaling_type: str | None = rope_scaling.get("type", rope_scaling.get("rope_type", None))
             if rotary_scaling_type is not None:
                 rope_config.rotary_embedding_scale_type = RotaryScalingType.from_string(rotary_scaling_type)
