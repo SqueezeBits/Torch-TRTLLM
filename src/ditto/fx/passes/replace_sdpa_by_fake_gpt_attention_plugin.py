@@ -31,6 +31,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
     """Replace F.scaled_dot_product_attention by FakeGPTAttentionPlugin (required for trtllm)."""
 
     dtype: torch.dtype
+    use_paged_context_fmha: bool = False
 
     # pylint: disable-next=too-many-locals
     def call(self, graph_module: GraphModule) -> PassResult:
@@ -82,6 +83,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 layer_idx_in_cache_pool=layer_idx,
                 head_size=mha.embed_dim,
                 type_id=DataType(self.dtype).to(trt.DataType),
+                use_paged_context_fmha=self.use_paged_context_fmha,
                 **mha.rope_config.model_dump(),
             )
             with graph.inserting_before(node):

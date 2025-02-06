@@ -145,6 +145,7 @@ def build(
     gather_context_logits: bool = False,
     gather_generation_logits: bool = False,
     gather_all_logits: bool = False,
+    use_paged_context_fmha: bool = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
     assert not (tp_size > 1 and peft_ids), "Tensor Parallelism is not supported with LoRA"
@@ -187,6 +188,7 @@ def build(
         logits_dtype=logits_dtype,
         gather_context_logits=gather_context_logits,
         gather_generation_logits=gather_generation_logits,
+        use_paged_context_fmha=use_paged_context_fmha,
     )
     minutes, seconds = divmod(int(time.perf_counter() - start_time), 60)
     logger.info(f"Build completed in {minutes:02d}:{seconds:02d}")

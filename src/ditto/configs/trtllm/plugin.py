@@ -50,12 +50,13 @@ class TRTLLMPluginConfig(StrictlyTyped):
     paged_state: bool = False
 
     @classmethod
-    def create_from(cls, dtype: torch.dtype, world_size: int = 1) -> Self:
+    def create_from(cls, dtype: torch.dtype, *, world_size: int = 1, use_paged_context_fmha: bool = False) -> Self:
         """Create a plugin configuration from a given dtype and world size.
 
         Args:
-            dtype: The dtype to create the plugin configuration for.
-            world_size: The world size to create the plugin configuration for.
+            dtype (torch.dtype): The dtype to create the plugin configuration for.
+            world_size (int, optional): The world size to create the plugin configuration for. Defaults to 1.
+            use_paged_context_fmha (bool, optional): Whether to use paged context FMHA. Defaults to False.
 
         Returns:
             The plugin configuration.
@@ -65,6 +66,7 @@ class TRTLLMPluginConfig(StrictlyTyped):
             gpt_attention_plugin=plugin_flag,
             gemm_plugin=plugin_flag,
             nccl_plugin=plugin_flag if world_size > 1 else None,
+            use_paged_context_fmha=use_paged_context_fmha,
         )
 
 

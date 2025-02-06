@@ -68,6 +68,7 @@ def trtllm_build(
     logits_dtype: DTypeLiteral = "float32",
     gather_context_logits: bool = False,
     gather_generation_logits: bool = False,
+    use_paged_context_fmha: bool = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a PyTorch model.
 
@@ -96,9 +97,14 @@ def trtllm_build(
         logits_dtype (DTypeLiteral): Dtype of the output logits
         gather_context_logits (bool): Whether to gather context token logits for benchmark
         gather_generation_logits (bool): Whether to gather generation token logits for benchmark
+        use_paged_context_fmha (bool): Whether to use paged context FMHA
     """
     mapping = mapping or TRTLLMMapping()
-    plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model.config.torch_dtype, mapping.world_size)
+    plugin_config = plugin_config or TRTLLMPluginConfig.create_from(
+        model.config.torch_dtype,
+        world_size=mapping.world_size,
+        use_paged_context_fmha=use_paged_context_fmha,
+    )
     profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(
         model.config,
         plugin_config,
@@ -252,11 +258,14 @@ def build_trtllm_engine_components(
     mapping = mapping or TRTLLMMapping()
     for rank, graph_module_per_rank in parallelize(graph_module, mapping):
         if rank == 0:
-            yield "config.json", generate_trtllm_engine_config(
-                graph_module_per_rank,
-                build_config,
-                mapping,
-                architecture=network_name,
+            yield (
+                "config.json",
+                generate_trtllm_engine_config(
+                    graph_module_per_rank,
+                    build_config,
+                    mapping,
+                    architecture=network_name,
+                ),
             )
             if (
                 lora_state_dicts := verify(
@@ -279,14 +288,17 @@ def build_trtllm_engine_components(
             "Building TensorRT engine{for_rank}",
             for_rank=f" for rank {rank}" if mapping.world_size > 1 else "",
         )
-        yield f"rank{rank}.engine", convert(
-            graph_module_per_rank,
-            argument_hint,
-            trt_config or TensorRTConfig(),
-            engine_cache=engine_cache,
-            network_name=network_name,
-            output_names=output_names,
-            rank=rank,
+        yield (
+            f"rank{rank}.engine",
+            convert(
+                graph_module_per_rank,
+                argument_hint,
+                trt_config or TensorRTConfig(),
+                engine_cache=engine_cache,
+                network_name=network_name,
+                output_names=output_names,
+                rank=rank,
+            ),
         )
 
 
