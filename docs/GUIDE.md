@@ -40,22 +40,39 @@ For example, the following commands are equivalent:
 
 #### Full Usage
 ```
-Usage: ditto build [OPTIONS] MODEL_ID                                                                                                    
-                                                                                                                                          
-╭─ Arguments ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ *    model_id      TEXT  [default: None] [required]                                                                                    │
-╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ --add-output                                                               TEXT  [default: <class 'list'>]                             │
-│ --output-dir                                                               TEXT                                                        │
-│ --device                                                                   TEXT  [default: cuda]                                       │
-│ --dtype                                                                    TEXT  [default: auto]                                       │
-│ --verbose                           --no-verbose                                 [default: no-verbose]                                 │
-│ --trust-remote-code                 --no-trust-remote-code                       [default: no-trust-remote-code]                       │
-│ --run-matmuls-in-fp32               --no-run-matmuls-in-fp32                     [default: no-run-matmuls-in-fp32]                     │
-│ --run-activations-in-model-dtype    --no-run-activations-in-model-dtype          [default: run-activations-in-model-dtype]             │
-│ --help                                                                           Show this message and exit.                           │
-╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Usage: ditto build [OPTIONS] MODEL_ID                                                                                                               
+                                                                                                                                                     
+ Build a TensorRT-LLM engine from a pretrained model.                                                                                                
+                                                                                                                                                     
+╭─ Arguments ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ *    model_id      TEXT  A pretrained model name or path. [default: None] [required]                                                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ --add-output                                                                 TEXT               List of node names to add as output. See docs/DEBUG.md for details.                  │
+│                                                                                                 [default: <class 'list'>]                                                            │
+│ --peft-ids                                                                   TEXT               List of LoRA adapter IDs to apply to the model. [default: <class 'list'>]            │
+│ --output-dir                                                                 TEXT               Path to the output directory. If not specified, `./engines/<model_id>` will be used. │
+│ --dtype                                                                      TEXT               Data type to use for the model. [default: auto]                                      │
+│ --verbose-failure                     --no-verbose-failure                                      Enable showing the value in those local variables. [default: no-verbose-failure]     │
+│ --trust-remote-code                   --no-trust-remote-code                                    Trust remote code. [default: no-trust-remote-code]                                   │
+│ --run-matmuls-in-fp32                 --no-run-matmuls-in-fp32                                  Run matmuls in fp32. [default: no-run-matmuls-in-fp32]                               │
+│ --run-activations-in-model-dtype      --no-run-activations-in-model-dtype                       Run activations in model dtype. [default: run-activations-in-model-dtype]            │
+│ --max-batch-size                                                             INTEGER            Maximum number of requests that the engine can schedule. [default: 256]              │
+│ --max-seq-len                                                                INTEGER            Maximum total length of one request, including prompt and generated output.          │
+│                                                                                                 [default: None]                                                                      │
+│ --max-num-tokens                                                             INTEGER            Maximum number of batched input tokens after padding is removed in each batch.       │
+│                                                                                                 [default: 8192]                                                                      │
+│ --opt-num-tokens                                                             INTEGER            Optimal number of batched input tokens after padding is removed in each batch.       │
+│                                                                                                 [default: None]                                                                      │
+│ --max-beam-width                                                             INTEGER            Maximum number of beams for beam search decoding. [default: 1]                       │
+│ --tp-size                                                                    INTEGER            N-way tensor parallelism size. [default: 1]                                          │
+│ --logits-dtype                                                               [float16|float32]  Data type of logits. [default: float32]                                              │
+│ --gather-context-logits               --no-gather-context-logits                                Enable gathering context logits. [default: no-gather-context-logits]                 │
+│ --gather-generation-logits            --no-gather-generation-logits                             Enable gathering generation logits. [default: no-gather-generation-logits]           │
+│ --gather-all-logits                   --no-gather-all-logits                                    Enable both `gather_context_logits` and `gather_generation_logits`.                  │
+│                                                                                                 [default: no-gather-all-logits]                                                      │
+│ --help                            -h                                                            Show this message and exit.                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 
