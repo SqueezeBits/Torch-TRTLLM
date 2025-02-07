@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # mypy: disable-error-code=misc
-# pylint: disable=dangerous-default-value, too-many-positional-arguments, too-many-arguments, too-many-locals
+# pylint: disable=too-many-positional-arguments, too-many-arguments, too-many-locals
 import os
 import time
 from typing import Annotated, Literal
@@ -45,6 +45,8 @@ if not DISABLE_TRANSFORMER_PATCHES:
     logger.info("To prevent custom patches for transformers set the environment variable DISABLE_TRANSFORMER_PATCHES=1")
 
 app = Typer(context_settings={"help_option_names": ["-h", "--help"]})
+
+FLOATING_POINT_DTYPES = ("float32", "float16", "bfloat16")
 
 
 @app.command()
@@ -134,14 +136,31 @@ def build(
         Option(default_factory=list, help="List of node names to add as output. See docs/DEBUG.md for details."),
     ],
     peft_ids: Annotated[
-        list[str], Option(default_factory=list, help="List of LoRA adapter IDs to apply to the model.")
+        list[str],
+        Option(
+            "-p",
+            "--peft-ids",
+            default_factory=list,
+            help="List of LoRA adapter IDs to apply to the model.",
+        ),
     ],
     output_dir: Annotated[
-        str, Option(help="Path to the output directory. If not specified, `./engines/<model_id>` will be used.")
+        str,
+        Option(
+            "-o",
+            "--output-dir",
+            help="Path to the output directory. If not specified, `./engines/<model_id>` will be used.",
+        ),
     ] = "",
-    dtype: Annotated[str, Option(help="Data type to use for the model.")] = "auto",
-    verbose_failure: Annotated[bool, Option(help="Enable showing the value in those local variables.")] = False,
-    trust_remote_code: Annotated[bool, Option(help="Trust remote code.")] = False,
+    dtype: Annotated[
+        str,
+        Option(
+            click_type=click.Choice(("auto", *FLOATING_POINT_DTYPES)),
+            help="Data type to use for the model. Defaults to `auto`.",
+        ),
+    ] = "auto",
+    verbose_failure: Annotated[bool, Option(help="Show local variable values on failure.")] = False,
+    trust_remote_code: Annotated[bool, Option(help="Trust remote code from Hugging Face Hub.")] = False,
     run_matmuls_in_fp32: Annotated[bool, Option(help="Run matmuls in fp32.")] = False,
     run_activations_in_model_dtype: Annotated[bool, Option(help="Run activations in model dtype.")] = True,
     max_batch_size: Annotated[int, Option(help="Maximum number of requests that the engine can schedule.")] = 2048,
@@ -155,18 +174,22 @@ def build(
         int | None, Option(help="Optimal number of batched input tokens after padding is removed in each batch.")
     ] = None,
     max_beam_width: Annotated[int, Option(help="Maximum number of beams for beam search decoding.")] = 1,
-    tp_size: Annotated[int, Option(help="N-way tensor parallelism size.")] = 1,
+    tp_size: Annotated[int, Option(help="N-way tensor parallelism size.", min=1)] = 1,
     logits_dtype: Annotated[
-        DTypeLiteral, Option(click_type=click.Choice(["float16", "float32"]), help="Data type of logits.")
+        DTypeLiteral,
+        Option(
+            click_type=click.Choice(FLOATING_POINT_DTYPES),
+            help="Data type of logits. Defaults to `float32`.",
+        ),
     ] = "float32",
     gather_context_logits: Annotated[bool, Option(help="Enable gathering context logits.")] = False,
     gather_generation_logits: Annotated[bool, Option(help="Enable gathering generation logits.")] = False,
     gather_all_logits: Annotated[
-        bool, Option(help="Enable both `gather_context_logits` and `gather_generation_logits`.")
+        bool, Option(help="Equivalent to `--gather-context-logits --gather-generation-logits`.")
     ] = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
-    assert not (tp_size > 1 and peft_ids), "Tensor Parallelism is not supported with LoRA"
+    assert not (tp_size > 1 and peft_ids), "Tensor parallelism with LoRA is currently not supported"
     if gather_all_logits:
         gather_context_logits = gather_generation_logits = True
     output_dir = resolve_output_dir(output_dir, model_id)
@@ -234,11 +257,11 @@ def get_model_dtype(dtype: str) -> torch.dtype | Literal["auto"]:
         raise ValueError(f"Unsupported torch data type: {dtype}") from e
 
 
-def resolve_output_dir(output_dir: str, model_id: str) -> str:
+def resolve_output_dir(output_dir: str | None, model_id: str) -> str:
     """Resolve the output directory path.
 
     Args:
-        output_dir (str): User-specified output directory path
+        output_dir (str | None): User-specified output directory path
         model_id (str): Model identifier used to generate default path
 
     Returns:
