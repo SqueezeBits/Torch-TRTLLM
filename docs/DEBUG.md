@@ -19,17 +19,6 @@ The checkpoints in the directory `meta-llama/Llama-2-7b-chat-hf-ckpt` are genera
 python /workspace/tensorrt_llm/examples/llama/convert_checkpoint.py --model_dir meta-llama/Llama-2-7b-chat-hf --dtype float16 --output_dir meta-llama/Llama-2-7b-chat-hf-ckpt
 ```
 
-### Note
-If you want to create `plugin.txt` file, you need to manually patch the function `gpt_attention_plugin` in the file `/workspace/tensorrt_llm/tensorrt_llm/functional.py` as written in [ditto/patches.py](src/ditto/patches.py).
-
-Just copy and paste the sections wrapped by the following comments at the right place in the code:
-```
-# ============================ patch start ============================
-<the contents to copy&paste>
-# ============================ patch end ============================
-```
-
-
 ## Adding Extra Output Tensors into Engine
 ### Using Ditto
 * Use the flag `--add-output`, possibly multiple times, to specify the nodes to be added to the outputs.

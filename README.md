@@ -19,6 +19,12 @@ Ditto is an open-source framework that enables **building TensorRT engines direc
 <img src="./docs/assets/ditto_flow.png" alt="Ditto logo" width="800"/>
 <div align="left">
 
+## Getting Started
+* [Installation](docs/GUIDE.md#a-installation)
+* [Quick Start Guide](docs/GUIDE.md#b-quick-start-guide)
+* [Debugging](docs/DEBUG.md)
+
+
 ## Key Advantages
 - Directly converting new HF models into TensorRT engines that are not supported by TensorRT-LLM.
     - As of the publication date of this document (February 10, 2025), [Helium](https://huggingface.co/kyutai/helium-1-preview-2b) is supported in Ditto, while it is not in TensorRT-LLM.
