@@ -13,7 +13,7 @@
 
 # Ditto - Direct Torch to TensorRT-LLM Optimizer
 
-Ditto is an open-source framework that enables **building TensorRT engines directly from PyTorch HuggingFace models**. Traditionally, building a TensorRT engine for a new transformer model requires implementing the model definition with TensorRT networks and converting the checkpoint into the corresponding format. Ditto eliminates the intermediate steps, allowing transformer models to be directly converted into TensorRT engines without additional effort. By simplifying this process, **Ditto aims to maximize efficiency in deploying transformer models on TensorRT**.
+Ditto is an open-source framework that enables **direct conversion of HuggingFace `PreTrainedModel`s into TensorRT-LLM engines**. Normally, building a TensorRT-LLM engine consists of two steps - checkpoint conversion and `trtllm-build` - both of which rely on pre-defined model architectures. As a result, converting a novel model requires porting the model with [TensorRT-LLM's Python API](https://github.com/NVIDIA/TensorRT-LLM?tab=readme-ov-file#tensorrt-llm-overview) and writing a custom checkpoint conversion script. **By automating these dull procedures, Ditto aims to make TensorRT-LLM more accessible to the broader AI community**.
 
 <div align="center">
 <img src="./docs/assets/ditto_flow.png" alt="Ditto logo" width="800"/>
@@ -26,11 +26,12 @@ Ditto is an open-source framework that enables **building TensorRT engines direc
 
 
 ## Key Advantages
-- Directly converting new HF models into TensorRT engines that are not supported by TensorRT-LLM.
+- Ease-of-use: Ditto enables users to convert models with a single command.
+```
+ditto build <huggingface-model-name>
+```
+- Allowing novel model architectures to be converted into TensorRT engines.
     - As of the publication date of this document (February 10, 2025), [Helium](https://huggingface.co/kyutai/helium-1-preview-2b) is supported in Ditto, while it is not in TensorRT-LLM.
-- Directly converting quantized HF models.
-- Enhancing the usability of custom plugins.
-- Allowing for more flexible development of model architectures.
 
 ## Benchmarks
 
