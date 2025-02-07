@@ -276,6 +276,7 @@ parse_args() {
     # Handle TensorRT-LLM repository path
     if [ -z "$TRTLLM_REPO" ]; then
         # Get default TensorRT-LLM directory only if --trtllm-repo was not specified
+        pip install platformdirs
         DEFAULT_TRTLLM_DIR=$(python -c 'from platformdirs import user_cache_dir; print(f"{user_cache_dir()}/tensorrt-llm", end="")')
         if [ ! -d "$DEFAULT_TRTLLM_DIR" ]; then
             # Extract TensorRT-LLM version from pyproject.toml
