@@ -144,7 +144,7 @@ class NodeSpecialization(StrictlyTyped, ABC):
             data.update(hotfix)
         for name, field in self.model_fields.items():
             if field.exclude:
-                if name == "asterick":
+                if name == "asterisk":
                     append_in_args = False
                 continue
             value = data[name]

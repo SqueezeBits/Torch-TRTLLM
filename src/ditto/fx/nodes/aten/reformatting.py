@@ -19,7 +19,7 @@ from torch.fx.node import Node
 
 from ....types import ShapeArg
 from ...utils import get_tensor_metadata
-from ..asterick import Asterick
+from ..asterisk import Asterisk
 from .aten_op import ATenOp, FinalATenOp
 from .utils import make_dim_nonnegative
 
@@ -49,7 +49,7 @@ class SingleDimensionReshape(ATenOp):
 class Expand(FinalATenOp):
     this: Node
     shape: ShapeArg
-    asterick: None = Asterick
+    asterisk: None = Asterisk
     implicit: bool = False
 
 

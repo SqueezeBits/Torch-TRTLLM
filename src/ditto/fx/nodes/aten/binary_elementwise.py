@@ -19,7 +19,7 @@ import torch
 from torch.fx import Node
 
 from ....types import Number
-from ..asterick import Asterick
+from ..asterisk import Asterisk
 from .aten_op import FinalATenOp
 from .binary import Binary
 
@@ -55,13 +55,13 @@ class AddTensor(Add, FinalATenOp):
     Attributes:
         this (Node | Number): The first operand
         other (Node): The second tensor operand
-        asterick (None): Placeholder indicating mandatory keyword argument
+        asterisk (None): Placeholder indicating mandatory keyword argument
         alpha (Number, optional): Scaling factor for other. The operation performed for a non-default value is
             `this + alpha * other`. Defaults to 1.
     """
 
     other: Node
-    asterick: None = Asterick
+    asterisk: None = Asterisk
     alpha: Number = 1
 
 
@@ -459,13 +459,13 @@ class SubTensor(Sub, FinalATenOp):
     Attributes:
         this (Node): The first tensor operand
         other (Node): The second tensor operand
-        asterick (None): Placeholder indicating mandatory keyword argument
+        asterisk (None): Placeholder indicating mandatory keyword argument
         alpha (Number, optional): Scaling factor for other. The operation performed for a non-default value is
             `this - alpha * other`. Defaults to 1.
     """
 
     other: Node
-    asterick: None = Asterick
+    asterisk: None = Asterisk
     alpha: Number = 1
 
 

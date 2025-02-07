@@ -16,14 +16,14 @@
 import torch
 
 from ...utils import get_tensor_metadata
-from ..asterick import Asterick
+from ..asterisk import Asterisk
 from .aten_op import FinalATenOp
 from .unary_elementwise import UnaryElementwise
 
 
 @UnaryElementwise.register(torch.ops.aten.clone.default)
 class Clone(UnaryElementwise, FinalATenOp):
-    asterick: None = Asterick
+    asterisk: None = Asterisk
     memory_format: torch.memory_format | None = None
 
 
@@ -45,7 +45,7 @@ class ToCopy(UnaryElementwise, FinalATenOp):
     ```
     """
 
-    asterick: None = Asterick
+    asterisk: None = Asterisk
     dtype: torch.dtype | None = None
     layout: torch.layout | None = None
     device: torch.device | None = None

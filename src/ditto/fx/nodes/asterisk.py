@@ -14,4 +14,4 @@
 
 from pydantic import Field
 
-Asterick = Field(default=None, exclude=True)
+Asterisk = Field(default=None, exclude=True)

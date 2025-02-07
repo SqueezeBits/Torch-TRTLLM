@@ -19,7 +19,7 @@ from pydantic import Field
 from torch.fx.node import Node
 
 from ...utils import get_tensor_metadata
-from ..asterick import Asterick
+from ..asterisk import Asterisk
 from .aten_op import ATenOp, FinalATenOp
 from .utils import make_dim_nonnegative
 
@@ -28,7 +28,7 @@ class Reduction(ATenOp):
     this: Node
     dim: list[int] = Field(max_length=1, min_length=1)
     keepdim: bool = False
-    asterick: None = Asterick
+    asterisk: None = Asterisk
     dtype: torch.dtype | None = None
 
     @property
