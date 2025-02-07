@@ -144,7 +144,7 @@ def build(
     trust_remote_code: Annotated[bool, Option(help="Trust remote code.")] = False,
     run_matmuls_in_fp32: Annotated[bool, Option(help="Run matmuls in fp32.")] = False,
     run_activations_in_model_dtype: Annotated[bool, Option(help="Run activations in model dtype.")] = True,
-    max_batch_size: Annotated[int, Option(help="Maximum number of requests that the engine can schedule.")] = 256,
+    max_batch_size: Annotated[int, Option(help="Maximum number of requests that the engine can schedule.")] = 2048,
     max_seq_len: Annotated[
         int | None, Option(help="Maximum total length of one request, including prompt and generated output.")
     ] = None,
