@@ -39,7 +39,7 @@ class ToCopy(UnaryElementwise, FinalATenOp):
     """Specialization for the _to_copy operator.
 
     Attributes:
-        asterick (None): The asterick of the _to_copy.
+        asterisk (None): The asterisk of the _to_copy.
         dtype (torch.dtype | None): The dtype of the _to_copy.
         layout (torch.layout | None): The layout of the _to_copy.
         device (torch.device | None): The device of the _to_copy.

@@ -74,7 +74,7 @@ class Expand(FinalATenOp):
     Attributes:
         this (Node): The tensor to expand.
         shape (ShapeArg): The shape to expand the tensor to.
-        asterick (None): The asterick of the expand.
+        asterisk (None): The asterisk of the expand.
         implicit (bool): Whether the expand is implicit.
     """
 

@@ -31,7 +31,7 @@ class Reduction(ATenOp):
         this (Node): The tensor to reduce.
         dim (list[int]): The dimensions to reduce.
         keepdim (bool): Whether to keep the reduced dimensions.
-        asterick (None): The asterick of the reduction.
+        asterisk (None): The asterisk of the reduction.
         dtype (torch.dtype | None): The dtype of the reduction.
     """
 
