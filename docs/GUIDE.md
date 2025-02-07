@@ -2,32 +2,46 @@
 
 ## A. Installation
 
-### I. Using pip
-
-#### Prerequisites
-You first need to install `openmpi`. On Ubuntu systems, you can do this by running `sudo apt install openmpi-bin libopenmpi-dev`.
-
-#### Installation
-It is currently impossible to enable simple installation - like `pip install ditto` - due to the dependency conflicts between `torch-tensorrt` and `tensorrt-llm`. Thus, you need to install ditto in an existing environment in two steps:
-
-```
-pip install git+https://github.com/SqueezeBits/ditto.git
-pip install torch-tensorrt==2.5.0 --no-deps
-```
-
-### II. From source
-#### 1. Clone the repository
+### I. Using conda (recommended)
+First, clone the repository.
 ```
 git clone https://github.com/SqueezeBits/ditto.git
-cd ditto
+```
+Then, run the following command to create an anaconda environment with ditto installed.
+```
+/path/to/ditto/conda/create_env.sh
 ```
 
-#### 2. Create an anaconda environment
-Run `./conda/create_env.sh` to create an anaconda environment with ditto installed.
 See [conda/README.md](../conda/README.md) for more details.
+
+>Alternatively, you can use the following command without cloning the repository.
+>For example, to create an anaconda environment with ditto 0.1.0 installed, run
+>```
+>wget -qO- https://raw.githubusercontent.com/SqueezeBits/ditto/refs/heads/main/conda/create_env.sh | bash -s -- -v 0.1.0
+>```
+
+
+### II. Manual Installation
+
+It is recommended to use the script for creating a virtual environment shipped with Ditto as above. However, if you prefer to manually set up your environment, you can follow the instructions below.
+
+#### Prerequisites
+* CUDA 12 (Recommended: 12.4)
+* `openmpi` and `mpi4py`: for example, on Ubuntu systems, you can install them by running `sudo apt install openmpi-bin libopenmpi-dev python3-mpi4py`.
+
+#### Installation
+Currently, simple installation is not available due to the dependency conflicts between `torch-tensorrt` and `tensorrt-llm`. Thus, you need to install ditto in an existing environment in three steps:
+
+1. Install Ditto: `pip install git+https://github.com/SqueezeBits/ditto.git`
+
+2. Depending on the CUDA version, install `tensorrt-cu*` packages. For example, if you are using CUDA 12.4, run `pip install tensorrt-cu12==10.7.0 tensorrt-cu12-bindings==10.7.0 tensorrt-cu12-libs==10.7.0`.
+
+3. Install Torch-TensorRT **without dependencies**: `pip install torch-tensorrt==2.5.0 --no-deps`
+
 
 ### III. Using Docker
 #### 1. Build a docker image
+**WARNING: This might take a few hours.**
 ```
 docker build -f docker/Dockerfile -t ditto:ubuntu24.04 .
 ```

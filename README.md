@@ -31,7 +31,7 @@ Ditto is an open-source framework that enables **direct conversion of HuggingFac
 ditto build <huggingface-model-name>
 ```
 - Allowing novel model architectures to be converted into TensorRT engines.
-    - As of the publication date of this document (February 10, 2025), [Helium](https://huggingface.co/kyutai/helium-1-preview-2b) is supported in Ditto, while it is not in TensorRT-LLM.
+    - As of the publication date of this document (February 10, 2025), [Helium](https://huggingface.co/kyutai/helium-1-preview-2b) is supported in Ditto, while it is not in TensorRT-LLM. (Note that you need to re-install transformers nightly-build after installing Ditto as `pip install git+https://github.com/huggingface/transformers.git`)
 
 ## Benchmarks
 
