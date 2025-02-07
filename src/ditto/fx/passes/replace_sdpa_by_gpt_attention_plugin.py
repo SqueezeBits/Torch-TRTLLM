@@ -27,7 +27,7 @@ from ..utils import get_tensor_metadata
 from .infra import GraphOptimizationPass, PassResult
 
 
-class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
+class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
     """Replace F.scaled_dot_product_attention by FakeGPTAttentionPlugin (required for trtllm).
 
     Attributes:
@@ -86,7 +86,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph, global_rope_config.is_rope)
                 logger.debug(f"Found GPTAttentionPluginInputs for layer {layer_idx}")
 
-            fake_gpt_attention_plugin = GPTAttentionPlugin(
+            gpt_attention_plugin = GPTAttentionPlugin(
                 layer_idx=layer_idx,
                 num_heads=mha.num_heads,
                 num_kv_heads=mha.num_kv_heads_per_group,
@@ -100,7 +100,7 @@ class ReplaceSDPAByFakeGPTAttentionPlugin(GraphOptimizationPass):
                 if (qkv_meta := get_tensor_metadata(qkv)) and ((out_dtype := qkv_meta.dtype) != self.dtype):
                     qkv = ToCopy.create(graph, qkv, dtype=self.dtype).node
                 plugin_node = graph.call_function(
-                    fake_gpt_attention_plugin,
+                    gpt_attention_plugin,
                     (qkv,),
                     global_plugin_inputs.model_dump(),
                 )

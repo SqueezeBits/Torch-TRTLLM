@@ -35,9 +35,9 @@ Just copy and paste the sections wrapped by the following comments at the right 
 * Use the flag `--add-output`, possibly multiple times, to specify the nodes to be added to the outputs.
 * See the debug artifacts `graph_module.py` and `graph.txt` to see the node names.
 
-For example, the following command will append the TRT tensors corresponding to the outputs of the FX nodes `mm_default` and `fake_gpt_attention_plugin` to the TensorRT network outputs.
+For example, the following command will append the TRT tensors corresponding to the outputs of the FX nodes `mm_default` and `gpt_attention_plugin` to the TensorRT network outputs.
 ```
-ditto build meta-llama/Llama-2-7b-chat-hf --output-dir ./engines/meta-llama/Llama-2-7b-chat-hf-more-outputs --add-output mm_default --add-output fake_gpt_attention_plugin
+ditto build meta-llama/Llama-2-7b-chat-hf --output-dir ./engines/meta-llama/Llama-2-7b-chat-hf-more-outputs --add-output mm_default --add-output gpt_attention_plugin
 ```
 
 ### Using trtllm-build
@@ -45,9 +45,9 @@ ditto build meta-llama/Llama-2-7b-chat-hf --output-dir ./engines/meta-llama/Llam
 * The JSON contents must be a dictionary mapping the TRT layer names to an alias of your choice. It'll be helpful for the comparison later to choose the alias as the corresponding name of the FX node producing it.
 * See the debug artifacts `trt_network_def.py` for names of the TRT tensors. The name of the TRT layer that produces each tensor is written in the comment above it.
 
-For example, the following command will append the TRT tensors corresponding to the outputs of the FX nodes `mm_default` and `fake_gpt_attention_plugin` to the TensorRT network outputs in Llama2-7B.
+For example, the following command will append the TRT tensors corresponding to the outputs of the FX nodes `mm_default` and `gpt_attention_plugin` to the TensorRT network outputs in Llama2-7B.
 ```
-TRTLLM_ADD_OUTPUT='{"LLaMAForCausalLM/transformer/layers/0/attention/qkv/multiply_collect_L272/multiply_and_lora_L246/matmul_L1048/cast_L855/CAST_0": "mm_default", "LLaMAForCausalLM/transformer/layers/0/attention/wrapper_L561/gpt_attention_L5154/PLUGIN_V2_GPTAttention_0": "fake_gpt_attention_plugin"}' /workspace/ditto/scripts/trtllm-build --checkpoint_dir meta-llama/Llama-2-7b-chat-hf-ckpt --output_dir ./engines/Llama-2-7b-chat-hf-trtllm-more-outputs
+TRTLLM_ADD_OUTPUT='{"LLaMAForCausalLM/transformer/layers/0/attention/qkv/multiply_collect_L272/multiply_and_lora_L246/matmul_L1048/cast_L855/CAST_0": "mm_default", "LLaMAForCausalLM/transformer/layers/0/attention/wrapper_L561/gpt_attention_L5154/PLUGIN_V2_GPTAttention_0": "gpt_attention_plugin"}' /workspace/ditto/scripts/trtllm-build --checkpoint_dir meta-llama/Llama-2-7b-chat-hf-ckpt --output_dir ./engines/Llama-2-7b-chat-hf-trtllm-more-outputs
 ```
 
 ## Dumping Stepwise Inputs and Outputs while Running Inference

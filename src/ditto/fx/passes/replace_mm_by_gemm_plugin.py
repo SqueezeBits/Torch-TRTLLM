@@ -23,7 +23,7 @@ from ..utils import get_tensor_metadata
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
-class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
+class ReplaceMMByGemmPlugin(NodewiseOptimizationPass):
     """Replace torch.ops.aten.mm.default by FakeGemmPlugin (required for trtllm)."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
@@ -40,10 +40,10 @@ class ReplaceMMByFakeGemmPlugin(NodewiseOptimizationPass):
         graph = node.graph
         # Note: the right-hand-side `mm.other` must be transposed before it is fed to GemmPlugin
         # for the correct functionality as GemmPlugin's functionality breaks when `transb=0` (don't know why ...)
-        fake_gemm_plugin = GemmPlugin(transb=1, type_id=DataType(mm_output.dtype).to(trt.DataType))
+        gemm_plugin = GemmPlugin(transb=1, type_id=DataType(mm_output.dtype).to(trt.DataType))
         with graph.inserting_before(node):
             other_t = Permute.create(graph, mm.other, (1, 0)).node
-            gemm_plugin = graph.call_function(fake_gemm_plugin, (mm.this, other_t))
-            propagate_metadata_from(mm, to=gemm_plugin)
+            plugin_node = graph.call_function(gemm_plugin, (mm.this, other_t))
+            propagate_metadata_from(mm, to=plugin_node)
 
-        return {node: ReplaceAllUses(by=gemm_plugin)}
+        return {node: ReplaceAllUses(by=plugin_node)}
