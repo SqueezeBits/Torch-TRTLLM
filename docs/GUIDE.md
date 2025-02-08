@@ -26,7 +26,7 @@ See [conda/README.md](../conda/README.md) for more details.
 It is recommended to use the script for creating a virtual environment shipped with Ditto as above. However, if you prefer to manually set up your environment, you can follow the instructions below.
 
 #### Prerequisites
-* CUDA 12 (Recommended: 12.4)
+* CUDA (recommended version is 12.4)
 * `openmpi` and `mpi4py`: for example, on Ubuntu systems, you can install them by running `sudo apt install openmpi-bin libopenmpi-dev python3-mpi4py`.
 
 #### Installation
@@ -42,17 +42,19 @@ Currently, simple installation is not available due to the dependency conflicts 
 ### III. Using Docker
 #### 1. Build a docker image
 **WARNING: This might take a few hours.**
+Run from the root directory of the repository:
 ```
 docker build -f docker/Dockerfile -t ditto:ubuntu24.04 .
 ```
 
 #### 2. Run the container
+Run from the root directory of the repository:
 ```
 docker run --rm -it --gpus all -v `pwd`:/workspace/ditto ditto:ubuntu24.04 bash
 ```
 
 #### 3. Install ditto
-Inside the docker container, run
+Now, inside the docker container, run
 ```
 pip install /workspace/ditto
 ```
