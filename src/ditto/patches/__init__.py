@@ -12,3 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .torch import patch_modulelist_getitem
+from .transformers import patch_attention_mask_converter_make_causal_mask
+
+# Do NOT import from .trtllm! We don't want to apply the trtllm patches here.
