@@ -4,14 +4,21 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "ditto"
-description = "Ditto - conversion tool for transformers to TensorRT"
+description = "Ditto - Direct Torch to TensorRT-LLM Optimizer"
 authors = ["SqueezeBits.inc <owlite@squeezebits.com>"]
 maintainers = ["SqueezeBits.inc <owlite@squeezebits.com>"]
 license = "AGPL-3.0-only"
 readme = "README.md"
-homepage = "https://github.com/SqueezeBits/ditto"
-repository = "https://github.com/SqueezeBits/ditto"
-keywords = ["transformers", "TensorRT", "torch.export"]
+homepage = "https://github.com/SqueezeBits/Torch-TRTLLM"
+repository = "https://github.com/SqueezeBits/Torch-TRTLLM"
+keywords = [
+    "pytorch",
+    "transformer",
+    "torch",
+    "tensorrt",
+    "torch-tensorrt",
+    "tensorrt-llm",
+]
 classifiers = [
     "License :: OSI Approved :: GNU Affero General Public License v3",
     "Operating System :: OS Independent"
