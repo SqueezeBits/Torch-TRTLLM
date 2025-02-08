@@ -114,6 +114,3 @@ Note that the quality evaluation results are benchmarked using  [TensorRT-LLM ll
 - Pipeline Parallelism
 - State Space Model
 - Encode-Decoder Model
-
-## Getting Started
-Refer to [GUIDE.md](docs/GUIDE.md) for detailed usage.
