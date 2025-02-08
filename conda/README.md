@@ -20,8 +20,8 @@ Options:
 * For example, running `./conda/create_env.sh -n venv` from the repository root will create a conda environment named "venv".
 
 * You can also use other alternatives for conda such as
-[micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) as
-`./conda/create_env.sh -n venv -c micromamba`.
+[mamba](https://mamba.readthedocs.io/en/latest/user_guide/mamba.html) as
+`./conda/create_env.sh -n venv -c mamba`.
 
 Then, activate the generated conda environment.
 ```bash
