@@ -5,7 +5,7 @@
 ### I. Using conda (recommended)
 First, clone the repository.
 ```
-git clone https://github.com/SqueezeBits/ditto.git
+git clone https://github.com/SqueezeBits/Torch-TRTLLM.git
 ```
 Then, run the following command to create an anaconda environment with ditto installed.
 ```
@@ -17,7 +17,7 @@ See [conda/README.md](../conda/README.md) for more details.
 >Alternatively, you can use the following command without cloning the repository.
 >For example, to create an anaconda environment with ditto 0.1.0 installed, run
 >```
->wget -qO- https://raw.githubusercontent.com/SqueezeBits/ditto/refs/heads/main/conda/create_env.sh | bash -s -- -v 0.1.0
+>wget -qO- https://raw.githubusercontent.com/SqueezeBits/Torch-TRTLLM/refs/heads/main/conda/create_env.sh | bash -s -- -v 0.1.0
 >```
 
 
@@ -32,7 +32,7 @@ It is recommended to use the script for creating a virtual environment shipped w
 #### Installation
 Currently, simple installation is not available due to the dependency conflicts between `torch-tensorrt` and `tensorrt-llm`. Thus, you need to install ditto in an existing environment in three steps:
 
-1. Install Ditto: `pip install git+https://github.com/SqueezeBits/ditto.git`
+1. Install Ditto: `pip install git+https://github.com/SqueezeBits/Torch-TRTLLM.git`
 
 2. Depending on the CUDA version, install `tensorrt-cu*` packages. For example, if you are using CUDA 12.4, run `pip install tensorrt-cu12==10.7.0 tensorrt-cu12-bindings==10.7.0 tensorrt-cu12-libs==10.7.0`.
 
