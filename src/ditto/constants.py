@@ -65,9 +65,6 @@ except KeyError as e:
         f"DEFAULT_TRT_PROFILING_VERBOSITY must be one of {', '.join(trt.ProfilingVerbosity.__members__.keys())}"
     ) from e
 
-DISABLE_TRANSFORMER_PATCHES: bool = os.getenv("DISABLE_TRANSFORMER_PATCHES", "0") == "1"
-"""Whether to disable the patches for the transformers package."""
-
 FX_TRANSFORM_MAXIMUM_ITERATION = int(os.getenv("FX_TRANSFORM_MAXIMUM_ITERATION", "100"))
 """Maximum iteration limit for FX graph transformations."""
 

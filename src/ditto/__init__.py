@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Note: logging must be imported first to set up the loguru logging.
-from . import logging, constants  # noqa: I001
+from . import logging, constants, patches  # noqa: I001
 from .fx import PretrainedConfigGenerationError, generate_trtllm_engine_config
 from .convert import convert
 from .export import export
