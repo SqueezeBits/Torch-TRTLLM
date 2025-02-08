@@ -20,7 +20,6 @@ from typing import Annotated, Literal
 
 import click
 import torch
-import transformers
 from loguru import logger
 from transformers import (
     AutoModelForCausalLM,
@@ -33,23 +32,11 @@ from typer import Option, Typer
 
 from .api import trtllm_build
 from .configs import TRTLLMMapping
-from .constants import DEFAULT_DEVICE, DISABLE_TORCH_PATCHES, DISABLE_TRANSFORMER_PATCHES
+from .constants import DEFAULT_DEVICE
 from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
 from .literals import DTypeLiteral
 from .peft import load_peft_adapters
 from .types import trt_to_torch_dtype_mapping
-
-if not DISABLE_TRANSFORMER_PATCHES:
-    # pylint: disable-next=unused-import
-    from .patches import transformers as transformers_patches  # noqa: F401
-
-    logger.info("To prevent custom patches for transformers set the environment variable DISABLE_TRANSFORMER_PATCHES=1")
-
-if not DISABLE_TORCH_PATCHES and transformers.__version__ >= "4.47":
-    # pylint: disable-next=unused-import
-    from .patches import torch as torch_patches  # noqa: F401
-
-    logger.info("To prevent custom patches for torch set the environment variable DISABLE_TORCH_PATCHES=1")
 
 app = Typer()
 
