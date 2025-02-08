@@ -126,7 +126,7 @@ main() {
     local ditto_path=""
     local remote=false
     local editable=false
-    local ditto_url_for_pip="git+https://github.com/squeezebits/ditto.git"
+    local ditto_url_for_pip="git+https://github.com/SqueezeBits/Torch-TRTLLM.git"
 
     parse_args name version remote editable "$@"
 
