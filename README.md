@@ -3,7 +3,7 @@
 <img src="./docs/assets/ditto_logo.png" alt="Ditto logo" width="200" />
 
 [![pytorch](https://img.shields.io/badge/pytorch-%3E%3D2.5%2C%3C2.6-blue)](https://pytorch.org/)
-[![transformers](https://img.shields.io/badge/transformers-%3C%3D4.45.1%2C%3E%3D4.38.2-yellow)](https://huggingface.co/transformers/)
+[![transformers](https://img.shields.io/badge/transformers-%3E%3D4.38.2-yellow)](https://huggingface.co/transformers/)
 [![tensorrt-llm](https://img.shields.io/badge/tensorrt--llm-0.16.0-green)](https://developer.nvidia.com/blog/tag/tensorrt-llm/)
 [![torch-tensorrt](https://img.shields.io/badge/torch--tensorrt-2.5.0-lightgreen)](https://pytorch.org/TensorRT)
 [![version](https://img.shields.io/badge/version-0.1.0-purple)](#)
