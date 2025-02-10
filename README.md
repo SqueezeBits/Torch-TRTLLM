@@ -56,7 +56,7 @@ We used [TensorRT-LLM llmapi](https://github.com/NVIDIA/TensorRT-LLM/tree/main/t
     <th align="center">ifeval<br/>(Accuracy)</th>
   </tr>
   <tr>
-    <td rowspan="2">Llama3.3-70B</td>
+    <td rowspan="2">Llama3.3-70B-Instruct</td>
     <td>Ditto</td>
     <td align="center">0.819</td>
     <td align="center">3.96</td>
@@ -73,7 +73,7 @@ We used [TensorRT-LLM llmapi](https://github.com/NVIDIA/TensorRT-LLM/tree/main/t
     <td align="center">0.915</td>
   </tr>
   <tr>
-    <td rowspan="2">Llama3.1-8B</td>
+    <td rowspan="2">Llama3.1-8B-Instruct</td>
     <td>Ditto</td>
     <td align="center">0.680</td>
     <td align="center">8.64</td>
@@ -105,7 +105,7 @@ Performance benchmarks were conducted using [TensorRT-LLM gptManagerBenchmark](h
     <th align="center">L40<br/>(token/sec)</th>
   </tr>
   <tr>
-    <td rowspan="2">Llama3.3-70B</td>
+    <td rowspan="2">Llama3.3-70B-Instruct</td>
     <td>Ditto</td>
     <td align="center">4</td>
     <td align="center">1759.2</td>
@@ -120,7 +120,7 @@ Performance benchmarks were conducted using [TensorRT-LLM gptManagerBenchmark](h
     <td align="center">-</td>
   </tr>
   <tr>
-    <td rowspan="2">Llama3.1-8B</td>
+    <td rowspan="2">Llama3.1-8B-Instruct</td>
     <td>Ditto</td>
     <td align="center">1</td>
     <td align="center">3357.9</td>
@@ -148,7 +148,7 @@ We also conducted a benchmark with the [Helium1-preview-2B](https://huggingface.
     <th align="center">L40<br/>(token/sec)</th>
   </tr>
   <tr>
-    <td rowspan="2">Helium1-2B</td>
+    <td rowspan="2">Helium1-preview-2B</td>
     <td>Ditto</td>
     <td align="center">1</td>
     <td align="center">-</td>
