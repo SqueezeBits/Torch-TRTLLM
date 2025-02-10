@@ -94,7 +94,7 @@ class TorchExportArguments(StrictlyTyped):
                     continue
                 assert (constraint := constraints[name]) is not None
                 if not isinstance(export_dim := s.export_dim, int):
-                    constraint[dim] = export_dim
+                    constraint[dim] = 2 * export_dim
 
             if not constraints[name]:
                 constraints[name] = None

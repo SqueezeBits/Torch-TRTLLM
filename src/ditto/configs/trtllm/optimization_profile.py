@@ -32,7 +32,7 @@ class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
     opt_batch_size: int = Field(default=128, gt=0)
     max_batch_size: int = Field(default=256, gt=0)
     max_beam_width: int = Field(default=1, gt=0)
-    max_num_tokens: int = Field(default=8192, multiple_of=2, gt=0)
+    max_num_tokens: int = Field(default=8192, gt=0)
     opt_num_tokens: int = Field(default=8, gt=0)
 
     @model_validator(mode="after")
