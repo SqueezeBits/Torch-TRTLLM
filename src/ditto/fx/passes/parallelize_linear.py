@@ -351,7 +351,7 @@ def insert_allreduce_plugin(
     config: AllReduceConfig = AllReduceConfig(0),  # noqa: B008
     fusion_op: AllReduceFusionOp = AllReduceFusionOp.NONE,
     eps: float = 1e-5,
-) -> Node:
+) -> None:
     """Insert an allreduce plugin node into the graph.
 
     Args:
@@ -364,9 +364,6 @@ def insert_allreduce_plugin(
         fusion_op (AllReduceFusionOp, optional): The fusion operation of the allreduce plugin.
             Defaults to AllReduceFusionOp.NONE.
         eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
-
-    Returns:
-        Node: The allreduce plugin node
     """
     assert (to_val := get_val(to, torch.Tensor)) is not None, f"Failed to get tensor value from {to.format_node()}"
     allreduce_plugin = AllReducePlugin(
