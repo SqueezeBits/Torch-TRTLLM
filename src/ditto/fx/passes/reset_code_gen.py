@@ -32,6 +32,12 @@ class ResetCodeGen(GraphOptimizationPass):
 
 
 def sync_placeholder_names_with_forward_arg_names(graph_module: GraphModule) -> None:
+    """Sync the placeholder names with the forward argument names.
+
+    Args:
+        graph_module (GraphModule): The graph module.
+    """
+
     def _impl(obj: Any) -> None:
         if isinstance(obj, tuple | list):
             for x in obj:

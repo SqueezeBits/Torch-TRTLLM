@@ -22,7 +22,11 @@ from .infra import GraphOptimizationPass, PassResult
 
 
 class CastOutputLogits(GraphOptimizationPass):
-    """Cast output logits if needed."""
+    """Cast output logits if needed.
+
+    Attributes:
+        logits_dtype (DTypeLiteral): The data type to cast the output logits to
+    """
 
     logits_dtype: DTypeLiteral
 

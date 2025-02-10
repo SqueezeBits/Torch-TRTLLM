@@ -17,8 +17,8 @@ from torch.fx import Node
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class FuseEquivalentNodes(NodewiseOptimizationPass):
-    """Fuse nodes performing identical operations for the same input node."""
+class EliminateCommonExpressions(NodewiseOptimizationPass):
+    """Eliminate nodes performing identical operations for the same input node."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (groups := [group for group in group_users(node) if len(group) > 1]):

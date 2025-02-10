@@ -36,6 +36,15 @@ def get_memory_footprint(  # type: ignore[misc]
     *devices: DeviceLikeType,
     dumps: bool = True,
 ) -> str | dict[str, dict[str, int]]:
+    """Get the memory footprint of the devices.
+
+    Args:
+        *devices (DeviceLikeType): The devices to get the memory footprint of.
+        dumps (bool): Whether to dump the memory footprint as a JSON string.
+
+    Returns:
+        str | dict[str, dict[str, int]]: The memory footprint of the devices.
+    """
     memory_footprint = {"cpu": get_host_memory_footprint()}
     for device in {torch.device(d) for d in devices}:
         memory_footprint.update({f"{device}": get_device_memory_footprint(device)})
@@ -49,6 +58,11 @@ def get_memory_footprint(  # type: ignore[misc]
 
 
 def get_host_memory_footprint() -> dict[str, int]:
+    """Get the memory footprint of the host.
+
+    Returns:
+        dict[str, int]: The memory footprint of the host.
+    """
     # Get the current process ID
     pid = os.getpid()
     # Create a Process object for the current process
@@ -58,6 +72,14 @@ def get_host_memory_footprint() -> dict[str, int]:
 
 
 def get_device_memory_footprint(device: DeviceLikeType) -> dict[str, int]:
+    """Get the memory footprint of the device.
+
+    Args:
+        device (DeviceLikeType): The device to get the memory footprint of.
+
+    Returns:
+        dict[str, int]: The memory footprint of the device.
+    """
     return {
         "Allocated Memory": torch.cuda.memory_allocated(device),
         "Max Allocated Memory": torch.cuda.max_memory_allocated(device),
@@ -66,6 +88,14 @@ def get_device_memory_footprint(device: DeviceLikeType) -> dict[str, int]:
 
 
 def format_size(size_in_bytes: float) -> str:
+    """Format the size in bytes to a human-readable string.
+
+    Args:
+        size_in_bytes (float): The size in bytes to format.
+
+    Returns:
+        str: The formatted size.
+    """
     if size_in_bytes < (1 << 20):
         return f"{size_in_bytes / (1 << 10):.3f} KB"
     if size_in_bytes < (1 << 30):

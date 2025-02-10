@@ -21,6 +21,7 @@ from .constant_folding import ConstantFolding
 from .decompose_addmm import DecomposeAddMM
 from .defer_cast import DeferCast
 from .defer_unsqueeze import DeferUnsqueeze
+from .eliminate_common_expressions import EliminateCommonExpressions
 from .eliminate_nop_cat_or_stack import EliminateNopCatOrStack
 from .eliminate_nop_permute import EliminateNopPermute
 from .eliminate_nop_reshape_or_expand import EliminateNopReshapeOrExpand
@@ -35,7 +36,6 @@ from .fuse_consecutive_reshapes import FuseConsecutiveReshapes
 from .fuse_consecutive_slice_concat import FuseConsecutiveSliceConcat
 from .fuse_consecutive_split_concat import FuseConsecutiveSplitConcat
 from .fuse_consecutive_to_copys import FuseConsecutiveToCopys
-from .fuse_equivalent_nodes import FuseEquivalentNodes
 from .fuse_gated_mlp_projections import FuseGatedMLPProjections
 from .fuse_qkv_projections import FuseQKVProjections
 from .fuse_reciprocal_mul import FuseReciprocalMul
@@ -45,8 +45,8 @@ from .insert_gather_last_token_ids import InsertGatherLastTokenIds
 from .parallelize_linear import ParallelizeLinear
 from .pop_lora_plugins import PopLoraPlugins
 from .propagate_tensor_parallelism import PropagateTensorParallelism
-from .replace_mm_by_fake_gemm_plugin import ReplaceMMByFakeGemmPlugin
-from .replace_sdpa_by_fake_gpt_attention_plugin import ReplaceSDPAByFakeGPTAttentionPlugin
+from .replace_mm_by_gemm_plugin import ReplaceMMByGemmPlugin
+from .replace_sdpa_by_gpt_attention_plugin import ReplaceSDPAByGPTAttentionPlugin
 from .replace_view_by_reshape import ReplaceViewByReshape
 from .reset_code_gen import ResetCodeGen
 from .rewrite_fp_literals_as_nodes import RewriteFloatingPointLiteralsAsNodes

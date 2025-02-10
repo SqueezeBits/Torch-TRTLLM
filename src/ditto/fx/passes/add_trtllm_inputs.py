@@ -26,7 +26,11 @@ from .infra import GraphOptimizationPass, PassResult
 
 
 class AddTRTLLMInputs(GraphOptimizationPass):
-    """Add placeholder nodes corresponding to the TRTLLM model inputs."""
+    """Add placeholder nodes corresponding to the TRTLLM model inputs.
+
+    Attributes:
+        argument_hint (TRTLLMArgumentHint): The argument hint.
+    """
 
     argument_hint: TRTLLMArgumentHint
 
@@ -48,9 +52,7 @@ class AddTRTLLMInputs(GraphOptimizationPass):
                     unsqueeze = Unsqueeze.create(graph, input_ids, INPUT_IDS_UNSQUEEZE_DIM)
                     if isinstance(val := input_ids.output, FakeTensor):
                         with val.fake_mode:
-                            input_ids.output = torch.empty(  # type: ignore[assignment]
-                                hint.symbolic_shape, dtype=hint.dtype
-                            )
+                            input_ids.output = torch.empty(hint.symbolic_shape, dtype=hint.dtype)
                     input_ids.node.replace_all_uses_with(unsqueeze.node, delete_user_cb=is_not_equal_to(unsqueeze.node))
                     modified = True
                     input_ids_unsqueezed = True
@@ -82,6 +84,15 @@ class AddTRTLLMInputs(GraphOptimizationPass):
 
 
 def is_not_equal_to(target: Node) -> Callable[[Node], bool]:
+    """Check if a node is not equal to a target node.
+
+    Args:
+        target (Node): The target node.
+
+    Returns:
+        Callable[[Node], bool]: A function that checks if a node is not equal to the target node.
+    """
+
     def is_not_equal_to_target(user: Node) -> bool:
         return user != target
 

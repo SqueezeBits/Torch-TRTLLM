@@ -21,9 +21,21 @@ from .pretrained import TRTLLMPretrainedConfig
 
 
 class TRTLLMEngineConfig(StrictlyTyped):
+    """The configuration for the TensorRT-LLM engine.
+
+    Attributes:
+        pretrained_config (TRTLLMPretrainedConfig): The pretrained configuration.
+        build_config (TRTLLMBuildConfig): The build configuration.
+    """
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def version(self) -> str:
+        """Get the version of the TensorRT-LLM engine.
+
+        Returns:
+            str: The version of the TensorRT-LLM engine.
+        """
         return trtllm_version
 
     pretrained_config: TRTLLMPretrainedConfig

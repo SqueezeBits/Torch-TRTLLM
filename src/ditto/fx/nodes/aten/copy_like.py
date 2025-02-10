@@ -23,26 +23,29 @@ from .unary_elementwise import UnaryElementwise
 
 @UnaryElementwise.register(torch.ops.aten.clone.default)
 class Clone(UnaryElementwise, FinalATenOp):
+    """Specialization for the clone operator.
+
+    Attributes:
+        asterisk (None): The asterisk of the clone.
+        memory_format (torch.memory_format | None): The memory format of the clone.
+    """
+
     asterisk: None = Asterisk
     memory_format: torch.memory_format | None = None
 
 
 @UnaryElementwise.register(torch.ops.aten._to_copy.default)
 class ToCopy(UnaryElementwise, FinalATenOp):
-    """ATen op _to_copy::default.
+    """Specialization for the _to_copy operator.
 
-    ```
-    aten::_to_copy(
-        Tensor self,
-        *,
-        ScalarType? dtype=None,
-        Layout? layout=None,
-        Device? device=None,
-        bool? pin_memory=None,
-        bool non_blocking=False,
-        MemoryFormat? memory_format=None
-    ) -> Tensor
-    ```
+    Attributes:
+        asterisk (None): The asterisk of the _to_copy.
+        dtype (torch.dtype | None): The dtype of the _to_copy.
+        layout (torch.layout | None): The layout of the _to_copy.
+        device (torch.device | None): The device of the _to_copy.
+        pin_memory (bool | None): Whether the _to_copy is pinned in memory.
+        non_blocking (bool): Whether the _to_copy is non-blocking.
+        memory_format (torch.memory_format | None): The memory format of the _to_copy.
     """
 
     asterisk: None = Asterisk
@@ -55,6 +58,11 @@ class ToCopy(UnaryElementwise, FinalATenOp):
 
     @property
     def dtype_unchanged(self) -> bool:
+        """Check if the dtype is unchanged.
+
+        Returns:
+            bool: True if the dtype is unchanged, False otherwise.
+        """
         if self.dtype is None:
             return True
         if meta := get_tensor_metadata(self.this):

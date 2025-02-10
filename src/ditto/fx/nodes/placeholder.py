@@ -28,8 +28,10 @@ if TYPE_CHECKING:
 
 
 class Placeholder(FinalSpecialization):
+    """The specialization for placeholder nodes."""
+
     @classmethod  # pylint: disable-next=arguments-differ
-    def create(  # type: ignore[override]
+    def create(
         cls,
         graph: Graph,
         name: str,
@@ -38,7 +40,7 @@ class Placeholder(FinalSpecialization):
         x = cls._specialize_from(graph.placeholder(name))
         if fake_mode := get_fake_mode(graph):
             with fake_mode:
-                x.output = torch.empty(hint.symbolic_shape, dtype=hint.dtype)  # type: ignore[assignment]
+                x.output = torch.empty(hint.symbolic_shape, dtype=hint.dtype)
         return x
 
     @property

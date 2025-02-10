@@ -20,44 +20,44 @@ from .unary_elementwise import UnaryElementwise
 
 
 class Activation(UnaryElementwise):
-    ...
+    """Base class for activation functions."""
 
 
 @Activation.register(torch.ops.aten.elu.default)
 class Elu(Activation, FinalATenOp):
-    ...
+    """Specialization for the ELU activation function."""
 
 
 @Activation.register(torch.ops.aten.gelu.default)
 class Gelu(Activation, FinalATenOp):
-    ...
+    """Specialization for the GELU activation function."""
 
 
 @Activation.register(torch.ops.aten.hardsigmoid.default)
 class HardSigmoid(Activation, FinalATenOp):
-    ...
+    """Specialization for the hard sigmoid activation function."""
 
 
 @Activation.register(torch.ops.aten.leaky_relu.default)
 class LeakyRelu(Activation, FinalATenOp):
-    ...
+    """Specialization for the leaky ReLU activation function."""
 
 
 @Activation.register(torch.ops.aten.relu.default)
 class Relu(Activation, FinalATenOp):
-    ...
+    """Specialization for the ReLU activation function."""
 
 
 @Activation.register(torch.ops.aten.sigmoid.default)
 class Sigmoid(Activation, FinalATenOp):
-    ...
+    """Specialization for the sigmoid activation function."""
 
 
 @Activation.register(torch.ops.aten.softplus.default)
 class Softplus(Activation, FinalATenOp):
-    ...
+    """Specialization for the softplus activation function."""
 
 
 @Activation.register(torch.ops.aten.tanh.default)
 class Tanh(Activation, FinalATenOp):
-    ...
+    """Specialization for the tanh activation function."""

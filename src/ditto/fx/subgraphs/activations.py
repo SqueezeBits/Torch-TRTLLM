@@ -22,18 +22,27 @@ from .subgraph import Subgraph
 
 
 class ActivationSubgraph(Subgraph):
+    """Base class for activation subgraphs."""
+
     @property
     @abstractmethod
     def input(self) -> Node:
-        ...
+        """The input node of the activation subgraph."""
 
     @property
     @abstractmethod
     def output(self) -> Node:
-        ...
+        """The output node of the activation subgraph."""
 
 
 class Silu(ActivationSubgraph):
+    """The SiLU subgraph.
+
+    Args:
+        sigmoid (Sigmoid): The sigmoid node.
+        mul (Mul): The mul node.
+    """
+
     sigmoid: Sigmoid
     mul: Mul
 

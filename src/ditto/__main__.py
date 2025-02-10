@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # mypy: disable-error-code=misc
-# pylint: disable=dangerous-default-value, too-many-positional-arguments, too-many-arguments, too-many-locals
+# pylint: disable=too-many-positional-arguments, too-many-arguments, too-many-locals
 import os
 import time
 from typing import Annotated, Literal
@@ -28,7 +28,7 @@ from transformers import (
     PreTrainedTokenizer,
     PreTrainedTokenizerFast,
 )
-from typer import Option, Typer
+from typer import Argument, Option, Typer
 
 from .api import trtllm_build
 from .configs import TRTLLMMapping
@@ -38,17 +38,21 @@ from .literals import DTypeLiteral
 from .peft import load_peft_adapters
 from .types import trt_to_torch_dtype_mapping
 
-app = Typer()
+app = Typer(context_settings={"help_option_names": ["-h", "--help"]})
+
+FLOATING_POINT_DTYPES = ("float32", "float16", "bfloat16")
 
 
 @app.command()
 def generate(
-    model_id: str,
-    prompts: Annotated[list[str], Option(default_factory=list)],
-    device: str = DEFAULT_DEVICE,
-    dtype: str = "auto",
-    trust_remote_code: bool = False,
-    max_output_len: int = 100,
+    model_id: Annotated[
+        str, Argument(help="A pretrained model name or path. e.g., 'meta-llama/Meta-Llama-3-8B-Instruct'.")
+    ],
+    prompts: Annotated[list[str], Option(default_factory=list, help="List of input prompts.")],
+    device: Annotated[str, Option(help="Device to run generation on.")] = DEFAULT_DEVICE,
+    dtype: Annotated[str, Option(help="Data type to use for the model.")] = "auto",
+    trust_remote_code: Annotated[bool, Option(help="Trust remote code.")] = False,
+    max_output_len: Annotated[int, Option(help="Maximum number of new tokens to generate.")] = 100,
 ) -> None:
     """Generate text completions for given prompts using a language model."""
     if not prompts:
@@ -120,28 +124,66 @@ def run_generation(
 @app.command()
 @torch.no_grad()
 def build(
-    model_id: str,
-    add_output: list[str] = [],  # noqa: B006
-    peft_ids: list[str] = [],  # noqa: B006
-    output_dir: str = "",
-    dtype: str = "auto",
-    verbose_failure: bool = False,
-    trust_remote_code: bool = False,
-    run_matmuls_in_fp32: bool = False,
-    run_activations_in_model_dtype: bool = True,
-    max_batch_size: int = 256,
-    max_seq_len: int | None = None,
-    max_num_tokens: int = 8192,
-    opt_num_tokens: int | None = None,
-    max_beam_width: int = 1,
-    tp_size: int = 1,
-    logits_dtype: Annotated[DTypeLiteral, Option(click_type=click.Choice(["float16", "float32"]))] = "float32",
-    gather_context_logits: bool = False,
-    gather_generation_logits: bool = False,
-    gather_all_logits: bool = False,
+    model_id: Annotated[str, Argument(help="A pretrained model name or path.")],
+    add_output: Annotated[
+        list[str],
+        Option(default_factory=list, help="List of node names to add as output. See docs/DEBUG.md for details."),
+    ],
+    peft_ids: Annotated[
+        list[str],
+        Option(
+            "-p",
+            "--peft-ids",
+            default_factory=list,
+            help="List of LoRA adapter IDs to apply to the model.",
+        ),
+    ],
+    output_dir: Annotated[
+        str,
+        Option(
+            "-o",
+            "--output-dir",
+            help="Path to the output directory. If not specified, `./engines/<model_id>` will be used.",
+        ),
+    ] = "",
+    dtype: Annotated[
+        str,
+        Option(
+            click_type=click.Choice(("auto", *FLOATING_POINT_DTYPES)),
+            help="Data type to use for the model. Defaults to `auto`.",
+        ),
+    ] = "auto",
+    verbose_failure: Annotated[bool, Option(help="Show local variable values on failure.")] = False,
+    trust_remote_code: Annotated[bool, Option(help="Trust remote code from Hugging Face Hub.")] = False,
+    run_matmuls_in_fp32: Annotated[bool, Option(help="Run matmuls in fp32.")] = False,
+    run_activations_in_model_dtype: Annotated[bool, Option(help="Run activations in model dtype.")] = True,
+    max_batch_size: Annotated[int, Option(help="Maximum number of requests that the engine can schedule.")] = 2048,
+    max_seq_len: Annotated[
+        int | None, Option(help="Maximum total length of one request, including prompt and generated output.")
+    ] = None,
+    max_num_tokens: Annotated[
+        int, Option(help="Maximum number of batched input tokens after padding is removed in each batch.")
+    ] = 8192,
+    opt_num_tokens: Annotated[
+        int | None, Option(help="Optimal number of batched input tokens after padding is removed in each batch.")
+    ] = None,
+    max_beam_width: Annotated[int, Option(help="Maximum number of beams for beam search decoding.")] = 1,
+    tp_size: Annotated[int, Option(help="N-way tensor parallelism size.", min=1)] = 1,
+    logits_dtype: Annotated[
+        DTypeLiteral,
+        Option(
+            click_type=click.Choice(FLOATING_POINT_DTYPES),
+            help="Data type of logits. Defaults to `float32`.",
+        ),
+    ] = "float32",
+    gather_context_logits: Annotated[bool, Option(help="Enable gathering context logits.")] = False,
+    gather_generation_logits: Annotated[bool, Option(help="Enable gathering generation logits.")] = False,
+    gather_all_logits: Annotated[
+        bool, Option(help="Equivalent to `--gather-context-logits --gather-generation-logits`.")
+    ] = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
-    assert not (tp_size > 1 and peft_ids), "Tensor Parallelism is not supported with LoRA"
+    assert not (tp_size > 1 and peft_ids), "Tensor parallelism with LoRA is currently not supported"
     if gather_all_logits:
         gather_context_logits = gather_generation_logits = True
     output_dir = resolve_output_dir(output_dir, model_id)
@@ -209,11 +251,11 @@ def get_model_dtype(dtype: str) -> torch.dtype | Literal["auto"]:
         raise ValueError(f"Unsupported torch data type: {dtype}") from e
 
 
-def resolve_output_dir(output_dir: str, model_id: str) -> str:
+def resolve_output_dir(output_dir: str | None, model_id: str) -> str:
     """Resolve the output directory path.
 
     Args:
-        output_dir (str): User-specified output directory path
+        output_dir (str | None): User-specified output directory path
         model_id (str): Model identifier used to generate default path
 
     Returns:
@@ -251,12 +293,12 @@ def get_default_output_dir(model_id: str) -> str:
 
 @app.command()
 def compare(
-    x: str,
-    y: str,
-    transpose: Annotated[list[str], Option(default_factory=list)],
-    show_only: Annotated[list[str], Option(default_factory=list)],
-    floating_point_only: bool = False,
-    device: str = DEFAULT_DEVICE,
+    x: Annotated[str, Argument(help="Path to the first output dictionary.")],
+    y: Annotated[str, Argument(help="Path to the second output dictionary.")],
+    transpose: Annotated[list[str], Option(default_factory=list, help="List of output names to be transposed")],
+    show_only: Annotated[list[str], Option(default_factory=list, help="List of output names to be shown.")],
+    floating_point_only: Annotated[bool, Option(help="Compare only floating point tensors.")] = False,
+    device: Annotated[str, Option(help="Device to run comparison on.")] = DEFAULT_DEVICE,
 ) -> None:
     """Compare tensors between two PyTorch state dictionaries."""
     logger.info(f"Map location: {device}")

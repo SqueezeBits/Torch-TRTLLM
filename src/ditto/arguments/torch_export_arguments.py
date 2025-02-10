@@ -24,6 +24,14 @@ from .tensor_type_hint import TensorTypeHint
 
 
 class TorchExportArguments(StrictlyTyped):
+    """Arguments for torch.export.
+
+    Args:
+        tensor_inputs (dict[str, torch.Tensor]): The tensor inputs for torch.export.
+        constant_inputs (dict[str, BuiltInConstant]): The constant inputs for torch.export.
+        constraints (dict[str, dict[int, ExportDim] | None]): The constraints for the tensor inputs.
+    """
+
     tensor_inputs: dict[str, torch.Tensor]
     constant_inputs: dict[str, BuiltInConstant] = Field(default_factory=dict)
     constraints: dict[str, dict[int, ExportDim] | None] = Field(default_factory=dict)
@@ -59,6 +67,15 @@ class TorchExportArguments(StrictlyTyped):
         device: DeviceLikeType = DEFAULT_DEVICE,
         **input_hints: TensorTypeHint | BuiltInConstant,
     ) -> Self:
+        """Create a TorchExportArguments object from a dictionary of input hints.
+
+        Args:
+            device (DeviceLikeType): The device to use for the tensor inputs. Defaults to `DEFAULT_DEVICE`.
+            **input_hints (TensorTypeHint | BuiltInConstant): The input hints for the torch.export.
+
+        Returns:
+            Self: The TorchExportArguments object.
+        """
         tensor_inputs: dict[str, torch.Tensor] = {}
         constant_inputs: dict[str, BuiltInConstant] = {}
         constraints: dict[str, dict[int, ExportDim] | None] = {}

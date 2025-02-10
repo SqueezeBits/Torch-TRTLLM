@@ -24,17 +24,34 @@ from .utils import make_dim_nonnegative
 
 @ATenOp.register(torch.ops.aten.sym_size.int)
 class SymSizeInt(FinalATenOp):
+    """Specialization for the sym_size operator with an integer dimension.
+
+    Attributes:
+        this (Node): The input node.
+        dim (int): The dimension to get the size of.
+    """
+
     this: Node
     dim: int
 
     @property
     def ndim(self) -> int | None:
+        """The number of dimensions of the input tensor.
+
+        Returns:
+            int | None: The number of dimensions of the input tensor.
+        """
         if t := get_tensor_metadata(self.this):
             return len(t.shape)
         return None
 
     @property
     def nonnegative_dim(self) -> int | None:
+        """The non-negative dimension of the input tensor.
+
+        Returns:
+            int | None: The non-negative dimension of the input tensor.
+        """
         if (ndim := self.ndim) is not None:
             return make_dim_nonnegative(self.dim, ndim=ndim)
         return None

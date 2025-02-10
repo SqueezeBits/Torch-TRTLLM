@@ -18,6 +18,14 @@ from ....types import StrictlyTyped
 
 
 class PassResult(StrictlyTyped):
+    """The result of a pass.
+
+    Attributes:
+        graph_module (GraphModule): The graph module.
+        modified (bool): Whether the graph module was modified.
+        require_fake_tensor_prop (bool): Whether to require FakeTensorProp.
+    """
+
     graph_module: GraphModule
     modified: bool
     require_fake_tensor_prop: bool = False

@@ -16,6 +16,11 @@ import torch
 
 
 def is_in_fake_tensor_mode() -> bool:
+    """Check if the current dispatch mode is fake tensor mode.
+
+    Returns:
+        bool: True if the current dispatch mode is fake tensor mode, False otherwise.
+    """
     # Get the current dispatch mode
     # Check if it's an instance of FakeTensorMode
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is not None

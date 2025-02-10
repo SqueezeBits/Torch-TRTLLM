@@ -32,6 +32,7 @@ from .passes import (
     DecomposeAddMM,
     DeferCast,
     DeferUnsqueeze,
+    EliminateCommonExpressions,
     EliminateNopCatOrStack,
     EliminateNopPermute,
     EliminateNopReshapeOrExpand,
@@ -45,7 +46,6 @@ from .passes import (
     FuseConsecutiveSliceConcat,
     FuseConsecutiveSplitConcat,
     FuseConsecutiveToCopys,
-    FuseEquivalentNodes,
     FuseGatedMLPProjections,
     FuseQKVProjections,
     FuseReciprocalMul,
@@ -53,8 +53,8 @@ from .passes import (
     IndexLayers,
     InsertGatherLastTokenIds,
     PopLoraPlugins,
-    ReplaceMMByFakeGemmPlugin,
-    ReplaceSDPAByFakeGPTAttentionPlugin,
+    ReplaceMMByGemmPlugin,
+    ReplaceSDPAByGPTAttentionPlugin,
     ReplaceViewByReshape,
     RewriteFloatingPointLiteralsAsNodes,
     RewriteIndexAsSingleSlice,
@@ -113,10 +113,10 @@ def compose(*transforms: Callable[[GraphModule], GraphModule]) -> Callable[[Grap
     """Compose multiple transforms into a single transform.
 
     Args:
-        *transforms: The transforms to compose
+        *transforms (Callable[[GraphModule], GraphModule]): The transforms to compose
 
     Returns:
-        A function that applies all the given transforms to a graph module
+        Callable[[GraphModule], GraphModule]: A function that applies all the given transforms to a graph module
     """
 
     def composed_transform(graph_module: GraphModule) -> GraphModule:
@@ -137,7 +137,7 @@ LEVEL1_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     FuseConsecutiveReshapes,
     FuseConsecutivePermutes,
     FuseConsecutiveToCopys,
-    FuseEquivalentNodes,
+    EliminateCommonExpressions,
     EliminateNopReshapeOrExpand,
     EliminateNopPermute,
     EliminateUnsqueezeSqueeze,
@@ -193,12 +193,12 @@ def get_trtllm_conversion_transform(
         argument_hint (TRTLLMArgumentHint): Type hints for TRTLLM inputs
         model_config (TRTLLMModelConfig): Model configurations
         dtype (torch.dtype): Data type for plugins
-        skipped_optimizers (list[PassName] | None): Names of optimization passes to skip
-        run_matmuls_in_fp32 (bool): Whether to run matrix multiplications in FP32
-        run_activations_in_model_dtype (bool): Whether to run activations in model dtype
+        skipped_optimizers (list[PassName] | None, optional): Names of optimization passes to skip. Defaults to None.
+        run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
+        run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
 
     Returns:
-        A function that applies TRT-LLM conversion passes to a graph module
+        Callable[[GraphModule], GraphModule]: A function that applies TRT-LLM conversion passes to a graph module
     """
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
         AddTRTLLMInputs(argument_hint=argument_hint),
@@ -208,11 +208,11 @@ def get_trtllm_conversion_transform(
         FuseGatedMLPProjections,
         WrapRoPESubgraphs,
         RewriteIndexAsSingleSlice,
-        ReplaceSDPAByFakeGPTAttentionPlugin(dtype=dtype),
+        ReplaceSDPAByGPTAttentionPlugin(dtype=dtype),
         IndexLayers,
         BindUnmatchedLoraProtos,
         PopLoraPlugins(argument_hint=argument_hint),
-        ReplaceMMByFakeGemmPlugin,
+        ReplaceMMByGemmPlugin,
         CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]
 
@@ -236,10 +236,10 @@ def get_level1_transform(
     """Create a transform that applies level 1 optimization passes.
 
     Args:
-        skipped_optimizers: Names of optimization passes to skip
+        skipped_optimizers (list[PassName] | None, optional): Names of optimization passes to skip. Defaults to None.
 
     Returns:
-        A function that applies level 1 optimization passes to a graph module
+        Callable[[GraphModule], GraphModule]: A function that applies level 1 optimization passes to a graph module
     """
     return get_transform(
         *LEVEL1_PASSES,
@@ -253,10 +253,10 @@ def get_level2_transform(
     """Create a transform that applies level 2 optimization passes.
 
     Args:
-        skipped_optimizers: Names of optimization passes to skip
+        skipped_optimizers (list[PassName] | None, optional): Names of optimization passes to skip. Defaults to None.
 
     Returns:
-        A function that applies level 2 optimization passes to a graph module
+        Callable[[GraphModule], GraphModule]: A function that applies level 2 optimization passes to a graph module
     """
     return get_transform(
         *LEVEL1_PASSES,

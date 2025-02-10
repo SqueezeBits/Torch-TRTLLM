@@ -4,25 +4,29 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "ditto"
-description = "Ditto - conversion tool for transformers to TensorRT"
+description = "Ditto - Direct Torch to TensorRT-LLM Optimizer"
 authors = ["SqueezeBits.inc <owlite@squeezebits.com>"]
 maintainers = ["SqueezeBits.inc <owlite@squeezebits.com>"]
 license = "AGPL-3.0-only"
 readme = "README.md"
-homepage = "https://github.com/SqueezeBits/ditto"
-repository = "https://github.com/SqueezeBits/ditto"
-keywords = ["transformers", "TensorRT", "torch.export"]
+homepage = "https://github.com/SqueezeBits/Torch-TRTLLM"
+repository = "https://github.com/SqueezeBits/Torch-TRTLLM"
+keywords = [
+    "pytorch",
+    "transformer",
+    "torch",
+    "tensorrt",
+    "torch-tensorrt",
+    "tensorrt-llm",
+]
 classifiers = [
     "License :: OSI Approved :: GNU Affero General Public License v3",
     "Operating System :: OS Independent"
 ]
-version = "0.0.0"
+version = "0.1.0"
 
 [tool.poetry.dependencies]
 python = ">=3.10"
-pydantic = "*"
-torch = ">=2.5,<2.6"
-transformers = "<=4.45.1,>=4.38.2"
 peft = ">=0.14.0"
 tensorrt-llm = "0.16.0"
 # torch-tensorrt = "2.5.0"
@@ -31,13 +35,9 @@ tensorrt-cu12-bindings = "10.7.0"
 tensorrt-cu12-libs = "10.7.0"
 loguru = "*"
 typer = "*"
-onnx-graphsurgeon = "*"
 
 [tool.poetry.scripts]
 ditto = "ditto.__main__:app"
-
-[tool.poetry.dynamic]
-version = { source = "ditto", attribute = "__version__" }
 
 [tool.poetry.package.include]
 path = "src/ditto"

@@ -20,4 +20,10 @@ from .aten_op import ATenOp
 
 
 class Unary(ATenOp):
+    """Base class for unary operations.
+
+    Attributes:
+        this (Node): The input node.
+    """
+
     this: Node

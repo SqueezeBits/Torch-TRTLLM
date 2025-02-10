@@ -53,13 +53,21 @@ from .infra import (
 
 
 class DeferUnsqueeze(GraphOptimizationPass):
-    """Defer the unsqueeze ops as much as possible."""
+    """Defer the unsqueeze ops as much as possible.
+
+    Attributes:
+        register_create_node_hook (bool): Whether to register the create_stack_trace hook
+    """
 
     register_create_node_hook: bool = False
 
     @cached_property
     def pass_manager(self) -> PassManager:
-        """The pass manager for subpasses."""
+        """The pass manager for subpasses.
+
+        Returns:
+            PassManager: The pass manager that contains required passes for this optimization pass.
+        """
         return PassManager(
             passes=[
                 SwapUnsqueezeWithEmbedding(depth=self.depth + 1),
