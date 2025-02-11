@@ -40,11 +40,11 @@ Ditto is an open-source framework that enables **direct conversion of HuggingFac
 
 ## Benchmarks
 
-We have conducted comprehensive benchmarks for both output quality and inference performance to validate the conversion process of Ditto. [Llama3.3-70B-Instruct](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct) and [Llama3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) were used for the benchmarks and all benchmarks were performed with both GEMM and GPT attention plugins enabled.
+We have conducted comprehensive benchmarks for both output quality and inference performance to validate the conversion process of Ditto. [Llama3.3-70B-Instruct](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct), [Llama3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct), and [Helium1-preview-2B](https://huggingface.co/kyutai/helium-1-preview-2b) were used for the benchmarks and all benchmarks were performed with both GEMM and GPT attention plugins enabled.
 
 
 ### Quality
-We used [TensorRT-LLM llmapi](https://github.com/NVIDIA/TensorRT-LLM/tree/main/tensorrt_llm/llmapi) integrated with [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness/tree/main) for quality evaluation.  
+We used [TensorRT-LLM llmapi](https://github.com/NVIDIA/TensorRT-LLM/tree/main/tensorrt_llm/llmapi) integrated with [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness/tree/main) for quality evaluation. For Helium model, ifeval task was excluded since it is not an instruction model.
 <table>
   <tr>
     <th></th>
@@ -88,6 +88,19 @@ We used [TensorRT-LLM llmapi](https://github.com/NVIDIA/TensorRT-LLM/tree/main/t
     <td align="center">0.350</td>
     <td align="center">0.823</td>
     <td align="center">0.815</td>
+  </tr>
+  <tr>
+    <td rowspan="2">Helium1-preview-2B</td>
+    <td>Ditto</td>
+    <td align="center">0.486</td>
+    <td align="center">11.37</td>
+    <td align="center">0.263</td>
+    <td align="center">0.578</td>
+    <td align="center">-</td>
+  </tr>
+  <tr>
+    <td>TRT-LLM</td>
+    <td colspan="5" align="center">Not Supported</td>
   </tr>
 </table>
 
@@ -133,19 +146,6 @@ Performance benchmarks were conducted using [TensorRT-LLM gptManagerBenchmark](h
     <td align="center">3318.0</td>
     <td align="center">1508.6</td>
     <td align="center">1086.5</td>
-  </tr>
-</table>
-
-
-We also conducted a benchmark with the [Helium1-preview-2B](https://huggingface.co/kyutai/helium-1-preview-2b) model, which is supported in Ditto but not in TensorRT-LLM as noted above.
-<table>
-  <tr>
-    <th></th>
-    <th></th>
-    <th align="center">TP</th>
-    <th align="center">A100<br/>(token/sec)</th>
-    <th align="center">A6000<br/>(token/sec)</th>
-    <th align="center">L40<br/>(token/sec)</th>
   </tr>
   <tr>
     <td rowspan="2">Helium1-preview-2B</td>
