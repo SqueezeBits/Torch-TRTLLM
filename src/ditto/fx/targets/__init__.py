@@ -30,4 +30,6 @@ from .lora_plugin import (
     LoraProto,
 )
 from .plugin import Plugin
+from .recv_plugin import RecvPlugin
 from .rope import FAKE_ROPE_TARGETS
+from .send_plugin import SendPlugin
