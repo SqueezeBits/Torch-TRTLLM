@@ -100,12 +100,6 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
         Returns:
             TRTLLMOptimizationProfileConfig: The optimization profile configuration
         """
-
-        def divide_by_2(value: int, *, offset: int = 0) -> int:
-            if (ret := (value + offset) // 2) == 0:
-                return 1
-            return ret
-
         max_position_embeddings = getattr(hf_config, "max_position_embeddings", DEFAULT_MAX_POS_EMBEDDING)
         rope_scaling = getattr(hf_config, "rope_scaling", None)
         if rope_scaling is not None:
@@ -124,17 +118,17 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             opt_num_tokens = min(max_num_tokens, max_batch_size * max_beam_width)
             logger.debug(f"opt_num_tokens is not set, specifying to {opt_num_tokens}")
         max_kv_cache_block_size = math.ceil(max_seq_len / plugin_config.tokens_per_block)
-        opt_kv_cache_block_size = math.ceil(divide_by_2(max_seq_len) / plugin_config.tokens_per_block)
+        opt_kv_cache_block_size = math.ceil((max_seq_len // 2) / plugin_config.tokens_per_block)
         return cls(
             max_batch_size=max_batch_size,
-            opt_batch_size=divide_by_2(max_batch_size, offset=1),
+            opt_batch_size=max(1, (max_batch_size + 1) // 2),
             max_seq_len=max_seq_len,
-            opt_seq_len=divide_by_2(max_seq_len, offset=1),
+            opt_seq_len=max(1, (max_seq_len + 1) // 2),
             max_input_len=max_input_len,
             max_num_tokens=max_num_tokens,
             opt_num_tokens=opt_num_tokens,
             max_beam_width=max_beam_width,
-            opt_beam_width=divide_by_2(max_beam_width, offset=1),
+            opt_beam_width=max(1, (max_beam_width + 1) // 2),
             max_kv_cache_block_size=max_kv_cache_block_size,
             opt_kv_cache_block_size=opt_kv_cache_block_size,
         )
