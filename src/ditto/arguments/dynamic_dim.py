@@ -76,12 +76,14 @@ class DynamicDimensionType(BaseModel, ABC):
         return self
 
     @property
-    def sym_int(self) -> torch.SymInt:
+    def sym_int(self) -> torch.SymInt | int:
         """Get the symbolic integer of the dynamic dimension.
 
         Returns:
-            torch.SymInt: The symbolic integer of the dynamic dimension
+            torch.SymInt | int: The symbolic integer or integer of the dynamic dimension
         """
+        if self.min == self.max:
+            return self.opt
         if self._sym_int is None:
             self._sym_int = self._create_sym_int()
         return self._sym_int
@@ -311,7 +313,8 @@ class DynamicDimension(DynamicDimensionType):
         Returns:
             int: The example value of the dynamic dimension
         """
-        ex = min(max(self.opt, 2), self.max) if self.given_example is None else self.given_example
+        mid = (self.min + self.max) // 2
+        ex = min(max(mid, 2), self.max) if self.given_example is None else self.given_example
         if ex < 2 and self.min < self.max:
             the_example_size = (
                 "the inferred example size" if self.given_example is None else "the provided example size"
