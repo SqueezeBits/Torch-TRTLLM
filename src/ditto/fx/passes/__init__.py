@@ -43,6 +43,7 @@ from .herd_constants_to_the_right import HerdConstantsToTheRight
 from .index_layers import IndexLayers
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
 from .parallelize_linear import ParallelizeLinear
+from .parallelize_pipeline import ParallelizePipeline
 from .pop_lora_plugins import PopLoraPlugins
 from .propagate_tensor_parallelism import PropagateTensorParallelism
 from .replace_mm_by_gemm_plugin import ReplaceMMByGemmPlugin

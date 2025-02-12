@@ -168,6 +168,7 @@ def build(
         int | None, Option(help="Optimal number of batched input tokens after padding is removed in each batch.")
     ] = None,
     max_beam_width: Annotated[int, Option(help="Maximum number of beams for beam search decoding.")] = 1,
+    pp_size: Annotated[int, Option(help="N-way pipeline parallelism size.", min=1)] = 1,
     tp_size: Annotated[int, Option(help="N-way tensor parallelism size.", min=1)] = 1,
     logits_dtype: Annotated[
         DTypeLiteral,
@@ -183,7 +184,9 @@ def build(
     ] = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
-    assert not (tp_size > 1 and peft_ids), "Tensor parallelism with LoRA is currently not supported"
+    assert not (
+        (tp_size > 1 or pp_size > 1) and peft_ids
+    ), "Tensor Parallelism or Pipeline Parallelism with LoRA is currently not supported"
     if gather_all_logits:
         gather_context_logits = gather_generation_logits = True
     output_dir = resolve_output_dir(output_dir, model_id)
@@ -211,7 +214,7 @@ def build(
     trtllm_build(
         model,
         output_dir,
-        mapping=TRTLLMMapping(tp_size=tp_size),
+        mapping=TRTLLMMapping(pp_size=pp_size, tp_size=tp_size),
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         debug_node_names=add_output,

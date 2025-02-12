@@ -117,7 +117,7 @@ def trtllm_build(
     argument_hint = TRTLLMArgumentHint.configure(
         profile_config,
         gather_context_logits=gather_context_logits,
-        tp_size=mapping.tp_size,
+        mapping=mapping,
     )
 
     graph_module = trtllm_export(
@@ -130,9 +130,6 @@ def trtllm_build(
         extra_passes=[add_outputs(debug_node_names)] if debug_node_names else None,
     )
 
-    output_names = ["logits"]  # TRTLLM requires the first output name to be 'logits'
-    if debug_node_names:
-        output_names.extend(debug_node_names)
     for filename, component in build_trtllm_engine_components(
         graph_module,
         argument_hint,
@@ -141,7 +138,7 @@ def trtllm_build(
         trt_config=trt_config,
         engine_cache=engine_cache,
         network_name=get_network_name(model),
-        output_names=output_names,
+        debug_node_names=debug_node_names,
     ):
         save_component(output_dir, filename, component)
 
@@ -229,7 +226,7 @@ def build_trtllm_engine_components(
     trt_config: TensorRTConfig | None = None,
     engine_cache: BaseEngineCache | None = None,
     network_name: str | None = None,
-    output_names: list[str] | None = None,
+    debug_node_names: list[str] | None = None,
 ) -> Generator[tuple[str, EngineComponent], None, None]:
     """Build TensorRT-LLM engine components from a graph module.
 
@@ -241,7 +238,7 @@ def build_trtllm_engine_components(
         trt_config (TensorRTConfig | None, optional): TensorRT builder configuration. Defaults to None.
         engine_cache (BaseEngineCache | None, optional): Cache for storing/loading built engines. Defaults to None.
         network_name (str | None, optional): Name of the network. Defaults to None.
-        output_names (list[str] | None, optional): Names of output tensors. Defaults to None.
+        debug_node_names (list[str] | None, optional): List of node names to output for debugging. Defaults to None.
 
     Yields:
         tuple[str, EngineComponent]: A tuple containing:
@@ -250,13 +247,16 @@ def build_trtllm_engine_components(
                 bytes, or Lora state dicts.
     """
     mapping = mapping or TRTLLMMapping()
-    for rank, graph_module_per_rank in parallelize(graph_module, mapping):
+    for rank, graph_module_per_rank in parallelize(graph_module, argument_hint, mapping):
         if rank == 0:
-            yield "config.json", generate_trtllm_engine_config(
-                graph_module_per_rank,
-                build_config,
-                mapping,
-                architecture=network_name,
+            yield (
+                "config.json",
+                generate_trtllm_engine_config(
+                    graph_module_per_rank,
+                    build_config,
+                    mapping,
+                    architecture=network_name,
+                ),
             )
             if (
                 lora_state_dicts := verify(
@@ -279,14 +279,16 @@ def build_trtllm_engine_components(
             "Building TensorRT engine{for_rank}",
             for_rank=f" for rank {rank}" if mapping.world_size > 1 else "",
         )
-        yield f"rank{rank}.engine", convert(
-            graph_module_per_rank,
-            argument_hint,
-            trt_config or TensorRTConfig(),
-            engine_cache=engine_cache,
-            network_name=network_name,
-            output_names=output_names,
-            rank=rank,
+        yield (
+            f"rank{rank}.engine",
+            convert(
+                graph_module_per_rank,
+                argument_hint,
+                trt_config or TensorRTConfig(),
+                engine_cache=engine_cache,
+                network_name=network_name,
+                debug_node_names=debug_node_names,
+            ),
         )
 
 

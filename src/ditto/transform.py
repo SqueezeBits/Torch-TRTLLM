@@ -30,6 +30,7 @@ from .debug import save_for_debug
 from .fx import (
     ForgetSubmodules,
     ParallelizeLinear,
+    ParallelizePipeline,
     Plugin,
     PropagateTensorParallelism,
     ResetCodeGen,
@@ -109,12 +110,14 @@ def transform(
 
 def parallelize(
     graph_module: GraphModule,
+    argument_hint: TRTLLMArgumentHint,
     mapping: TRTLLMMapping,
 ) -> Generator[tuple[int, GraphModule], None, None]:
     """Parallelize the graph module.
 
     Args:
         graph_module (GraphModule): The input graph module to parallelize
+        argument_hint (TRTLLMArgumentHint): The argument hint of the parallelized graph module
         mapping (TRTLLMMapping): The mapping of the parallelized graph module
 
     Returns:
@@ -122,6 +125,7 @@ def parallelize(
             A generator that yields the parallelized graph module for each rank
     """
     if mapping.world_size == 1:
+        argument_hint.mapping = mapping.copy_with_rank(0)
         yield 0, graph_module
         return
 
@@ -130,13 +134,13 @@ def parallelize(
     for rank in range(mapping.world_size):
         logger.debug(f"Running parallelize passes for rank {rank}")
         copied_graph_module = copy_graph_module(graph_module)
-        mapping_with_rank = mapping.copy_with_rank(rank)
-        parallelize_pass_manager = DynamoPassManager.build_from_passlist(
-            [
-                PropagateTensorParallelism(mapping=mapping_with_rank).as_transform(),
-                ParallelizeLinear(mapping=mapping_with_rank).as_transform(),
-            ]
-        )
+        argument_hint.mapping = mapping.copy_with_rank(rank)
+        parallelize_pass_manager = DynamoPassManager()
+        if mapping.tp_size > 1:
+            parallelize_pass_manager.add_pass(PropagateTensorParallelism(mapping=argument_hint.mapping).as_transform())
+            parallelize_pass_manager.add_pass(ParallelizeLinear(mapping=argument_hint.mapping).as_transform())
+        if mapping.pp_size > 1:
+            parallelize_pass_manager.add_pass(ParallelizePipeline(argument_hint=argument_hint).as_transform())
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
             yield rank, parallelize_pass_manager(copied_graph_module)
 
@@ -154,7 +158,7 @@ def copy_graph_module(graph_module: GraphModule) -> GraphModule:
     copied_graph.meta.update(graph_module.meta)
     for node in copied_graph.graph.nodes:
         if isinstance(node.target, Plugin):
-            # Note: If the target of a node is an instance of Plugin, it isn't copied.
+            # Note: If the target of a node is an instance of Plugin, it is just moved, not copied.
             # We need to copy the Plugin target manually.
             node.target = copy(node.target)
     return copied_graph

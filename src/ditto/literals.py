@@ -89,6 +89,7 @@ PassName = Literal[
     "IndexLayers",
     "InsertGatherLastTokenIds",
     "ParallelizeLinear",
+    "ParallelizePipeline",
     "PopLoraPlugins",
     "PropagateTensorParallelism",
     "ReplaceMMByGemmPlugin",
