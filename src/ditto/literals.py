@@ -96,6 +96,7 @@ PassName = Literal[
     "ReplaceSDPAByGPTAttentionPlugin",
     "ReplaceViewByReshape",
     "ResetCodeGen",
+    "ResolveDynamicReshape",
     "RewriteFloatingPointLiteralsAsNodes",
     "RewriteReshapeAsUnsqueeze",
     "RewriteSplitAsSlices",
