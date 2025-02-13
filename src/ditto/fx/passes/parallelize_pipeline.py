@@ -19,9 +19,9 @@ from torch.fx import Graph, GraphModule, Node
 
 from ...arguments import TRTLLMArgumentHint
 from ...types import DataType
-from ..nodes import AddTensorTensor, Placeholder, SymSizeInt
+from ..nodes import AddTensorTensor, BinaryElementwise, Placeholder, SymSizeInt, Unsqueeze
 from ..targets import GPTAttentionPlugin, RecvPlugin, SendPlugin
-from ..utils import get_val
+from ..utils import find_closest_common_descendant, get_val
 from .infra import (
     GraphOptimizationPass,
     PassResult,
@@ -30,6 +30,7 @@ from .infra import (
 )
 
 
+# pylint: disable=too-many-locals
 class ParallelizePipeline(GraphOptimizationPass):
     """Parallelize the pipeline in the graph (Pipeline Parallelism).
 
@@ -72,11 +73,20 @@ class ParallelizePipeline(GraphOptimizationPass):
                     )
                 input_ids_node.replace_all_uses_with(
                     hidden_states_input.node,
-                    delete_user_cb=lambda node: SymSizeInt.specialize_from(node) is None,
+                    delete_user_cb=lambda user: SymSizeInt.specialize_from(user) is None,
                 )
 
                 recv_node = insert_recv_plugin(graph, hidden_states_input.node, mapping.prev_pp_rank)
                 pipeline_input_node.replace_all_uses_with(recv_node)
+                if (
+                    len(users := list(recv_node.users)) == 2
+                    and (common_descendant := find_closest_common_descendant(users[0], users[1]))
+                    and (binary := BinaryElementwise.specialize_from(common_descendant))
+                ):
+                    # Note: Some models have squeeze and unsqueeze operations for broadcasting.
+                    # In that case, it might occur the mismatch of the input shapes of some binary nodes.
+                    # This function resolves the mismatch by unsqueezing the input node if necessary.
+                    resolve_unmatched_input_shapes(binary)
             elif (
                 not mapping.is_last_pp_rank()
                 and gpt_attn_plugin.layer_idx == layers_to_be_parallelized[-1]
@@ -248,3 +258,45 @@ def find_output_node(graph: Graph) -> Node:
     output_node = graph.find_nodes(op="output")[0]
     assert isinstance(input_args := output_node.args[0], tuple)
     return input_args[0]
+
+
+def resolve_unmatched_input_shapes(binary: BinaryElementwise) -> None:
+    """Resolve the unmatched input shapes of the binary node.
+
+    This function resolves only the case where one of the inputs needs to be unsqueezed.
+
+    Example:
+        binary.this.shape = (dim0, dim1)
+        binary.other.shape = (1, dim0, dim1)
+
+        After resolution:
+        binary.this.shape = (1, dim0, dim1)
+        binary.other.shape = (1, dim0, dim1)
+
+    Args:
+        binary (BinaryElementwise): The binary node to resolve the unmatched input shapes of
+    """
+
+    def need_to_unsqueeze(shape0: tuple[int | torch.SymInt, ...], shape1: tuple[int | torch.SymInt, ...]) -> bool:
+        if (
+            len(shape1) - len(shape0) == 1
+            and isinstance(shape1[0], int)
+            and shape1[0] == 1
+            and all(lhs_dim == rhs_dim for lhs_dim, rhs_dim in zip(shape0, shape1[1:]))
+        ):
+            return True
+        return False
+
+    if (
+        (lhs_val := get_val(binary.this, FakeTensor)) is not None
+        and (rhs_val := get_val(binary.other, FakeTensor)) is not None
+        and (
+            need_to_unsqueeze(lhs_val.shape, rhs_val.shape)
+            if len(lhs_val.shape) < len(rhs_val.shape)
+            else need_to_unsqueeze(rhs_val.shape, lhs_val.shape)
+        )
+    ):
+        target_node = binary.this if len(lhs_val.shape) < len(rhs_val.shape) else binary.other
+        with target_node.graph.inserting_after(target_node):
+            unsqueeze = Unsqueeze.create(target_node.graph, target_node, 0)
+            target_node.replace_all_uses_with(unsqueeze.node, delete_user_cb=lambda user: user is not unsqueeze.node)
