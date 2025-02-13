@@ -19,7 +19,7 @@ from torch.fx import Graph, GraphModule, Node
 
 from ...arguments import TRTLLMArgumentHint
 from ...types import DataType
-from ..nodes import AddTensorTensor, Placeholder
+from ..nodes import AddTensorTensor, Placeholder, SymSizeInt
 from ..targets import GPTAttentionPlugin, RecvPlugin, SendPlugin
 from ..utils import get_val
 from .infra import (
@@ -70,7 +70,10 @@ class ParallelizePipeline(GraphOptimizationPass):
                     hidden_states_input = Placeholder.create(
                         graph, "hidden_states_input", self.argument_hint.hidden_states_input
                     )
-                input_ids_node.replace_all_uses_with(hidden_states_input)
+                input_ids_node.replace_all_uses_with(
+                    hidden_states_input.node,
+                    delete_user_cb=lambda node: SymSizeInt.specialize_from(node) is None,
+                )
 
                 recv_node = insert_recv_plugin(graph, hidden_states_input.node, mapping.prev_pp_rank)
                 pipeline_input_node.replace_all_uses_with(recv_node)
@@ -171,7 +174,7 @@ def find_input_node_of_pipeline(node: Node) -> Node | None:
             if current in visited:
                 continue
             visited.add(current)
-            if _ := AddTensorTensor.specialize_from(current):
+            if (add := AddTensorTensor.specialize_from(current)) and add.this.op == add.other.op == "call_function":
                 return current
             if current.users:
                 queue.extend(current.users)
