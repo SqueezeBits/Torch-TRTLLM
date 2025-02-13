@@ -499,6 +499,7 @@ def get_shape_ranges(
                 )
             )
             for name in input_names
+            if name not in ("logits",)
         }
         for profile in optimization_profiles
     ]

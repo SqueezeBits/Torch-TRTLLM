@@ -27,13 +27,13 @@ from .plugin import TRTLLMPluginConfig
 class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
     """A subset of properties in `trtllm.BuildConfig` related to optimization profile required at runtime."""
 
-    max_input_len: int = Field(default=1024, gt=1)
-    max_seq_len: int = Field(default=DEFAULT_MAX_POS_EMBEDDING, gt=1)
+    max_input_len: int = Field(default=1024, gt=0)
+    max_seq_len: int = Field(default=DEFAULT_MAX_POS_EMBEDDING, gt=0)
     opt_batch_size: int = Field(default=128, gt=0)
-    max_batch_size: int = Field(default=256, gt=1)
+    max_batch_size: int = Field(default=256, gt=0)
     max_beam_width: int = Field(default=1, gt=0)
-    max_num_tokens: int = Field(default=8192, multiple_of=8, gt=1)
-    opt_num_tokens: int = Field(default=8, multiple_of=8, gt=0)
+    max_num_tokens: int = Field(default=8192, gt=0)
+    opt_num_tokens: int = Field(default=8, gt=0)
 
     @model_validator(mode="after")
     def check_runtime_attribute_dependencies(self) -> Self:
@@ -121,14 +121,14 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
         opt_kv_cache_block_size = math.ceil((max_seq_len // 2) / plugin_config.tokens_per_block)
         return cls(
             max_batch_size=max_batch_size,
-            opt_batch_size=(max_batch_size + 1) // 2,
+            opt_batch_size=max(1, (max_batch_size + 1) // 2),
             max_seq_len=max_seq_len,
-            opt_seq_len=(max_seq_len + 1) // 2,
+            opt_seq_len=max(1, (max_seq_len + 1) // 2),
             max_input_len=max_input_len,
             max_num_tokens=max_num_tokens,
             opt_num_tokens=opt_num_tokens,
             max_beam_width=max_beam_width,
-            opt_beam_width=(max_beam_width + 1) // 2,
+            opt_beam_width=max(1, (max_beam_width + 1) // 2),
             max_kv_cache_block_size=max_kv_cache_block_size,
             opt_kv_cache_block_size=opt_kv_cache_block_size,
         )

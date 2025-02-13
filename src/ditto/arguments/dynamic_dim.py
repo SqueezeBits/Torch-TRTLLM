@@ -30,7 +30,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from typing_extensions import Self
 
 from ..contexts import detailed_sym_node_str
-from ..types import ExportDim
+from ..types import ExportDim, SymbolicInteger
 
 
 class DynamicDimensionCacheConflictError(RuntimeError):
@@ -76,12 +76,14 @@ class DynamicDimensionType(BaseModel, ABC):
         return self
 
     @property
-    def sym_int(self) -> torch.SymInt:
+    def sym_int(self) -> SymbolicInteger:
         """Get the symbolic integer of the dynamic dimension.
 
         Returns:
-            torch.SymInt: The symbolic integer of the dynamic dimension
+            SymbolicInteger: The symbolic integer of the dynamic dimension
         """
+        if self.min == self.max:
+            return self.opt
         if self._sym_int is None:
             self._sym_int = self._create_sym_int()
         return self._sym_int
@@ -311,7 +313,8 @@ class DynamicDimension(DynamicDimensionType):
         Returns:
             int: The example value of the dynamic dimension
         """
-        ex = min(max(self.opt, 2), self.max) if self.given_example is None else self.given_example
+        mid = (self.min + self.max) // 2
+        ex = min(max(mid, 2), self.max) if self.given_example is None else self.given_example
         if ex < 2 and self.min < self.max:
             the_example_size = (
                 "the inferred example size" if self.given_example is None else "the provided example size"

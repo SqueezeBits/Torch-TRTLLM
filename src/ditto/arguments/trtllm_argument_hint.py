@@ -18,7 +18,7 @@
 from collections.abc import Callable
 
 import torch
-from pydantic import Field, TypeAdapter, computed_field, model_serializer
+from pydantic import Field, PrivateAttr, TypeAdapter, computed_field, model_serializer
 from typing_extensions import Self
 
 from ..configs import TRTLLMOptimizationProfileConfig
@@ -53,6 +53,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     tp_size: int = Field(default=1, exclude=True, gt=0)
     gather_context_logits: bool = Field(default=False, exclude=True)
     lora_input_hints: dict[str, TensorTypeHint] = Field(default_factory=dict, exclude=True)
+    _one: DynamicDimension = PrivateAttr(default=DynamicDimension(name="one", min=1, opt=1, max=1))
 
     @classmethod
     def configure(
@@ -83,13 +84,12 @@ class TRTLLMArgumentHint(StrictlyTyped):
             opt=profile_config.opt_seq_len,
             max=profile_config.max_seq_len,
         )
-        s = DynamicDimension(
+        num_tokens = DynamicDimension(
             name="num_tokens",
-            min=0,
-            opt=profile_config.opt_num_tokens // 8,
-            max=profile_config.max_num_tokens // 8,
+            min=1,
+            opt=profile_config.opt_num_tokens,
+            max=profile_config.max_num_tokens,
         )
-        num_tokens = 8 * s
         max_blocks_per_seq = DynamicDimension(
             name="max_blocks_per_seq",
             min=1,
@@ -167,7 +167,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @property
     def host_kv_cache_pool_pointers(self) -> TensorTypeHint:
         """Tensor type hint for host KV cache pool pointers with shape (1, 2)."""
-        return TensorTypeHint(shape=(1, 2), dtype=torch.int64)
+        return TensorTypeHint(shape=(self._one, 2), dtype=torch.int64)
 
     @computed_field
     @property
@@ -197,7 +197,17 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @property
     def host_runtime_perf_knobs(self) -> TensorTypeHint:
         """Tensor type hint for host runtime performance knobs with shape (16,)."""
-        return TensorTypeHint(shape=(16,), dtype=torch.int64)
+        return TensorTypeHint(
+            shape=(
+                DynamicDimension(
+                    name="host_runtime_perf_knobs",
+                    min=16,
+                    opt=16,
+                    max=16,
+                ),
+            ),
+            dtype=torch.int64,
+        )
 
     @computed_field
     @property
@@ -210,13 +220,23 @@ class TRTLLMArgumentHint(StrictlyTyped):
     def host_max_attention_window_sizes(self) -> TensorTypeHint:
         """Tensor type hint for host max attention window sizes with shape (num_attn_layers,)."""
         assert self.num_attn_layers is not None, "num_attn_layers needs to be set for host_max_attention_window_sizes"
-        return TensorTypeHint(shape=(self.num_attn_layers,), dtype=torch.int32)
+        return TensorTypeHint(
+            shape=(
+                DynamicDimension(
+                    name="host_max_attention_window_sizes",
+                    min=self.num_attn_layers,
+                    opt=self.num_attn_layers,
+                    max=self.num_attn_layers,
+                ),
+            ),
+            dtype=torch.int32,
+        )
 
     @computed_field
     @property
     def host_sink_token_length(self) -> TensorTypeHint:
         """Tensor type hint for host sink token length with shape (1,)."""
-        return TensorTypeHint(shape=(1,), dtype=torch.int32)
+        return TensorTypeHint(shape=(self._one,), dtype=torch.int32)
 
     @computed_field
     @property
@@ -232,13 +252,23 @@ class TRTLLMArgumentHint(StrictlyTyped):
     def host_kv_cache_pool_mapping(self) -> TensorTypeHint:
         """Tensor type hint for host KV cache pool mapping with shape (num_attn_layers,)."""
         assert self.num_attn_layers is not None, "num_attn_layers needs to be set for host_kv_cache_pool_mapping"
-        return TensorTypeHint(shape=(self.num_attn_layers,), dtype=torch.int32)
+        return TensorTypeHint(
+            shape=(
+                DynamicDimension(
+                    name="host_max_attention_window_sizes",
+                    min=self.num_attn_layers,
+                    opt=self.num_attn_layers,
+                    max=self.num_attn_layers,
+                ),
+            ),
+            dtype=torch.int32,
+        )
 
     @computed_field
     @property
     def host_context_progress(self) -> TensorTypeHint:
         """Tensor type hint for host context progress with shape (1,)."""
-        return TensorTypeHint(shape=(1,), dtype=torch.int64)
+        return TensorTypeHint(shape=(self._one,), dtype=torch.int64)
 
     @computed_field
     @property
