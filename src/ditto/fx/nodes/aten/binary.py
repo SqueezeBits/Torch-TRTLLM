@@ -66,17 +66,20 @@ class Binary(ATenOp):
             bool: True if the operation is commutative, False otherwise
         """
 
-    def specialize_either_side_as(self, node_type: type[SomeSpecialization]) -> SomeSpecialization | None:
+    def specialize_either_side_as(
+        self, node_type: type[SomeSpecialization]
+    ) -> tuple[SomeSpecialization, Node | Number] | None:
         """Try to specialize either operand as a specific node type.
 
         Args:
             node_type (type[SomeSpecialization]): The node type to specialize as
 
         Returns:
-            SomeSpecialization | None: The specialized node if successful, None otherwise
+            tuple[SomeSpecialization, Node | Number] | None: A tuple containing the specialized node
+                and the other operand if successful, None otherwise
         """
         if isinstance(self.this, Node) and (lhs := node_type.specialize_from(self.this)):
-            return lhs
+            return lhs, self.other
         if isinstance(self.other, Node) and (rhs := node_type.specialize_from(self.other)):
-            return rhs
+            return rhs, self.this
         return None

@@ -12,15 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .activations import ActivationSubgraph, Silu
-from .fused_linear import FusedLinear
-from .gated_mlp import GatedMLP
-from .linear import Linear
-from .lora import Lora, LoraProto, MultiLora
-from .moe import MoESubgraph
-from .path import TrailingReformatPath
-from .rope import RoPESubgraph
-from .sdpa import ScaledDotProductAttentionSubgraph
-from .subgraph import Subgraph
-from .token_embedding import TokenEmbedding
-from .topk import TopK
+from torch.fx import Node
+
+from ..subgraphs import MoESubgraph
+from .infra import NodewiseOptimizationPass, NodewisePassResult
+
+
+class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
+    def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+        if not (moe := MoESubgraph.configure_from(node)):
+            return {}
