@@ -20,6 +20,7 @@ declare RERUN_DITTO=false
 declare REBUILD_NATIVE=false
 declare RERUN_NATIVE=false
 declare TP_SIZE=1
+declare PP_SIZE=1
 
 # Global variables for engine and artifact directories
 declare DITTO_ENGINE_DIR=""
@@ -79,6 +80,7 @@ print_help() {
     echo "  --dtype DTYPE          Data type for model conversion (default: auto)"
     echo "  --model-type TYPE      Model type for finding convert_checkpoint.py (default: auto-detected)"
     echo "  --tp-size SIZE         Tensor parallel size (default: 1)"
+    echo "  --pp-size SIZE         Pipeline parallel size (default: 1)"
     echo "  --trust-remote-code    Trust remote code when loading models from Hugging Face"
     echo
     echo "  --skip                 Equivalent to --skip-build --skip-run"
@@ -261,6 +263,14 @@ parse_args() {
                 fi
                 shift 2
                 ;;
+            --pp-size)
+                PP_SIZE="$2"
+                if ! [[ "$PP_SIZE" =~ ^0*[1-9][0-9]*$ ]]; then
+                    echo "Error: PP_SIZE must be a positive integer."
+                    exit 1
+                fi
+                shift 2
+                ;;
             -*)
                 echo "Error: Unrecognized option: $1"
                 echo "Try '$0 --help' for more information"
@@ -367,6 +377,10 @@ append_option_suffix() {
         dir="${dir}_tp${TP_SIZE}"
     fi
 
+    if [ "$PP_SIZE" -gt 1 ]; then
+        dir="${dir}_pp${PP_SIZE}"
+    fi
+
     echo "$dir"
 }
 
@@ -415,6 +429,7 @@ ditto_build() {
         --output-dir $DITTO_ENGINE_DIR \
         --dtype $DTYPE \
         --tp-size $TP_SIZE \
+        --pp-size $PP_SIZE \
         $(build_peft_args "${peft_ids[@]}")"
 
     if [ "$TRUST_REMOTE_CODE" = true ]; then
@@ -438,8 +453,8 @@ run_engine() {
         --input_text \"$PROMPT\" \
         --max_output_len 100"
     
-    if [ "$TP_SIZE" -gt 1 ]; then
-        base_cmd="mpirun -n $TP_SIZE $base_cmd"
+    if [ $((TP_SIZE * PP_SIZE)) -gt 1 ]; then
+        base_cmd="mpirun -n $((TP_SIZE * PP_SIZE)) $base_cmd"
     fi
 
     # Only run if output file doesn't exist or is empty or rerun flag is true
@@ -534,7 +549,8 @@ native_build() {
                 --model_dir $BASE_MODEL_DIR \
                 --output_dir $TRTLLM_CKPT_DIR \
                 --dtype $DTYPE \
-                --tp_size $TP_SIZE"
+                --tp_size $TP_SIZE \
+                --pp_size $PP_SIZE"
         fi
 
         rich_execute "$convert_cmd" "$TRTLLM_CKPT_DIR/convert.log" "convert checkpoint"
