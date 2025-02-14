@@ -92,6 +92,7 @@ PassName = Literal[
     "ParallelizePipeline",
     "PopLoraPlugins",
     "PropagateTensorParallelism",
+    "ReplaceMoEByMoEPlugin",
     "ReplaceMMByGemmPlugin",
     "ReplaceSDPAByGPTAttentionPlugin",
     "ReplaceViewByReshape",

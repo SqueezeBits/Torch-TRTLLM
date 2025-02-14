@@ -544,3 +544,50 @@ class SubDefault(Sub, FinalATenOp):
 
     this: Number
     other: Number
+
+
+class Eq(BinaryElementwise):
+    """Binary elementwise equality comparison operation.
+
+    Attributes:
+        this (Node): The first operand
+        other (Node | Number): The second operand
+    """
+
+
+@Eq.register(torch.ops.aten.eq.Tensor)
+class EqTensor(Eq, FinalATenOp):
+    """The final specialization of `torch.ops.aten.eq.Tensor`.
+
+    Compares a tensor with another tensor elementwise for equality.
+
+    Attributes:
+        this (Node): The first tensor operand
+        other (Node): The second tensor operand
+    """
+
+    this: Node
+    other: Node
+
+    @property
+    def is_commutative(self) -> Literal[True]:
+        return True
+
+
+@Eq.register(torch.ops.aten.eq.Scalar)
+class EqScalar(Eq, FinalATenOp):
+    """The final specialization of `torch.ops.aten.eq.Scalar`.
+
+    Compares a tensor with a scalar elementwise for equality.
+
+    Attributes:
+        this (Node): The first tensor operand
+        other (Number): The second scalar operand
+    """
+
+    this: Node
+    other: Number
+
+    @property
+    def is_commutative(self) -> Literal[False]:
+        return False
