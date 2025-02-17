@@ -61,12 +61,8 @@ class ParallelizePipeline(GraphOptimizationPass):
                 not mapping.is_first_pp_rank()
                 and gpt_attn_plugin.layer_idx == layers_to_be_parallelized[0]
                 and (pipeline_input_node := find_input_node_of_pipeline(node))
-                and (input_tensor := get_val(pipeline_input_node, FakeTensor)) is not None
                 and (input_ids_node := find_input_ids_node(graph))
             ):
-                self.argument_hint.hidden_size = input_tensor.shape[-1]
-                self.argument_hint.hidden_dtype = input_tensor.dtype
-
                 with graph.inserting_after(input_ids_node):
                     hidden_states_input = Placeholder.create(
                         graph, "hidden_states_input", self.argument_hint.hidden_states_input

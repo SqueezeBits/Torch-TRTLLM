@@ -86,7 +86,7 @@ def transform(
     logger.debug("Running post-inlining passes")
     with fake_tensor_prop_on_node_creation(graph_module), ignore_symbolic_shapes_warning():
         graph_module = post_inline_pass_manager(graph_module)
-    update_argument_hint(argument_hint, graph_module)
+    update_argument_hint(argument_hint, graph_module, dtype)
 
     save_for_debug("initial_graph_module", graph_module)
 
