@@ -31,7 +31,14 @@ class ResolveDynamicReshape(NodewiseOptimizationPass):
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if (reshape := Reshape.specialize_from(node)) and (
-            len([dim for dim in reshape.shape if isinstance(dim, Node) and SymSizeInt.specialize_from(dim)]) == 1
+            len(
+                [
+                    dim
+                    for dim in reshape.shape
+                    if dim == -1 or (isinstance(dim, Node) and SymSizeInt.specialize_from(dim))
+                ]
+            )
+            == 1
         ):
             new_shape = [dim if isinstance(dim, int) else -1 for dim in reshape.shape]
             args, kwargs = reshape.args_kwargs(shape=new_shape)
