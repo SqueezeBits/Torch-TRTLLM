@@ -43,7 +43,9 @@ class TRTLLMArgumentHint(StrictlyTyped):
         gather_context_logits (bool): Whether to gather context logits. Defaults to False.
         lora_input_hints (dict[str, TensorTypeHint]): LoRA input tensor hints. Defaults to empty dict.
         hidden_size (int | None): Hidden size for hidden_states_input. Defaults to None.
+            (Required only when pp_rank > 0)
         hidden_dtype (torch.dtype | None): Hidden dtype for hidden_states_input. Defaults to None.
+            (Required only when pp_rank > 0)
     """
 
     batch_size: DynamicDimensionType = Field(frozen=True, exclude=True)
@@ -121,13 +123,25 @@ class TRTLLMArgumentHint(StrictlyTyped):
             gather_context_logits=gather_context_logits,
         )
 
-    def as_dict(self) -> dict[str, TensorTypeHint | None]:
+    def as_dict(self) -> dict[str, TensorTypeHint]:
         """Convert argument hints to dictionary.
 
         Returns:
-            dict[str, TensorTypeHint | None]: Dictionary of tensor hints
+            dict[str, TensorTypeHint]: Dictionary of tensor hints
         """
-        return TypeAdapter(dict[str, TensorTypeHint | None]).validate_python(self.model_dump())
+        return TypeAdapter(dict[str, TensorTypeHint]).validate_python(self.model_dump(exclude_none=True))
+
+    @property
+    def num_attn_layers_per_pipeline(self) -> int:
+        """Number of attention layers per pipeline.
+
+        Returns:
+            int: Number of attention layers per pipeline
+        """
+        assert (
+            self.num_attn_layers is not None
+        ), "num_attn_layers needs to be set for getting num_attn_layers_per_pipeline"
+        return self.num_attn_layers // self.mapping.pp_size
 
     @property
     def batched_input_ids(self) -> TensorTypeHint:
@@ -143,11 +157,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
 
         If the pipeline parallelism is used, the input IDs may not be needed.
         """
-        return (
-            TensorTypeHint(shape=(self.num_tokens,), dtype=torch.int32)
-            if not self.mapping.is_initialized() or self.mapping.is_first_pp_rank()
-            else None
-        )
+        return TensorTypeHint(shape=(self.num_tokens,), dtype=torch.int32) if self.mapping.is_first_pp_rank() else None
 
     @computed_field
     @property
@@ -158,10 +168,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
         """
         return (
             TensorTypeHint(shape=(self.num_tokens, self.hidden_size), dtype=self.hidden_dtype)
-            if self.mapping.is_initialized()
-            and not self.mapping.is_first_pp_rank()
-            and self.hidden_size is not None
-            and self.hidden_dtype is not None
+            if not self.mapping.is_first_pp_rank() and self.hidden_size is not None and self.hidden_dtype is not None
             else None
         )
 
@@ -175,7 +182,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @property
     def last_token_ids(self) -> TensorTypeHint | None:
         """Tensor type hint for last token IDs with shape (num_tokens,), None if gather context logits is True."""
-        if self.gather_context_logits or (self.mapping.is_initialized() and not self.mapping.is_last_pp_rank()):
+        if self.gather_context_logits or not self.mapping.is_last_pp_rank():
             return None
         return TensorTypeHint(shape=(self.batch_size,), dtype=torch.int32)
 
@@ -246,16 +253,14 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @computed_field
     @property
     def host_max_attention_window_sizes(self) -> TensorTypeHint:
-        """Tensor type hint for host max attention window sizes with shape (num_attn_layers,)."""
-        assert self.num_attn_layers is not None, "num_attn_layers needs to be set for host_max_attention_window_sizes"
-        num_attn_layers = self.mapping.get_length_of_pp_layers(self.num_attn_layers)
+        """Tensor type hint for host max attention window sizes with shape (num_attn_layers_per_pipeline,)."""
         return TensorTypeHint(
             shape=(
                 DynamicDimension(
                     name="host_max_attention_window_sizes",
-                    min=num_attn_layers,
-                    opt=num_attn_layers,
-                    max=num_attn_layers,
+                    min=self.num_attn_layers_per_pipeline,
+                    opt=self.num_attn_layers_per_pipeline,
+                    max=self.num_attn_layers_per_pipeline,
                 ),
             ),
             dtype=torch.int32,
@@ -279,16 +284,14 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @computed_field
     @property
     def host_kv_cache_pool_mapping(self) -> TensorTypeHint:
-        """Tensor type hint for host KV cache pool mapping with shape (num_attn_layers,)."""
-        assert self.num_attn_layers is not None, "num_attn_layers needs to be set for host_kv_cache_pool_mapping"
-        num_attn_layers = self.mapping.get_length_of_pp_layers(self.num_attn_layers)
+        """Tensor type hint for host KV cache pool mapping with shape (num_attn_layers_per_pipeline,)."""
         return TensorTypeHint(
             shape=(
                 DynamicDimension(
                     name="host_max_attention_window_sizes",
-                    min=num_attn_layers,
-                    opt=num_attn_layers,
-                    max=num_attn_layers,
+                    min=self.num_attn_layers_per_pipeline,
+                    opt=self.num_attn_layers_per_pipeline,
+                    max=self.num_attn_layers_per_pipeline,
                 ),
             ),
             dtype=torch.int32,

@@ -18,6 +18,7 @@ from torch._subclasses import FakeTensor
 from torch.fx import Graph, GraphModule, Node
 
 from ...arguments import TRTLLMArgumentHint
+from ...constants import INPUT_IDS
 from ...types import DataType
 from ..nodes import AddTensorTensor, BinaryElementwise, Placeholder, SymSizeInt, Unsqueeze
 from ..targets import GPTAttentionPlugin, RecvPlugin, SendPlugin
@@ -152,7 +153,7 @@ def find_input_ids_node(graph: Graph) -> Node:
         Node: The logits node in the graph
     """
     for input_node in graph.find_nodes(op="placeholder"):
-        if input_node.name == "input_ids":
+        if input_node.name == INPUT_IDS:
             return input_node
     raise RuntimeError("No input_ids placeholder found in the graph")
 

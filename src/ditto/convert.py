@@ -40,7 +40,7 @@ def convert(
     debug_node_names: list[str] | None = None,
 ) -> bytes:
     """Convert an graph module to a TensorRT engine."""
-    all_tensor_hints = {name: hint for name, hint in argument_hint.as_dict().items() if hint is not None}
+    all_tensor_hints = argument_hint.as_dict()
     input_specs = tuple(
         all_tensor_hints[p.name].as_spec(p.name) for p in graph_module.graph.find_nodes(op="placeholder")
     )
