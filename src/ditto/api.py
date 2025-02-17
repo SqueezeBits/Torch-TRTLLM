@@ -134,7 +134,6 @@ def trtllm_build(
         graph_module,
         argument_hint,
         build_config=TRTLLMBuildConfig.merge(profile_config, model_config),
-        mapping=mapping,
         trt_config=trt_config,
         engine_cache=engine_cache,
         network_name=get_network_name(model),
@@ -222,7 +221,6 @@ def build_trtllm_engine_components(
     argument_hint: TRTLLMArgumentHint,
     *,
     build_config: TRTLLMBuildConfig,
-    mapping: TRTLLMMapping | None = None,
     trt_config: TensorRTConfig | None = None,
     engine_cache: BaseEngineCache | None = None,
     network_name: str | None = None,
@@ -234,7 +232,6 @@ def build_trtllm_engine_components(
         graph_module (GraphModule): The graph module to convert to TensorRT engines
         argument_hint (TRTLLMArgumentHint): Configuration for input arguments
         build_config (TRTLLMBuildConfig): Configuration for building TensorRT-LLM engines
-        mapping (TRTLLMMapping | None, optional): Tensor parallel mapping configuration. Defaults to None.
         trt_config (TensorRTConfig | None, optional): TensorRT builder configuration. Defaults to None.
         engine_cache (BaseEngineCache | None, optional): Cache for storing/loading built engines. Defaults to None.
         network_name (str | None, optional): Name of the network. Defaults to None.
@@ -246,15 +243,14 @@ def build_trtllm_engine_components(
             - TRTLLMEngineConfig | bytes | dict[str, torch.Tensor]: Either the engine configuration, serialized engine
                 bytes, or Lora state dicts.
     """
-    mapping = mapping or TRTLLMMapping()
-    for rank, graph_module_per_rank in parallelize(graph_module, argument_hint, mapping):
+    for rank, graph_module_per_rank in parallelize(graph_module, argument_hint):
         if rank == 0:
             yield (
                 "config.json",
                 generate_trtllm_engine_config(
                     graph_module_per_rank,
                     build_config,
-                    mapping,
+                    argument_hint.mapping,
                     architecture=network_name,
                 ),
             )
@@ -277,7 +273,7 @@ def build_trtllm_engine_components(
         save_for_debug(f"graph_module_rank{rank}", graph_module_per_rank)
         logger.info(
             "Building TensorRT engine{for_rank}",
-            for_rank=f" for rank {rank}" if mapping.world_size > 1 else "",
+            for_rank=f" for rank {rank}" if argument_hint.mapping.world_size > 1 else "",
         )
         yield (
             f"rank{rank}.engine",

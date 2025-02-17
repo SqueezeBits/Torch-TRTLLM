@@ -17,7 +17,7 @@
 from collections.abc import Callable
 from typing import Any
 
-from pydantic import Field, computed_field, model_serializer, model_validator
+from pydantic import Field, PrivateAttr, computed_field, model_serializer, model_validator
 from typing_extensions import Self
 
 from ...literals import DTypeLiteral, QuantAlgoLiteral
@@ -56,7 +56,7 @@ class TRTLLMMapping(StrictlyTyped):
     pp_size: int = Field(default=1, ge=1)
     moe_tp_size: int = Field(default=0)
     moe_ep_size: int = Field(default=0)
-    rank: int = Field(default=-1, exclude=True)
+    _rank: int = PrivateAttr(default=-1)
 
     @property
     def cp_groups(self) -> list[list[int]]:
@@ -250,6 +250,27 @@ class TRTLLMMapping(StrictlyTyped):
         """
         return self.moe_ep_groups[self.pp_rank * self.moe_tp_size + self.moe_tp_rank]
 
+    @property
+    def rank(self) -> int:
+        """Get current process's rank.
+
+        Returns:
+            int: Current process's rank
+        """
+        assert self.is_initialized(), "rank can only be accessed after initialization"
+        return self._rank
+
+    @rank.setter
+    def rank(self, rank: int) -> None:
+        """Set current process's rank.
+
+        Args:
+            rank (int): New process rank
+        """
+        assert rank >= 0, f"rank must be non-negative, but got {rank=} < 0"
+        assert rank < self.world_size, f"rank must be lower than world_size, but got {rank=} >= {self.world_size=}"
+        self._rank = rank
+
     @model_validator(mode="before")
     @classmethod
     def resolve_defaults_if_none(cls, data: Any) -> Any:
@@ -303,22 +324,7 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             bool: True if the mapping is initialized with rank, False otherwise
         """
-        return self.rank != -1
-
-    def copy_with_rank(self, rank: int) -> Self:
-        """Create a copy of configuration with new rank.
-
-        Args:
-            rank (int): New process rank
-
-        Returns:
-            Self: New configuration instance with specified rank
-
-        Raises:
-            AssertionError: If rank is invalid
-        """
-        assert rank < self.world_size, f"rank must be lower than world_size, but got {rank} >= {self.world_size}"
-        return self.__class__(**self.model_dump(), rank=rank)
+        return self._rank >= 0
 
     def is_first_pp_rank(self) -> bool:
         """Check if the pp rank of this instance is the first pp rank.
@@ -345,8 +351,19 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             list[int]: List of layers to be parallelized for the current pipeline rank
         """
-        layers_per_pipeline_stage = num_decoder_layers // self.pp_size
+        layers_per_pipeline_stage = self.get_length_of_pp_layers(num_decoder_layers)
         return list(range(self.pp_rank * layers_per_pipeline_stage, (self.pp_rank + 1) * layers_per_pipeline_stage))
+
+    def get_length_of_pp_layers(self, num_decoder_layers: int) -> int:
+        """Get the length of the pipeline layers.
+
+        Args:
+            num_decoder_layers (int): Total number of decoder layers
+
+        Returns:
+            int: Length of the pipeline layers
+        """
+        return num_decoder_layers // self.pp_size
 
 
 class TRTLLMQuantConfig(StrictlyTyped):

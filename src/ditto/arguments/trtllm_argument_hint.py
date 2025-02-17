@@ -158,7 +158,8 @@ class TRTLLMArgumentHint(StrictlyTyped):
         """
         return (
             TensorTypeHint(shape=(self.num_tokens, self.hidden_size), dtype=self.hidden_dtype)
-            if not (self.mapping.is_initialized() and self.mapping.is_first_pp_rank())
+            if self.mapping.is_initialized()
+            and not self.mapping.is_first_pp_rank()
             and self.hidden_size is not None
             and self.hidden_dtype is not None
             else None
@@ -247,7 +248,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     def host_max_attention_window_sizes(self) -> TensorTypeHint:
         """Tensor type hint for host max attention window sizes with shape (num_attn_layers,)."""
         assert self.num_attn_layers is not None, "num_attn_layers needs to be set for host_max_attention_window_sizes"
-        num_attn_layers = len(self.mapping.get_pp_layers(self.num_attn_layers))
+        num_attn_layers = self.mapping.get_length_of_pp_layers(self.num_attn_layers)
         return TensorTypeHint(
             shape=(
                 DynamicDimension(
@@ -280,7 +281,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     def host_kv_cache_pool_mapping(self) -> TensorTypeHint:
         """Tensor type hint for host KV cache pool mapping with shape (num_attn_layers,)."""
         assert self.num_attn_layers is not None, "num_attn_layers needs to be set for host_kv_cache_pool_mapping"
-        num_attn_layers = len(self.mapping.get_pp_layers(self.num_attn_layers))
+        num_attn_layers = self.mapping.get_length_of_pp_layers(self.num_attn_layers)
         return TensorTypeHint(
             shape=(
                 DynamicDimension(
