@@ -52,9 +52,6 @@ def trtllm_build(
     model: PreTrainedModel | PeftModel,
     output_dir: str,
     *,
-    profile_config: TRTLLMOptimizationProfileConfig | None = None,
-    mapping: TRTLLMMapping | None = None,
-    plugin_config: TRTLLMPluginConfig | None = None,
     trt_config: TensorRTConfig | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
@@ -65,6 +62,8 @@ def trtllm_build(
     max_num_tokens: int = 8192,
     opt_num_tokens: int | None = None,
     max_beam_width: int = 1,
+    pp_size: int = 1,
+    tp_size: int = 1,
     logits_dtype: DTypeLiteral = "float32",
     gather_context_logits: bool = False,
     gather_generation_logits: bool = False,
@@ -80,9 +79,6 @@ def trtllm_build(
     Args:
         model (PreTrainedModel | PeftModel): The PyTorch model to convert
         output_dir (str): Directory to save the engine and config files
-        profile_config (TRTLLMOptimizationProfileConfig | None): Configuration for optimization profiles
-        mapping (TRTLLMMapping | None): Configuration for tensor parallelism mapping
-        plugin_config (TRTLLMPluginConfig | None): Configuration for TensorRT plugins
         trt_config (TensorRTConfig | None): TensorRT builder configuration
         run_matmuls_in_fp32 (bool): Whether to run matrix multiplications in FP32
         run_activations_in_model_dtype (bool): Whether to run activations in model dtype
@@ -93,13 +89,15 @@ def trtllm_build(
         max_num_tokens (int): Maximum number of tokens for TensorRT engine
         opt_num_tokens (int | None): Optimized number of tokens for TensorRT engine
         max_beam_width (int): Maximum beam width for TensorRT engine
+        pp_size (int): N-way pipeline parallelism size
+        tp_size (int): N-way tensor parallelism size
         logits_dtype (DTypeLiteral): Dtype of the output logits
         gather_context_logits (bool): Whether to gather context token logits for benchmark
         gather_generation_logits (bool): Whether to gather generation token logits for benchmark
     """
-    mapping = mapping or TRTLLMMapping()
-    plugin_config = plugin_config or TRTLLMPluginConfig.create_from(model.config.torch_dtype, mapping.world_size)
-    profile_config = profile_config or TRTLLMOptimizationProfileConfig.create_from(
+    mapping = TRTLLMMapping(pp_size=pp_size, tp_size=tp_size)
+    plugin_config = TRTLLMPluginConfig.create_from(model.config.torch_dtype, mapping.world_size)
+    profile_config = TRTLLMOptimizationProfileConfig.create_from(
         model.config,
         plugin_config,
         max_batch_size=max_batch_size,

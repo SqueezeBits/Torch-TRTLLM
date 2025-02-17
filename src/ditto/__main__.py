@@ -31,7 +31,6 @@ from transformers import (
 from typer import Argument, Option, Typer
 
 from .api import trtllm_build
-from .configs import TRTLLMMapping
 from .constants import DEFAULT_DEVICE
 from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
 from .literals import DTypeLiteral
@@ -214,7 +213,6 @@ def build(
     trtllm_build(
         model,
         output_dir,
-        mapping=TRTLLMMapping(pp_size=pp_size, tp_size=tp_size),
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         debug_node_names=add_output,
@@ -223,6 +221,8 @@ def build(
         max_num_tokens=max_num_tokens,
         opt_num_tokens=opt_num_tokens,
         max_beam_width=max_beam_width,
+        pp_size=pp_size,
+        tp_size=tp_size,
         logits_dtype=logits_dtype,
         gather_context_logits=gather_context_logits,
         gather_generation_logits=gather_generation_logits,
