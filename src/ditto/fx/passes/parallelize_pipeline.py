@@ -46,16 +46,14 @@ class ParallelizePipeline(GraphOptimizationPass):
         graph = graph_module.graph
         mapping = self.argument_hint.mapping
         assert (
-            num_attn_layers := get_num_gpt_attn_plugin_nodes(graph)
+            num_attn_layers := self.argument_hint.num_attn_layers
         ) % mapping.pp_size == 0, (
             f"Number of attention layers ({num_attn_layers}) must be divisible by pipeline stages ({mapping.pp_size})"
         )
         layers_to_be_parallelized = mapping.get_pp_layers(num_attn_layers)
-        for node in graph.nodes:
-            if not (
-                isinstance(gpt_attn_plugin := node.target, GPTAttentionPlugin)
-                and gpt_attn_plugin.layer_idx in layers_to_be_parallelized
-            ):
+        gpt_attn_plugin_nodes = [node for node in graph.nodes if isinstance(node.target, GPTAttentionPlugin)]
+        for idx, node in enumerate(gpt_attn_plugin_nodes):
+            if not (gpt_attn_plugin := node.target) and gpt_attn_plugin.layer_idx in layers_to_be_parallelized:
                 continue
 
             if (
@@ -63,6 +61,7 @@ class ParallelizePipeline(GraphOptimizationPass):
                 and gpt_attn_plugin.layer_idx == layers_to_be_parallelized[0]
                 and (pipeline_input_node := find_input_node_of_pipeline(node))
                 and (input_ids_node := find_input_ids_node(graph))
+                and self.argument_hint.hidden_states_input is not None
             ):
                 with graph.inserting_after(input_ids_node):
                     hidden_states_input = Placeholder.create(
@@ -87,8 +86,7 @@ class ParallelizePipeline(GraphOptimizationPass):
             elif (
                 not mapping.is_last_pp_rank()
                 and gpt_attn_plugin.layer_idx == layers_to_be_parallelized[-1]
-                and (next_gpt_attn_plugin_node := find_next_gpt_attn_plugin_node(node))
-                and (pipeline_output_node := find_input_node_of_pipeline(next_gpt_attn_plugin_node))
+                and (pipeline_output_node := find_input_node_of_pipeline(gpt_attn_plugin_nodes[idx + 1]))
                 and (graph_output_node := find_output_node(graph))
             ):
                 send_node = insert_send_plugin(graph, pipeline_output_node, mapping.next_pp_rank)
@@ -105,42 +103,6 @@ class ParallelizePipeline(GraphOptimizationPass):
                 graph.erase_node(placeholder)
 
         return PassResult(graph_module=graph_module, modified=False)
-
-
-def get_num_gpt_attn_plugin_nodes(graph: Graph) -> int:
-    """Get the number of GPTAttentionPlugin nodes in the graph.
-
-    Args:
-        graph (Graph): The graph to get the number of GPTAttentionPlugin layers from
-
-    Returns:
-        int: The number of GPTAttentionPlugin layers in the graph
-    """
-    return sum(1 for node in graph.nodes if isinstance(node.target, GPTAttentionPlugin))
-
-
-def find_next_gpt_attn_plugin_node(node: Node) -> Node | None:
-    """Find the next GPTAttentionPlugin node in the graph.
-
-    Args:
-        node (Node): The node to find the next GPTAttentionPlugin node from
-
-    Returns:
-        Node | None: The next GPTAttentionPlugin node in the graph or None if no such node is found
-    """
-    visited: set[Node] = set()
-    q: list[Node] = list(node.users)
-    while q:
-        current = q.pop(0)
-        if current in visited:
-            continue
-        visited.add(current)
-        if isinstance(current.target, GPTAttentionPlugin):
-            return current
-        if current.users:
-            q.extend(current.users)
-
-    return None
 
 
 def find_input_ids_node(graph: Graph) -> Node:
