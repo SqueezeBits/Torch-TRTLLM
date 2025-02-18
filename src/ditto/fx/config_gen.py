@@ -21,12 +21,13 @@ from ..configs import (
     TRTLLMEngineConfig,
     TRTLLMLoraConfig,
     TRTLLMMapping,
+    TRTLLMMoEConfig,
     TRTLLMPretrainedConfig,
 )
 from ..literals import DTypeLiteral
 from ..types import verify
 from .subgraphs import Linear, TokenEmbedding
-from .targets import GPTAttentionPlugin
+from .targets import GPTAttentionPlugin, MoEConfig
 
 
 class PretrainedConfigGenerationError(RuntimeError):
@@ -54,11 +55,14 @@ def generate_trtllm_engine_config(
     if (lora_config := graph_module.meta.pop("lora_config", None)) is not None:
         build_config.lora_config = TRTLLMLoraConfig.model_validate(lora_config)
         build_config.plugin_config.lora_plugin = "auto"
+    if (moe_config := graph_module.meta.pop("moe_config", None)) is not None:
+        build_config.plugin_config.moe_plugin = "auto"
     return TRTLLMEngineConfig(
         pretrained_config=generate_trtllm_pretrained_config(
             graph_module,
             mapping,
             architecture=architecture,
+            moe_config=moe_config,
         ),
         build_config=build_config,
     )
@@ -69,6 +73,7 @@ def generate_trtllm_pretrained_config(
     mapping: TRTLLMMapping,
     *,
     architecture: str | None = None,
+    moe_config: MoEConfig | None = None,
 ) -> TRTLLMPretrainedConfig:
     """Generate TRTLLMPretrainedConfig from graph module.
 
@@ -76,6 +81,8 @@ def generate_trtllm_pretrained_config(
         graph_module (GraphModule): The graph module to generate the pretrained config from.
         mapping (TRTLLMMapping): The tensor parallel mapping to use for the pretrained config.
         architecture (str | None, optional): The architecture to use for the pretrained config. Defaults to None.
+        moe_config (MoEConfig | None, optional): The MoE configuration to use for the pretrained config.
+            Defaults to None.
 
     Returns:
         TRTLLMPretrainedConfig: The generated pretrained config.
@@ -94,6 +101,8 @@ def generate_trtllm_pretrained_config(
     ):
         # pylint: disable-next=unsupported-assignment-operation
         pretrained_config.extra_fields["qwen_type"] = hf_config.model_type
+    if moe_config is not None:
+        pretrained_config.moe = TRTLLMMoEConfig.model_validate(moe_config)
     return pretrained_config
 
 

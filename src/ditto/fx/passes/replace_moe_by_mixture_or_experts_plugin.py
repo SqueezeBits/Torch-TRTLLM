@@ -15,7 +15,7 @@
 import tensorrt as trt
 import torch
 from loguru import logger
-from torch.fx import Graph, Node
+from torch.fx import Graph, GraphModule, Node
 from transformers import PretrainedConfig
 
 from ...types import DataType, verify
@@ -34,6 +34,7 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
 
     dtype: torch.dtype
     has_warned_missing_pretrained_config: bool = False
+    moe_config: MoEConfig | None = None
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         """Rewrite a node by replacing MoE subgraph with plugin node if applicable.
@@ -63,6 +64,8 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
             self.has_warned_missing_pretrained_config = True
 
         moe_config = MoEConfig.from_pretrained_config(pretrained_config)
+        if self.moe_config is None:
+            self.moe_config = moe_config
         moe_plugin = MixtureOfExpertsPlugin(
             **moe_config.model_dump(),
             activation_type=3,  # TODO: remove hard-coded activation type
@@ -95,3 +98,14 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
         # conversion. It has been verified that removing them is safe and does not affect functionality.
         for node in moe.unused_nodes:
             graph.erase_node(node)
+
+    def postprocess(self, graph_module: GraphModule) -> None:
+        super().postprocess(graph_module)
+        if self.moe_config is not None:
+            graph_module.meta["moe_config"] = {
+                "num_experts": self.moe_config.number_of_experts,
+                "shared_expert_intermediate_size": self.moe_config._shared_expert_intermediate_size,
+                "top_k": self.moe_config.top_k,
+                "normalization_mode": self.moe_config.normalization_mode,
+                "sparse_mixer_epsilon": self.moe_config.sparse_mixer_epsilon,
+            }

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import tensorrt as trt
 import torch
+from pydantic import PrivateAttr
 from tensorrt_llm.functional import QuantMode, SideStreamIDType
 from tensorrt_llm.layers.moe import MoeConfig as TRTLLMMoeConfig
 from torch.fx import Graph, Node
@@ -51,6 +52,7 @@ class MoEConfig(StrictlyTyped):
     top_k: int = 0
     normalization_mode: int = TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
     sparse_mixer_epsilon: float = 0.01
+    _shared_expert_intermediate_size: int = PrivateAttr(default=0)
 
     @classmethod
     def from_pretrained_config(cls, pretrained_config: PretrainedConfig | None) -> Self:
@@ -83,6 +85,11 @@ class MoEConfig(StrictlyTyped):
             pretrained_config,
             "num_experts_per_tok",
             default=moe_config.top_k,
+        )
+        moe_config._shared_expert_intermediate_size = lookup_attributes(
+            pretrained_config,
+            "shared_expert_intermediate_size",
+            default=moe_config._shared_expert_intermediate_size,
         )
         # TODO: Set normalization mode for each model.
         # For Qwen models, it is hard-coded to ExpertScaleNormalizationMode.NONE.
