@@ -207,7 +207,7 @@ def get_trtllm_conversion_transform(
         AddTRTLLMInputs(argument_hint=argument_hint),
         *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
         StashLoraSubgraphs,
-        ReplaceMoEByMoEPlugin,  # TODO: consider the order
+        ReplaceMoEByMoEPlugin(dtype=dtype),
         FuseQKVProjections,
         FuseGatedMLPProjections,
         WrapRoPESubgraphs,

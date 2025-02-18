@@ -12,13 +12,86 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from torch.fx import Node
+import tensorrt as trt
+import torch
+from loguru import logger
+from torch.fx import Graph, Node
+from transformers import PretrainedConfig
 
+from ...types import DataType, verify
 from ..subgraphs import MoESubgraph
-from .infra import NodewiseOptimizationPass, NodewisePassResult
+from ..targets import MixtureOfExpertsPlugin, MixtureOfExpertsPluginInputs, MoEConfig
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
+    """Pass that replaces Mixture of Experts (MoE) subgraphs with TensorRT MoE plugin nodes.
+
+    Attributes:
+        dtype (torch.dtype): Data type to use for the plugin tensors
+        has_warned_missing_pretrained_config (bool): Whether a warning has been logged about missing config
+    """
+
+    dtype: torch.dtype
+    has_warned_missing_pretrained_config: bool = False
+
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+        """Rewrite a node by replacing MoE subgraph with plugin node if applicable.
+
+        Args:
+            node (Node): Node to potentially rewrite
+
+        Returns:
+            dict[Node, NodewisePassResult]: Mapping from nodes to their rewrite results
+        """
         if not (moe := MoESubgraph.configure_from(node)):
             return {}
+
+        graph = node.graph
+
+        pretrained_config: PretrainedConfig | None = (
+            verify(
+                graph_module.meta.get("pretrained_config"),
+                as_type=PretrainedConfig,
+            )
+            if (graph_module := graph.owning_module)
+            else None
+        )
+
+        if not self.has_warned_missing_pretrained_config and pretrained_config is None:
+            logger.warning("No pretrained config found in graph module meta data. Default MoE config will be used.")
+            self.has_warned_missing_pretrained_config = True
+
+        moe_config = MoEConfig.from_pretrained_config(pretrained_config)
+        moe_plugin = MixtureOfExpertsPlugin(
+            **moe_config.model_dump(),
+            activation_type=3,  # TODO: remove hard-coded activation type
+            type_id=DataType(self.dtype).to(trt.DataType),
+            weight_type_id=DataType(self.dtype).to(trt.DataType),
+            output_type_id=DataType(self.dtype).to(trt.DataType),
+        )
+        with graph.inserting_before(moe.final_hidden_states):
+            plugin_inputs = MixtureOfExpertsPluginInputs.create_from(moe, graph)
+            plugin_node = graph.call_function(
+                moe_plugin,
+                (),
+                plugin_inputs.model_dump(),
+            )
+        self.remove_unused_nodes(moe, graph)
+
+        return {moe.final_hidden_states: ReplaceAllUses(by=plugin_node)}
+
+    def remove_unused_nodes(self, moe: MoESubgraph, graph: Graph) -> None:
+        """Remove nodes from the graph that are no longer used after plugin replacement.
+
+        Args:
+            moe (MoESubgraph): MoE subgraph containing unused nodes
+            graph (Graph): Graph to remove nodes from
+        """
+        # NOTE: The `torch.ops.aten.sym_constrain_range_for_size.default` nodes in experts are not used but
+        # are not eliminated by PyTorch's DCE process since they are side effectful nodes. This causes their ancestor
+        # nodes (including topk and nonzero, which don't have torch-tensorrt conversion logic yet) to also remain.
+        # These nodes should be eliminated to match TensorRT-LLM's network structure and to enable successful
+        # conversion. It has been verified that removing them is safe and does not affect functionality.
+        for node in moe.unused_nodes:
+            graph.erase_node(node)

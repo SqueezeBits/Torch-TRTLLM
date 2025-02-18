@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import ClassVar
 
+import torch
 from torch.fx import Node
 from typing_extensions import Self
 
 from ...types import SymbolicInteger
-from ..nodes import IndexPut, MulTensorTensor, SelectInt, Softmax
+from ..nodes import MM, Gemm, IndexPut, MulTensorTensor, SelectInt, Softmax
 from .gated_mlp import GatedMLP
 from .linear import Linear
 from .one_hot import OneHot
@@ -39,10 +41,12 @@ class Expert(Subgraph):
 
     index: int | SymbolicInteger
     entry_node: SelectInt
-    up_proj: Node
-    gate_proj: Node
-    down_proj: Node
+    up_proj: MM | Gemm
+    gate_proj: MM | Gemm
+    down_proj: MM | Gemm
     final_hidden_states: Node
+
+    UNUSED_TARGETS: ClassVar[tuple] = (torch.ops.aten.sym_constrain_range_for_size.default,)
 
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
@@ -60,11 +64,36 @@ class Expert(Subgraph):
         return cls(
             index=select.index,
             entry_node=select,
-            up_proj=gated_mlp.up_proj.mm.node,
-            gate_proj=gated_mlp.gate_proj.mm.node,
-            down_proj=down_proj.mm.node,
+            up_proj=gated_mlp.up_proj.mm,
+            gate_proj=gated_mlp.gate_proj.mm,
+            down_proj=down_proj.mm,
             final_hidden_states=final_hidden_states.node,
         )
+
+    def find_unused_nodes(self) -> set[Node]:
+        """Find unused nodes in the expert subgraph.
+
+        This method performs a breadth-first search starting from the expert's entry node
+        to find nodes that are unused (have no users) and match the UNUSED_TARGETS. This is
+        used to identify nodes that can be removed.
+
+        Returns:
+            set[Node]: A set of nodes that are unused in the expert subgraph.
+        """
+        visited = set()
+        queue = [self.entry_node.node]
+        unused_nodes = set()
+        while queue:
+            current = queue.pop(0)
+            if current in visited:
+                continue
+            visited.add(current)
+            if current.target in self.UNUSED_TARGETS and len(current.users) == 0:
+                unused_nodes.add(current)
+            for user in current.users:
+                if user not in visited:
+                    queue.append(user)
+        return unused_nodes
 
 
 class MoESubgraph(Subgraph):
@@ -78,7 +107,8 @@ class MoESubgraph(Subgraph):
     Attributes:
         hidden_states (Node): The input hidden states node.
         router_logits (Node): The router logits node before softmax.
-        experts (list[Expert]): List of Expert objects representing each expert in the MoE layer.
+        expert_weights (list[tuple[Node, Node, Node]]): List of tuples containing the weight nodes for each expert.
+            Each tuple contains (up_proj, gate_proj, down_proj) nodes representing the expert's weights.
         final_hidden_states (Node): The final output hidden states node after MoE computation.
     """
 
@@ -86,6 +116,7 @@ class MoESubgraph(Subgraph):
     router_logits: Node
     expert_weights: list[tuple[Node, Node, Node]]
     final_hidden_states: Node
+    unused_nodes: set[Node]
 
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
@@ -105,12 +136,14 @@ class MoESubgraph(Subgraph):
             raise NotImplementedError(f"Unsupported expert graph found from: {one_hot.eq.node}")
 
         experts = []
+        unused_nodes = set()
         for expert_entry in expert.entry_node.this.users:
             if not (expert := Expert.configure_from(expert_entry)):
                 raise NotImplementedError(f"Unsupported expert graph found from: {expert_entry}")
             experts.append(expert)
+            unused_nodes.update(expert.find_unused_nodes())
 
-        hidden_states = TrailingReformatPath.configure_from(gate.mm.this).top
+        hidden_states = gate.mm.this
         router_logits = softmax.this
         experts.sort(key=lambda expert: expert.index)
         final_hidden_states = experts[-1].final_hidden_states
@@ -119,6 +152,7 @@ class MoESubgraph(Subgraph):
             router_logits=router_logits,
             expert_weights=cls.extract_weights(experts),
             final_hidden_states=final_hidden_states,
+            unused_nodes=unused_nodes,
         )
 
     @staticmethod
@@ -132,4 +166,4 @@ class MoESubgraph(Subgraph):
             list[tuple[Node, Node, Node]]: List of tuples containing (up_proj, gate_proj, down_proj)
                 weight nodes for each expert.
         """
-        return [(expert.up_proj, expert.gate_proj, expert.down_proj) for expert in experts]
+        return [(expert.up_proj.other, expert.gate_proj.other, expert.down_proj.other) for expert in experts]
