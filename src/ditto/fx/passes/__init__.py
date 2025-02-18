@@ -43,12 +43,14 @@ from .herd_constants_to_the_right import HerdConstantsToTheRight
 from .index_layers import IndexLayers
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
 from .parallelize_linear import ParallelizeLinear
+from .parallelize_pipeline import ParallelizePipeline
 from .pop_lora_plugins import PopLoraPlugins
 from .propagate_tensor_parallelism import PropagateTensorParallelism
 from .replace_mm_by_gemm_plugin import ReplaceMMByGemmPlugin
 from .replace_sdpa_by_gpt_attention_plugin import ReplaceSDPAByGPTAttentionPlugin
 from .replace_view_by_reshape import ReplaceViewByReshape
 from .reset_code_gen import ResetCodeGen
+from .resolve_dynamic_reshape import ResolveDynamicReshape
 from .rewrite_fp_literals_as_nodes import RewriteFloatingPointLiteralsAsNodes
 from .rewrite_index_as_single_slice import RewriteIndexAsSingleSlice
 from .rewrite_pow_as_mul import RewritePowAsMul

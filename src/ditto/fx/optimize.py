@@ -56,6 +56,7 @@ from .passes import (
     ReplaceMMByGemmPlugin,
     ReplaceSDPAByGPTAttentionPlugin,
     ReplaceViewByReshape,
+    ResolveDynamicReshape,
     RewriteFloatingPointLiteralsAsNodes,
     RewriteIndexAsSingleSlice,
     RewritePowAsMul,
@@ -158,6 +159,7 @@ LEVEL2_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     RewritePowAsMul,
     RewriteFloatingPointLiteralsAsNodes,
     RewriteReshapeAsUnsqueeze,
+    ResolveDynamicReshape,
 )
 
 

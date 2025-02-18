@@ -258,7 +258,7 @@ def infer_pretrained_config(
         dtype=dtype,
         vocab_size=vocab_size,
         hidden_size=hidden_size,
-        num_hidden_layers=num_hidden_layers,
+        num_hidden_layers=num_hidden_layers * mapping.pp_size,
         num_attention_heads=plugin.num_heads * mapping.tp_size,
         num_key_value_heads=plugin.num_kv_heads * mapping.tp_size,
         intermediate_size=intermediate_size,

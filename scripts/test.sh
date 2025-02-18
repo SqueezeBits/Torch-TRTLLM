@@ -35,6 +35,13 @@ main() {
         "Qwen/Qwen2-7B-Instruct --tp-size 2"
         "microsoft/phi-4 --tp-size 2"
         "CohereForAI/aya-expanse-8b --model-type commandr --tp-size 2"
+        # PP
+        "meta-llama/Llama-3.1-8B-Instruct --pp-size 2"
+        "mistralai/Mistral-7B-Instruct-v0.3 --model-type llama --pp-size 2"
+        # "google/gemma-2-9b-it --pp-size 2" # unsupported in TensorRT-LLM
+        "Qwen/Qwen2-7B-Instruct --pp-size 2"
+        # "microsoft/phi-4 --pp-size 2" # unsupported in TensorRT-LLM
+        # "CohereForAI/aya-expanse-8b --model-type commandr --pp-size 2" # unsupported in TensorRT-LLM
     )
 
     for MODEL_SPECIFIC_ARG in "${MODEL_SPECIFIC_ARGS[@]}"; do

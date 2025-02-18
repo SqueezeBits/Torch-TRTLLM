@@ -24,12 +24,13 @@ from torch_tensorrt.dynamo.lowering.passes import (
 )
 
 from .arguments import TRTLLMArgumentHint
-from .configs import TRTLLMMapping, TRTLLMModelConfig
+from .configs import TRTLLMModelConfig
 from .contexts import ignore_symbolic_shapes_warning
 from .debug import save_for_debug
 from .fx import (
     ForgetSubmodules,
     ParallelizeLinear,
+    ParallelizePipeline,
     Plugin,
     PropagateTensorParallelism,
     ResetCodeGen,
@@ -85,7 +86,7 @@ def transform(
     logger.debug("Running post-inlining passes")
     with fake_tensor_prop_on_node_creation(graph_module), ignore_symbolic_shapes_warning():
         graph_module = post_inline_pass_manager(graph_module)
-    update_argument_hint(argument_hint, graph_module)
+    update_argument_hint(argument_hint, graph_module, dtype)
 
     save_for_debug("initial_graph_module", graph_module)
 
@@ -109,34 +110,38 @@ def transform(
 
 def parallelize(
     graph_module: GraphModule,
-    mapping: TRTLLMMapping,
+    argument_hint: TRTLLMArgumentHint,
 ) -> Generator[tuple[int, GraphModule], None, None]:
     """Parallelize the graph module.
 
+    This function is used to parallelize the graph module for each rank, and update the mapping's rank in the argument
+    hint.
+
     Args:
         graph_module (GraphModule): The input graph module to parallelize
-        mapping (TRTLLMMapping): The mapping of the parallelized graph module
+        argument_hint (TRTLLMArgumentHint): The argument hint of the parallelized graph module
 
     Returns:
         Generator[tuple[int, GraphModule], None, None]:
             A generator that yields the parallelized graph module for each rank
     """
-    if mapping.world_size == 1:
+    if argument_hint.mapping.world_size == 1:
+        argument_hint.mapping.rank = 0
         yield 0, graph_module
         return
 
     logger.info("Parallelizing the graph module")
     save_for_debug("graph_module_before_parallelization", graph_module)
-    for rank in range(mapping.world_size):
+    for rank in range(argument_hint.mapping.world_size):
         logger.debug(f"Running parallelize passes for rank {rank}")
         copied_graph_module = copy_graph_module(graph_module)
-        mapping_with_rank = mapping.copy_with_rank(rank)
-        parallelize_pass_manager = DynamoPassManager.build_from_passlist(
-            [
-                PropagateTensorParallelism(mapping=mapping_with_rank).as_transform(),
-                ParallelizeLinear(mapping=mapping_with_rank).as_transform(),
-            ]
-        )
+        argument_hint.mapping.rank = rank
+        parallelize_pass_manager = DynamoPassManager()
+        if argument_hint.mapping.tp_size > 1:
+            parallelize_pass_manager.add_pass(PropagateTensorParallelism(mapping=argument_hint.mapping).as_transform())
+            parallelize_pass_manager.add_pass(ParallelizeLinear(mapping=argument_hint.mapping).as_transform())
+        if argument_hint.mapping.pp_size > 1:
+            parallelize_pass_manager.add_pass(ParallelizePipeline(argument_hint=argument_hint).as_transform())
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
             yield rank, parallelize_pass_manager(copied_graph_module)
 
@@ -154,7 +159,7 @@ def copy_graph_module(graph_module: GraphModule) -> GraphModule:
     copied_graph.meta.update(graph_module.meta)
     for node in copied_graph.graph.nodes:
         if isinstance(node.target, Plugin):
-            # Note: If the target of a node is an instance of Plugin, it isn't copied.
+            # Note: If the target of a node is an instance of Plugin, it is just moved, not copied.
             # We need to copy the Plugin target manually.
             node.target = copy(node.target)
     return copied_graph

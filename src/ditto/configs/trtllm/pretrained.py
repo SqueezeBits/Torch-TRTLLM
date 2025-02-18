@@ -24,6 +24,7 @@ from ...literals import DTypeLiteral, QuantAlgoLiteral
 from ...types import StrictlyTyped
 
 
+# pylint: disable=too-many-public-methods
 class TRTLLMMapping(StrictlyTyped):
     """Minimal set of properties for initializing `trtllm.Mapping`.
 
@@ -36,7 +37,7 @@ class TRTLLMMapping(StrictlyTyped):
         pp_size (int): Size of pipeline parallel dimension. Defaults to 1.
         moe_tp_size (int): Size of MoE tensor parallel dimension. Defaults to 0.
         moe_ep_size (int): Size of MoE expert parallel dimension. Defaults to 0.
-        rank (int): Current process rank. Defaults to 0.
+        rank (int | None): Current process rank. Defaults to None.
     """
 
     @computed_field
@@ -55,7 +56,7 @@ class TRTLLMMapping(StrictlyTyped):
     pp_size: int = Field(default=1, ge=1)
     moe_tp_size: int = Field(default=0)
     moe_ep_size: int = Field(default=0)
-    rank: int = Field(default=0, exclude=True)
+    rank: int | None = Field(default=None, exclude=True, validate_default=False)
 
     @property
     def cp_groups(self) -> list[list[int]]:
@@ -142,6 +143,8 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             int: Current process's checkpoint parallel rank
         """
+        if self.rank is None:
+            return 0
         return self.rank % (self.tp_size * self.cp_size) // self.tp_size
 
     @property
@@ -151,6 +154,8 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             int: Current process's tensor parallel rank
         """
+        if self.rank is None:
+            return 0
         return self.rank % self.tp_size
 
     @property
@@ -160,7 +165,37 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             int: Current process's pipeline parallel rank
         """
+        if self.rank is None:
+            return 0
         return self.rank // (self.tp_size * self.cp_size)
+
+    @property
+    def prev_pp_rank(self) -> int:
+        """Get the previous pipeline parallel rank.
+
+        Returns:
+            int: Current process's previous pipeline parallel rank
+        """
+        if self.rank is None:
+            return 0
+        prev_pp_rank = self.rank - self.tp_size * self.cp_size
+        if prev_pp_rank < 0:
+            prev_pp_rank = prev_pp_rank + self.world_size
+        return prev_pp_rank
+
+    @property
+    def next_pp_rank(self) -> int:
+        """Get the next pipeline parallel rank.
+
+        Returns:
+            int: Current process's next pipeline parallel rank
+        """
+        if self.rank is None:
+            return 0
+        next_pp_rank = self.rank + self.tp_size * self.cp_size
+        if next_pp_rank >= self.world_size:
+            next_pp_rank = next_pp_rank - self.world_size
+        return next_pp_rank
 
     @property
     def moe_tp_rank(self) -> int:
@@ -169,6 +204,8 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             int: Current process's MoE tensor parallel rank
         """
+        if self.rank is None:
+            return 0
         return self.tp_rank // self.moe_ep_size
 
     @property
@@ -178,6 +215,8 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             int: Current process's MoE expert parallel rank
         """
+        if self.rank is None:
+            return 0
         return self.tp_rank % self.moe_ep_size
 
     @property
@@ -270,22 +309,51 @@ class TRTLLMMapping(StrictlyTyped):
         )
         assert not (self.moe_ep_size != 1 and self.cp_size > 1), "CP don't support MoE tp/ep yet"
 
+        if self.rank is not None:
+            assert self.rank >= 0, f"rank must be non-negative, but got {self.rank=} < 0"
+            assert (
+                self.rank < self.world_size
+            ), f"rank must be lower than world_size, but got {self.rank=} >= {self.world_size=}"
+
         return self
 
-    def copy_with_rank(self, rank: int) -> Self:
-        """Create a copy of configuration with new rank.
+    def is_first_pp_rank(self) -> bool:
+        """Check if the pp rank of this instance is the first pp rank.
 
-        Args:
-            rank (int): New process rank
+        If the rank is not valid, it assumes to be the first pp rank.
 
         Returns:
-            Self: New configuration instance with specified rank
-
-        Raises:
-            AssertionError: If rank is invalid
+            bool: True if the pp rank is 0, False otherwise
         """
-        assert rank < self.world_size, f"rank must be lower than world_size, but got {rank} >= {self.world_size}"
-        return self.__class__(**self.model_dump(), rank=rank)
+        if self.rank is None:
+            return True
+        return self.pp_rank == 0
+
+    def is_last_pp_rank(self) -> bool:
+        """Check if the pp rank of this instance is the last pp rank.
+
+        If the rank is not valid, it assumes to be the last pp rank.
+
+        Returns:
+            bool: True if the pp rank is the last pp rank, False otherwise
+        """
+        if self.rank is None:
+            return True
+        return self.pp_rank == self.pp_size - 1
+
+    def get_pp_layers(self, num_decoder_layers: int) -> list[int]:
+        """Get the decoder layers' indices to be parallelized for the current pipeline rank.
+
+        Args:
+            num_decoder_layers (int): Total number of decoder layers
+
+        Returns:
+            list[int]: List of layers to be parallelized for the current pipeline rank
+        """
+        num_layers_per_pipeline_stage = num_decoder_layers // self.pp_size
+        return list(
+            range(self.pp_rank * num_layers_per_pipeline_stage, (self.pp_rank + 1) * num_layers_per_pipeline_stage)
+        )
 
 
 class TRTLLMQuantConfig(StrictlyTyped):

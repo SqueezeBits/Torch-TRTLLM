@@ -25,7 +25,16 @@ from torch_tensorrt.dynamo.conversion._ConverterRegistry import dynamo_tensorrt_
 from torch_tensorrt.dynamo.conversion.converter_utils import get_trt_tensor
 
 from ..debug import enable_plugin_debug_info_hook
-from ..fx.targets import AllGatherPlugin, AllReducePlugin, GemmPlugin, GPTAttentionPlugin, LoraPlugin, Plugin
+from ..fx.targets import (
+    AllGatherPlugin,
+    AllReducePlugin,
+    GemmPlugin,
+    GPTAttentionPlugin,
+    LoraPlugin,
+    Plugin,
+    RecvPlugin,
+    SendPlugin,
+)
 
 
 @dynamo_tensorrt_converter(
@@ -180,6 +189,62 @@ def convert_lora_plugin(
     """
     assert isinstance(target, LoraPlugin)
     return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="lora")
+
+
+@dynamo_tensorrt_converter(
+    RecvPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_recv_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a RecvPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The RecvPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, RecvPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="recv")
+
+
+@dynamo_tensorrt_converter(
+    SendPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_send_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a SendPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The SendPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, SendPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="send")
 
 
 def _convert_plugin(
