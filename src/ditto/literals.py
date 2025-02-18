@@ -124,3 +124,12 @@ QuantAlgoLiteral = Literal[
     "FP8_PER_CHANNEL_PER_TOKEN",
     "INT8",
 ]
+
+LogLevelLiteral = Literal[
+    50,  # CRITICAL,FATAL
+    40,  # ERROR
+    30,  # WARNING
+    20,  # INFO
+    10,  # DEBUG
+    0,  # NOTSET
+]
