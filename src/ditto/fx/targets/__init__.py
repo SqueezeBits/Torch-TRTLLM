@@ -29,5 +29,10 @@ from .lora_plugin import (
     LoraPluginInputs,
     LoraProto,
 )
+from .mixture_of_experts_plugin import (
+    MixtureOfExpertsPlugin,
+    MixtureOfExpertsPluginInputs,
+    MoEConfig,
+)
 from .plugin import Plugin
 from .rope import FAKE_ROPE_TARGETS
