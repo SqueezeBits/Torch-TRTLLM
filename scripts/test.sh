@@ -42,6 +42,8 @@ main() {
         "Qwen/Qwen2-7B-Instruct --pp-size 2"
         # "microsoft/phi-4 --pp-size 2" # unsupported in TensorRT-LLM
         # "CohereForAI/aya-expanse-8b --model-type commandr --pp-size 2" # unsupported in TensorRT-LLM
+        # MoE
+        "Qwen/Qwen1.5-MoE-A2.7B-Chat"
     )
 
     for MODEL_SPECIFIC_ARG in "${MODEL_SPECIFIC_ARGS[@]}"; do
