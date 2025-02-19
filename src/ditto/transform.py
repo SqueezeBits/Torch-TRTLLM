@@ -52,6 +52,7 @@ def transform(
     skipped_optimizers: list[PassName] | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
+    run_routers_in_model_dtype: bool = False,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
 ) -> GraphModule:
     """Transform a PyTorch GraphModule by applying a series of optimization passes.
@@ -66,6 +67,8 @@ def transform(
         run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
         extra_passes (list[Callable[[GraphModule], GraphModule]] | None, optional): Additional transformation passes to
             apply. Defaults to None.
+        run_routers_in_model_dtype (bool, optional): Whether to run linear layers for routers in MoE models in model
+            dtype instead of FP32. Defaults to False.
 
     Returns:
         GraphModule: The transformed PyTorch GraphModule after applying optimization passes
@@ -99,6 +102,7 @@ def transform(
                 skipped_optimizers=skipped_optimizers,
                 run_matmuls_in_fp32=run_matmuls_in_fp32,
                 run_activations_in_model_dtype=run_activations_in_model_dtype,
+                run_routers_in_model_dtype=run_routers_in_model_dtype,
             ),
             *(extra_passes or []),
         ]

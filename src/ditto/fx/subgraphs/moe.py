@@ -19,7 +19,7 @@ from torch.fx import Node
 from typing_extensions import Self
 
 from ...types import SymbolicInteger
-from ..nodes import MM, Gemm, IndexPut, MulTensorTensor, SelectInt, Softmax
+from ..nodes import MM, Gemm, IndexPut, MulTensorTensor, SelectInt, Softmax, ToCopy
 from .gated_mlp import GatedMLP
 from .linear import Linear
 from .one_hot import OneHot
@@ -113,6 +113,7 @@ class MoESubgraph(Subgraph):
     """
 
     hidden_states: Node
+    router: MM | Gemm
     router_logits: Node
     expert_weights: list[tuple[Node, Node, Node]]
     final_hidden_states: Node
@@ -143,12 +144,17 @@ class MoESubgraph(Subgraph):
             experts.append(expert)
             unused_nodes.update(expert.find_unused_nodes())
 
-        hidden_states = gate.mm.this
+        if to_copy := ToCopy.specialize_from(gate.mm.this):
+            # When the router is casted to FP32.
+            hidden_states = to_copy.this
+        else:
+            hidden_states = gate.mm.this
         router_logits = softmax.this
         experts.sort(key=lambda expert: expert.index)
         final_hidden_states = experts[-1].final_hidden_states
         return cls(
             hidden_states=hidden_states,
+            router=gate.mm,
             router_logits=router_logits,
             expert_weights=cls.extract_weights(experts),
             final_hidden_states=final_hidden_states,

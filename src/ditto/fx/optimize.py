@@ -28,6 +28,7 @@ from .passes import (
     CanonicalizeCopy,
     CastMMToFP32,
     CastOutputLogits,
+    CastRouterToFP32,
     ConstantFolding,
     DecomposeAddMM,
     DeferCast,
@@ -80,6 +81,7 @@ def get_optimization_transform(
     skipped_optimizers: list[PassName] | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
+    run_routers_in_model_dtype: bool = False,
 ) -> Callable[[GraphModule], GraphModule]:
     """Optimize the given graph module inplace.
 
@@ -93,6 +95,8 @@ def get_optimization_transform(
             Defaults to False.
         run_activations_in_model_dtype (bool, optional): whether to run all activations (a.k.a. non-linearities) in
             the given `dtype`. Defaults to True.
+        run_routers_in_model_dtype (bool, optional): whether to run linear layers for routers in MoE models in model
+            dtype instead of FP32. Defaults to False.
 
     Returns:
         Callable[[GraphModule], GraphModule]: the function that applies FX optimization passes to the given graph module
@@ -105,6 +109,7 @@ def get_optimization_transform(
             skipped_optimizers=skipped_optimizers,
             run_matmuls_in_fp32=run_matmuls_in_fp32,
             run_activations_in_model_dtype=run_activations_in_model_dtype,
+            run_routers_in_model_dtype=run_routers_in_model_dtype,
         ),
         get_level2_transform(skipped_optimizers),
         ConstantFolding().as_transform(),
@@ -189,6 +194,7 @@ def get_trtllm_conversion_transform(
     skipped_optimizers: list[PassName] | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
+    run_routers_in_model_dtype: bool = False,
 ) -> Callable[[GraphModule], GraphModule]:
     """Create a transform that converts a graph module to TensorRT-LLM compatible format.
 
@@ -199,6 +205,8 @@ def get_trtllm_conversion_transform(
         skipped_optimizers (list[PassName] | None, optional): Names of optimization passes to skip. Defaults to None.
         run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
         run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
+        run_routers_in_model_dtype (bool, optional): Whether to run linear layers for routers in MoE models in model
+            dtype instead of FP32. Defaults to False.
 
     Returns:
         Callable[[GraphModule], GraphModule]: A function that applies TRT-LLM conversion passes to a graph module
@@ -207,6 +215,7 @@ def get_trtllm_conversion_transform(
         AddTRTLLMInputs(argument_hint=argument_hint),
         *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
         StashLoraSubgraphs,
+        CastRouterToFP32,
         ReplaceMoEByMoEPlugin(dtype=dtype),
         FuseQKVProjections,
         FuseGatedMLPProjections,
@@ -225,6 +234,10 @@ def get_trtllm_conversion_transform(
 
     if run_activations_in_model_dtype:
         passes.append(FixActivationPrecision(dtype=dtype))
+
+    if run_routers_in_model_dtype:
+        skipped_optimizers = skipped_optimizers or []
+        skipped_optimizers.append("CastRouterToFP32")
 
     return get_transform(
         *passes,

@@ -63,6 +63,7 @@ PassName = Literal[
     "BindUnmatchedLoraProtos",
     "CanonicalizeCopy",
     "CastMMToFP32",
+    "CastRouterToFP32",
     "ConstantFolding",
     "DecomposeAddMM",
     "DeferCast",

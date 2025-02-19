@@ -67,6 +67,7 @@ def trtllm_build(
     logits_dtype: DTypeLiteral = "float32",
     gather_context_logits: bool = False,
     gather_generation_logits: bool = False,
+    run_routers_in_model_dtype: bool = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a PyTorch model.
 
@@ -94,6 +95,8 @@ def trtllm_build(
         logits_dtype (DTypeLiteral): Dtype of the output logits
         gather_context_logits (bool): Whether to gather context token logits for benchmark
         gather_generation_logits (bool): Whether to gather generation token logits for benchmark
+        run_routers_in_model_dtype (bool): Whether to run linear layers for routers in MoE models in model dtype
+            instead of FP32.
     """
     mapping = TRTLLMMapping(pp_size=pp_size, tp_size=tp_size)
     plugin_config = TRTLLMPluginConfig.create_from(model.config.torch_dtype, mapping.world_size)
@@ -125,6 +128,7 @@ def trtllm_build(
         model.config.torch_dtype,
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
+        run_routers_in_model_dtype=run_routers_in_model_dtype,
         extra_passes=[add_outputs(debug_node_names)] if debug_node_names else None,
     )
 
@@ -151,6 +155,7 @@ def trtllm_export(
     skipped_optimizers: list[PassName] | None = None,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
     enable_experimental_decompositions: bool = False,
+    run_routers_in_model_dtype: bool = False,
 ) -> GraphModule:
     """Export a PyTorch model to a graph module optimized for TensorRT-LLM.
 
@@ -171,6 +176,8 @@ def trtllm_export(
             apply. Defaults to None.
         enable_experimental_decompositions (bool, optional): Whether to enable experimental decompositions.
             Defaults to False.
+        run_routers_in_model_dtype (bool, optional): Whether to run linear layers for routers in MoE models in model
+            dtype instead of FP32. Defaults to False.
 
     Returns:
         GraphModule: The optimized graph module for TensorRT-LLM
@@ -207,6 +214,7 @@ def trtllm_export(
         skipped_optimizers=skipped_optimizers,
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
+        run_routers_in_model_dtype=run_routers_in_model_dtype,
         extra_passes=extra_passes,
     )
 
