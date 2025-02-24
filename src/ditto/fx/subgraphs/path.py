@@ -220,7 +220,7 @@ class TrailingReformatPath(Path):
         """Traceback to find a specific node type in the trailing reformat path.
 
         Args:
-            node_type (type[NodeType] | Subgraph): The type of node or subgraph to search for.
+            node_type (type[NodeType] | type[Subgraph]): The type of node or subgraph to search for.
             node (Node): The starting node for the traceback.
             break_if (NodeCriterion, optional): A function to determine when to stop tracing.
                 Defaults to a lambda that always returns False.
