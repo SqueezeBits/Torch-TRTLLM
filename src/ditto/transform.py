@@ -122,6 +122,7 @@ def transform(
         logger.debug(f"Running pre-custom passes for rank {rank}")
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
             copied_graph_module = pre_custom_pass_manager(copied_graph_module)
+        save_for_debug("pre_custom_pass", copied_graph_module)
 
         custom_pass_manager = DynamoPassManager.build_from_passlist(
             [

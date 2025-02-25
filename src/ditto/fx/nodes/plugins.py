@@ -17,7 +17,7 @@ from typing import Any
 
 from torch.fx.node import Node
 
-from ..targets import GemmPlugin, GPTAttentionPlugin
+from ..targets import GemmPlugin, GPTAttentionPlugin, WeightOnlyGroupwiseQuantMatmulPlugin, WeightOnlyQuantMatmulPlugin
 from .call_function import CallFunction
 
 
@@ -47,7 +47,11 @@ class Gemm(CallFunction):
 
 
 class GPTAttention(CallFunction):
-    """A plugin specialization representing a GPT attention plugin node."""
+    """A plugin specialization representing a GPT attention plugin node.
+
+    Attributes:
+        qkv (Node): The input node for the query, key, and value projections
+    """
 
     model_config = {"extra": "ignore"}
 
@@ -65,3 +69,63 @@ class GPTAttention(CallFunction):
     @classmethod
     def validate_node(cls, node: Node) -> bool:
         return isinstance(node.target, GPTAttentionPlugin)
+
+
+class WeightOnlyQuantMatmul(CallFunction):
+    """A plugin specialization representing a weight-only quantized matrix multiplication node.
+
+    Attributes:
+        this (Node): The first input node
+        other (Node): The second input node (expected to be a weight tensor)
+        scale (Node): The scale node
+    """
+
+    this: Node
+    other: Node
+    scale: Node
+
+    @property
+    def target(self) -> WeightOnlyQuantMatmulPlugin:
+        assert isinstance(t := super().target, WeightOnlyQuantMatmulPlugin)
+        return t
+
+    @classmethod
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
+        return ()
+
+    @classmethod
+    def validate_node(cls, node: Node) -> bool:
+        return isinstance(node.target, WeightOnlyQuantMatmulPlugin)
+
+
+class WeightOnlyGroupwiseQuantMatmul(CallFunction):
+    """A plugin specialization representing a weight-only groupwise quantized matrix multiplication node.
+
+    Attributes:
+        this (Node): The first input node
+        other (Node): The second input node (expected to be a weight tensor)
+        scale (Node): The scale node
+        zeros (Node | None): The zeros node
+        bias (Node | None): The bias node
+        alpha (Node | None): The alpha node
+    """
+
+    this: Node
+    other: Node
+    scale: Node
+    zeros: Node | None
+    bias: Node | None
+    alpha: Node | None
+
+    @property
+    def target(self) -> WeightOnlyGroupwiseQuantMatmulPlugin:
+        assert isinstance(t := super().target, WeightOnlyGroupwiseQuantMatmulPlugin)
+        return t
+
+    @classmethod
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
+        return ()
+
+    @classmethod
+    def validate_node(cls, node: Node) -> bool:
+        return isinstance(node.target, WeightOnlyGroupwiseQuantMatmulPlugin)

@@ -36,6 +36,11 @@ from .mixture_of_experts_plugin import (
     get_moe_normalization_mode,
 )
 from .plugin import Plugin
+from .quantization import Dequantize
 from .recv_plugin import RecvPlugin
 from .rope import FAKE_ROPE_TARGETS
 from .send_plugin import SendPlugin
+from .weightonly_quantmatmul_plugin import (
+    WeightOnlyGroupwiseQuantMatmulPlugin,
+    WeightOnlyQuantMatmulPlugin,
+)
