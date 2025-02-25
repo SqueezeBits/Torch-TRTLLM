@@ -6,51 +6,44 @@
 First, clone the repository.
 ```
 git clone https://github.com/SqueezeBits/Torch-TRTLLM.git
+cd Torch-TRTLLM
 ```
-Then, run the following command to create an anaconda environment with ditto installed.
+Then, run the following command to create an environment with dependencies installed.
 ```
-/path/to/ditto/conda/create_env.sh
+conda create -f conda/environment.yml
 ```
-
-See [conda/README.md](../conda/README.md) for more details.
-
->Alternatively, you can use the following command without cloning the repository.
->For example, to create an anaconda environment with ditto 0.1.0 installed, run
->```
->wget -qO- https://raw.githubusercontent.com/SqueezeBits/Torch-TRTLLM/refs/heads/main/conda/create_env.sh | bash -s -- -v 0.1.0
->```
-
+Finally, install Ditto.
+```
+pip install .
+```
 
 ### II. Manual Installation
 
-It is recommended to use the script for creating a virtual environment shipped with Ditto as above. However, if you prefer to manually set up your environment, you can follow the instructions below.
+It is recommended to use conda to create a virtual environment with dependencies as above. However, if you prefer to manually set up your environment, you must manually ensure prerequisites below.
 
 #### Prerequisites
 * CUDA (recommended version is 12.4)
 * `openmpi` and `mpi4py`: for example, on Ubuntu systems, you can install them by running `sudo apt install openmpi-bin libopenmpi-dev python3-mpi4py`.
 
 #### Installation
-Currently, simple installation is not available due to the dependency conflicts between `torch-tensorrt` and `tensorrt-llm`. Thus, you need to install ditto in an existing environment in three steps:
 
-1. Install Ditto: `pip install git+https://github.com/SqueezeBits/Torch-TRTLLM.git`
-
-2. Depending on the CUDA version, install `tensorrt-cu*` packages. For example, if you are using CUDA 12.4, run `pip install tensorrt-cu12==10.7.0 tensorrt-cu12-bindings==10.7.0 tensorrt-cu12-libs==10.7.0`.
-
-3. Install Torch-TensorRT **without dependencies**: `pip install torch-tensorrt==2.5.0 --no-deps`
-
+With the prerequisites installed, install Ditto with following command. 
+```
+pip install git+https://github.com/SqueezeBits/Torch-TRTLLM.git@latest
+```
 
 ### III. Using Docker
 #### 1. Build a docker image
 **WARNING: This might take a few hours.**
 Run from the root directory of the repository:
 ```
-docker build -f docker/Dockerfile -t ditto:ubuntu24.04 .
+docker build -f docker/Dockerfile -t ditto:latest .
 ```
 
 #### 2. Run the container
 Run from the root directory of the repository:
 ```
-docker run --rm -it --gpus all -v `pwd`:/workspace/ditto ditto:ubuntu24.04 bash
+docker run --rm -it --gpus all -v `pwd`:/workspace/ditto ditto:latest bash
 ```
 
 #### 3. Install ditto

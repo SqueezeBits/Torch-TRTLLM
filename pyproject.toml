@@ -1,16 +1,15 @@
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=61.0", "pip"]
+build-backend = "setuptools.build_meta"
 
-[tool.poetry]
+[project]
 name = "ditto"
+authors = [{ name = "SqueezeBits.inc", email = "owlite@squeezebits.com" }]
+maintainers = [{ name = "SqueezeBits.inc", email = "owlite@squeezebits.com" }]
 description = "Ditto - Direct Torch to TensorRT-LLM Optimizer"
-authors = ["SqueezeBits.inc <owlite@squeezebits.com>"]
-maintainers = ["SqueezeBits.inc <owlite@squeezebits.com>"]
-license = "AGPL-3.0-only"
 readme = "README.md"
-homepage = "https://github.com/SqueezeBits/Torch-TRTLLM"
-repository = "https://github.com/SqueezeBits/Torch-TRTLLM"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
 keywords = [
     "pytorch",
     "transformer",
@@ -20,24 +19,39 @@ keywords = [
     "tensorrt-llm",
 ]
 classifiers = [
-    "License :: OSI Approved :: GNU Affero General Public License v3",
-    "Operating System :: OS Independent"
+    "License :: OSI Approved :: Apache Software License",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-version = "0.1.0"
+dependencies = [
+    "torch==2.5.*",
+    "mpi4py==3.*",
+    "peft>=0.14.0",
+    "tensorrt-llm==0.16.0",
+    # "torch-tensorrt == 2.5.0",
+    "tensorrt-cu12==10.7.0",
+    "tensorrt-cu12-bindings==10.7.0",
+    "tensorrt-cu12-libs==10.7.0",
+    "loguru",
+    "typer",
+]
+dynamic = ["version"]
 
-[tool.poetry.dependencies]
-python = ">=3.10"
-peft = ">=0.14.0"
-tensorrt-llm = "0.16.0"
-# torch-tensorrt = "2.5.0"
-tensorrt-cu12 = "10.7.0"
-tensorrt-cu12-bindings = "10.7.0"
-tensorrt-cu12-libs = "10.7.0"
-loguru = "*"
-typer = "*"
+[project.urls]
+repository = "https://github.com/SqueezeBits/Torch-TRTLLM"
 
-[tool.poetry.scripts]
+[project.scripts]
 ditto = "ditto.__main__:app"
 
-[tool.poetry.package.include]
-path = "src/ditto"
+[tool.setuptools.dynamic]
+version = { attr = "ditto.__version__" }
