@@ -18,9 +18,11 @@ from collections.abc import Callable
 from typing import Any
 
 from pydantic import Field, computed_field, model_serializer, model_validator
+from tensorrt_llm.quantization import QuantAlgo
 from typing_extensions import Self
 
-from ...literals import DTypeLiteral, QuantAlgoLiteral
+from ...literals import DTypeLiteral
+from ...quantization import GlobalQuantConfig
 from ...types import StrictlyTyped
 
 
@@ -360,24 +362,41 @@ class TRTLLMQuantConfig(StrictlyTyped):
     """Configuration for model quantization in TRT-LLM.
 
     Attributes:
-        quant_algo (QuantAlgoLiteral | None): Quantization algorithm. Defaults to None.
-        kv_cache_quant_algo (QuantAlgoLiteral | None): KV cache quantization algorithm. Defaults to None.
-        group_size (int): Size of quantization groups. Defaults to 128.
-        smoothquant_val (float): SmoothQuant alpha parameter. Defaults to 0.5.
+        quant_algo (QuantAlgo | None): Quantization algorithm. Defaults to None.
+        kv_cache_quant_algo (QuantAlgo | None): KV cache quantization algorithm. Defaults to None.
+        group_size (int | None): Size of quantization groups. Defaults to None.
+        smoothquant_val (float | None): SmoothQuant alpha parameter. Defaults to None.
         clamp_val (list[float] | None): Min/max clamp values for SmoothQuant. Defaults to None.
         has_zero_point (bool): Whether quantization includes zero point. Defaults to False.
         pre_quant_scale (bool): Whether to apply scaling before quantization. Defaults to False.
         exclude_modules (list[str] | None): Module names to exclude from quantization. Defaults to None.
     """
 
-    quant_algo: QuantAlgoLiteral | None = None
-    kv_cache_quant_algo: QuantAlgoLiteral | None = None
-    group_size: int = 128
-    smoothquant_val: float = 0.5
+    quant_algo: QuantAlgo | None = None
+    kv_cache_quant_algo: QuantAlgo | None = None
+    group_size: int | None = None
+    smoothquant_val: float | None = None
     clamp_val: list[float] | None = Field(default=None, min_length=2, max_length=2)
     has_zero_point: bool = False
     pre_quant_scale: bool = False
     exclude_modules: list[str] | None = None
+
+    @classmethod
+    def create_from(cls, global_quant_config: GlobalQuantConfig) -> Self:
+        """Create a TRTLLMQuantConfig from a GlobalQuantConfig.
+
+        Args:
+            global_quant_config (GlobalQuantConfig): The global quantization configuration
+
+        Returns:
+            Self: The created TRTLLMQuantConfig
+        """
+        return cls(
+            quant_algo=global_quant_config.trtllm_quant_algo,
+            kv_cache_quant_algo=global_quant_config.trtllm_kv_cache_quant_algo,
+            group_size=global_quant_config.group_size,
+            has_zero_point=global_quant_config.has_zero_point,
+        )
 
 
 class TRTLLMMoEConfig(StrictlyTyped):

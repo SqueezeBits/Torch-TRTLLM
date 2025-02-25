@@ -26,7 +26,7 @@ class Dequantize(StrictlyTyped):
     into a single dequantize node. It is used to convert the mm node to a plugin node for quantization.
 
     Attributes:
-        dtype (torch.dtype): Data type of the tensor
+        dtype (torch.dtype): Data type of the model
         global_quant_config (GlobalQuantConfig): Global quantization configuration
         output_shape (torch.Size): Shape of the output tensor
         bits (int): Number of bits for quantization
