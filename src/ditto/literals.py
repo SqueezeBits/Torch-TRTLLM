@@ -127,10 +127,11 @@ QuantAlgoLiteral = Literal[
 ]
 
 LogLevelLiteral = Literal[
-    50,  # CRITICAL,FATAL
-    40,  # ERROR
-    30,  # WARNING
-    20,  # INFO
-    10,  # DEBUG
-    0,  # NOTSET
+    "CRITICAL",
+    "FATAL",
+    "ERROR",
+    "WARNING",
+    "INFO",
+    "DEBUG",
+    "NOTSET",
 ]

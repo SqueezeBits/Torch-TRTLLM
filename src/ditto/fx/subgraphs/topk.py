@@ -56,7 +56,7 @@ class TopK(Subgraph):
             values = get_item if get_item.idx == 0 else None
             indices = get_item if get_item.idx == 1 else None
         else:
-            values, indices = map(GetItem.specialize_from, topk.users.keys())
+            values, indices = (GetItem.specialize_from(user) for user in topk.users)
 
         assert any(get_item == user for user in (values, indices))
         return cls(

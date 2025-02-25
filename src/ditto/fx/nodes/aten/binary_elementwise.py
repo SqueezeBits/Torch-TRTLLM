@@ -550,7 +550,7 @@ class Eq(BinaryElementwise):
     """Binary elementwise equality comparison operation.
 
     Attributes:
-        this (Node): The first operand
+        this (Node | Number): The first operand
         other (Node | Number): The second operand
     """
 

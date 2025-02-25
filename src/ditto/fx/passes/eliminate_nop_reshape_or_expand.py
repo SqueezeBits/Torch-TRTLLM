@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
-
 from torch.fx import Node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
 
@@ -34,7 +32,7 @@ class EliminateNopReshapeOrExpand(NodewiseOptimizationPass):
         ):
             return {}
 
-        with set_logger_level("torch.fx.experimental.recording", logging.CRITICAL):
+        with set_logger_level("torch.fx.experimental.recording", "CRITICAL"):
             try:
                 if not input_tensor.shape == output_tensor.shape:
                     return {}
