@@ -32,7 +32,8 @@ from .lora_plugin import (
 from .mixture_of_experts_plugin import (
     MixtureOfExpertsPlugin,
     MixtureOfExpertsPluginInputs,
-    MoEConfig,
+    get_moe_activation_type,
+    get_moe_normalization_mode,
 )
 from .plugin import Plugin
 from .recv_plugin import RecvPlugin

@@ -15,6 +15,7 @@
 from torch.fx import Node
 from typing_extensions import Self
 
+from ...types import SymbolicInteger
 from ..nodes import GetItem
 from ..nodes import TopK as TopKNode
 from .subgraph import Subgraph
@@ -35,6 +36,7 @@ class TopK(Subgraph):
     """
 
     this: Node
+    k: SymbolicInteger
     output_values: GetItem | None
     output_indices: GetItem | None
 
@@ -61,6 +63,7 @@ class TopK(Subgraph):
         assert any(get_item == user for user in (values, indices))
         return cls(
             this=topk.this,
+            k=topk.k,
             output_values=values,
             output_indices=indices,
         )

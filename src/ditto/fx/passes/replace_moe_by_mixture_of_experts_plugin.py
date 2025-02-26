@@ -14,13 +14,17 @@
 
 import tensorrt as trt
 import torch
-from loguru import logger
 from torch.fx import Graph, GraphModule, Node
 
 from ...types import DataType
 from ..subgraphs import MoESubgraph
-from ..targets import MixtureOfExpertsPlugin, MixtureOfExpertsPluginInputs, MoEConfig
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, get_pretrained_config
+from ..targets import (
+    MixtureOfExpertsPlugin,
+    MixtureOfExpertsPluginInputs,
+    get_moe_activation_type,
+    get_moe_normalization_mode,
+)
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
@@ -28,12 +32,10 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
 
     Attributes:
         dtype (torch.dtype): Data type to use for the plugin tensors
-        has_warned_missing_pretrained_config (bool): Whether a warning has been logged about missing config
     """
 
     dtype: torch.dtype
-    has_warned_missing_pretrained_config: bool = False
-    moe_config: MoEConfig | None = None
+    plugin: MixtureOfExpertsPlugin | None = None
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         """Rewrite a node by replacing MoE subgraph with plugin node if applicable.
@@ -49,21 +51,21 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
 
         graph = node.graph
 
-        pretrained_config = get_pretrained_config(graph)
-        if not self.has_warned_missing_pretrained_config and pretrained_config is None:
-            logger.warning("No pretrained config found in graph module meta data. Default MoE config will be used.")
-            self.has_warned_missing_pretrained_config = True
-
-        moe_config = MoEConfig.from_pretrained_config(pretrained_config)
-        if self.moe_config is None:
-            self.moe_config = moe_config
         moe_plugin = MixtureOfExpertsPlugin(
-            **moe_config.model_dump(),
-            activation_type=3,  # TODO: remove hard-coded activation type
+            number_of_experts=moe.number_of_experts,
+            top_k=moe.top_k,
+            expert_hidden_size=moe.expert_hidden_size,
+            expert_inter_size=moe.expert_inter_size,
+            normalization_mode=get_moe_normalization_mode(),
+            activation_type=get_moe_activation_type(),
             type_id=DataType(self.dtype).to(trt.DataType),
             weight_type_id=DataType(self.dtype).to(trt.DataType),
             output_type_id=DataType(self.dtype).to(trt.DataType),
         )
+        moe_plugin._shared_expert_intermediate_size = moe.shared_expert_intermediate_size
+        if self.plugin is None:
+            self.plugin = moe_plugin
+
         with graph.inserting_before(moe.final_hidden_states):
             plugin_inputs = MixtureOfExpertsPluginInputs.create_from(moe, graph)
             plugin_node = graph.call_function(
@@ -92,11 +94,11 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
 
     def postprocess(self, graph_module: GraphModule) -> None:
         super().postprocess(graph_module)
-        if self.moe_config is not None:
+        if self.plugin is not None:
             graph_module.meta["moe_config"] = {
-                "num_experts": self.moe_config.number_of_experts,
-                "shared_expert_intermediate_size": self.moe_config._shared_expert_intermediate_size,
-                "top_k": self.moe_config.top_k,
-                "normalization_mode": self.moe_config.normalization_mode,
-                "sparse_mixer_epsilon": self.moe_config.sparse_mixer_epsilon,
+                "num_experts": self.plugin.number_of_experts,
+                "shared_expert_intermediate_size": self.plugin._shared_expert_intermediate_size,
+                "top_k": self.plugin.top_k,
+                "normalization_mode": self.plugin.normalization_mode,
+                "sparse_mixer_epsilon": self.plugin.sparse_mixer_epsilon,
             }

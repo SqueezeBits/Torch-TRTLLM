@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import ClassVar
+from typing import ClassVar, overload
 
 import torch
 from torch.fx import Node
@@ -41,9 +41,9 @@ class Expert(Subgraph):
 
     index: int | SymbolicInteger
     entry_node: SelectInt
-    up_proj: MM | Gemm
-    gate_proj: MM | Gemm
-    down_proj: MM | Gemm
+    up_proj: Linear
+    gate_proj: Linear
+    down_proj: Linear
     final_hidden_states: Node
 
     UNUSED_TARGETS: ClassVar[tuple] = (torch.ops.aten.sym_constrain_range_for_size.default,)
@@ -64,9 +64,9 @@ class Expert(Subgraph):
         return cls(
             index=select.index,
             entry_node=select,
-            up_proj=gated_mlp.up_proj.mm,
-            gate_proj=gated_mlp.gate_proj.mm,
-            down_proj=down_proj.mm,
+            up_proj=gated_mlp.up_proj,
+            gate_proj=gated_mlp.gate_proj,
+            down_proj=down_proj,
             final_hidden_states=final_hidden_states.node,
         )
 
@@ -115,15 +115,53 @@ class MoESubgraph(Subgraph):
     hidden_states: Node
     router: MM | Gemm
     router_logits: Node
+    top_k: int
     expert_weights: list[tuple[Node, Node, Node]]
+    shared_expert_weights: list[tuple[Node, Node, Node]]
     final_hidden_states: Node
     unused_nodes: set[Node]
+
+    @property
+    def number_of_experts(self) -> int:
+        """Get the number of experts in the MoE layer.
+
+        Returns:
+            int: The number of expert networks
+        """
+        return len(self.expert_weights)
+
+    @property
+    def expert_hidden_size(self) -> int:
+        """Get the hidden dimension size used by each expert.
+
+        Returns:
+            int: Hidden dimension size for expert networks
+        """
+        return self.expert_weights[0][0].meta["tensor_meta"].shape[0]
+
+    @property
+    def expert_inter_size(self) -> int:
+        """Get the intermediate dimension size used by each expert.
+
+        Returns:
+            int: Intermediate dimension size for expert networks
+        """
+        return self.expert_weights[0][0].meta["tensor_meta"].shape[1]
+
+    @property
+    def shared_expert_intermediate_size(self) -> int:
+        """Get the intermediate dimension size used by the shared expert.
+
+        Returns:
+            int: Intermediate dimension size for the shared expert network
+        """
+        return self.shared_expert_weights[0][0].meta["tensor_meta"].shape[1]
 
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
         # The common pattern for Mixture of Experts (MoE) is:
         # softmax -> top-k -> one-hot
-        # This pattern is used in Qwen, Mixtral, and DeepSeek-v1.
+        # This pattern is used in Qwen and Mixtral.
         if not (
             (one_hot := OneHot.configure_from(node))
             and (get_item := TrailingReformatPath.configure_from(one_hot.this).top)
@@ -146,30 +184,56 @@ class MoESubgraph(Subgraph):
 
         if to_copy := ToCopy.specialize_from(gate.mm.this):
             # When the router is casted to FP32.
-            hidden_states = to_copy.this
+            expert_hidden_states = to_copy
         else:
-            hidden_states = gate.mm.this
+            expert_hidden_states = gate.mm
+
+        shared_experts = []
+        for user in expert_hidden_states.this.users:
+            if user == expert_hidden_states.node:
+                continue
+            if not (
+                Linear.configure_from(user)
+                and (gated_mlp := GatedMLP.find_nearest(user, follow_parent=False))
+                and (down_proj := Linear.find_nearest(gated_mlp.mul.node, follow_parent=False))
+            ):
+                continue
+            shared_experts.append((gated_mlp.up_proj, gated_mlp.gate_proj, down_proj))
+
         router_logits = softmax.this
         experts.sort(key=lambda expert: expert.index)
         final_hidden_states = experts[-1].final_hidden_states
         return cls(
-            hidden_states=hidden_states,
+            hidden_states=expert_hidden_states.this,
             router=gate.mm,
             router_logits=router_logits,
-            expert_weights=cls.extract_weights(experts),
+            top_k=int(topk.k),
+            expert_weights=[cls.extract_weights(expert) for expert in experts],
+            shared_expert_weights=[cls.extract_weights(expert) for expert in shared_experts],
             final_hidden_states=final_hidden_states,
             unused_nodes=unused_nodes,
         )
 
     @staticmethod
-    def extract_weights(experts: list[Expert]) -> list[tuple[Node, Node, Node]]:
-        """Extract weights from a list of experts to exclude other components for MoESubgraph instances.
+    @overload
+    def extract_weights(expert: Expert) -> tuple[Node, Node, Node]:
+        ...
+
+    @staticmethod
+    @overload
+    def extract_weights(expert: tuple[Linear, Linear, Linear]) -> tuple[Node, Node, Node]:
+        ...
+
+    @staticmethod
+    def extract_weights(expert: Expert | tuple[Linear, Linear, Linear]) -> tuple[Node, Node, Node]:
+        """Extract weight nodes from an expert or tuple of linear layers.
 
         Args:
-            experts (list[Expert]): List of Expert objects to extract weights from.
+            expert: Either an Expert instance or a tuple of (up_proj, gate_proj, down_proj) Linear layers
 
         Returns:
-            list[tuple[Node, Node, Node]]: List of tuples containing (up_proj, gate_proj, down_proj)
-                weight nodes for each expert.
+            A tuple of (up_proj_weight, gate_proj_weight, down_proj_weight) nodes
         """
-        return [(expert.up_proj.other, expert.gate_proj.other, expert.down_proj.other) for expert in experts]
+        if isinstance(expert, Expert):
+            return (expert.up_proj.mm.other, expert.gate_proj.mm.other, expert.down_proj.mm.other)
+        return (expert[0].mm.other, expert[1].mm.other, expert[2].mm.other)

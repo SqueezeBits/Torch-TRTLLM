@@ -20,82 +20,17 @@ import torch
 from pydantic import PrivateAttr
 from tensorrt_llm.functional import QuantMode, SideStreamIDType
 from tensorrt_llm.layers.moe import MoeConfig as TRTLLMMoeConfig
+from tensorrt_llm.layers.moe import activation_str_to_int_map
 from torch.fx import Graph, Node
-from transformers import PretrainedConfig
 from typing_extensions import Self
 
 from ...types import StrictlyTyped
 from ..nodes import Cat, Permute, Stack
 from .fake_tensor_mode import is_in_fake_tensor_mode
 from .plugin import Plugin
-from .utils import lookup_attributes
 
 if TYPE_CHECKING:
     from ..subgraphs import MoESubgraph
-
-
-class MoEConfig(StrictlyTyped):
-    """Configuration class for Mixture of Experts (MoE) model.
-
-    Attributes:
-        number_of_experts (int): Number of expert networks in the MoE model
-        expert_hidden_size (int): Hidden dimension size for each expert
-        expert_inter_size (int): Intermediate dimension size for each expert
-        top_k (int): Number of experts to route each token to
-        normalization_mode (int): Mode for normalizing expert routing weights
-        sparse_mixer_epsilon (float): Small constant added for numerical stability
-    """
-
-    number_of_experts: int = 0
-    expert_hidden_size: int = 0
-    expert_inter_size: int = 0
-    top_k: int = 0
-    normalization_mode: int = TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
-    sparse_mixer_epsilon: float = 0.01
-    _shared_expert_intermediate_size: int = PrivateAttr(default=0)
-
-    @classmethod
-    def from_pretrained_config(cls, pretrained_config: PretrainedConfig | None) -> Self:
-        """Create MoEConfig from a pretrained model configuration.
-
-        Args:
-            pretrained_config: Configuration from a pretrained model, or None
-
-        Returns:
-            MoEConfig: New configuration initialized from pretrained config
-        """
-        moe_config = cls()
-
-        moe_config.number_of_experts = lookup_attributes(
-            pretrained_config,
-            "num_experts",
-            default=moe_config.number_of_experts,
-        )
-        moe_config.expert_hidden_size = lookup_attributes(
-            pretrained_config,
-            "hidden_size",
-            default=moe_config.expert_hidden_size,
-        )
-        moe_config.expert_inter_size = lookup_attributes(
-            pretrained_config,
-            "moe_intermediate_size",
-            default=moe_config.expert_inter_size,
-        )
-        moe_config.top_k = lookup_attributes(
-            pretrained_config,
-            "num_experts_per_tok",
-            default=moe_config.top_k,
-        )
-        moe_config._shared_expert_intermediate_size = lookup_attributes(
-            pretrained_config,
-            "shared_expert_intermediate_size",
-            default=moe_config._shared_expert_intermediate_size,
-        )
-        # TODO: Set normalization mode for each model.
-        # For Qwen models, it is hard-coded to ExpertScaleNormalizationMode.NONE.
-        moe_config.normalization_mode = TRTLLMMoeConfig.ExpertScaleNormalizationMode.NONE
-
-        return moe_config
 
 
 class MixtureOfExpertsPlugin(Plugin):
@@ -141,11 +76,12 @@ class MixtureOfExpertsPlugin(Plugin):
     tp_rank: int = 0
     ep_size: int = 1
     ep_rank: int = 0
-    normalization_mode: int
-    sparse_mixer_epsilon: float
+    normalization_mode: int = TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
+    sparse_mixer_epsilon: float = 0.01
     force_determinism: bool = False
     side_stream_id: int = SideStreamIDType.disable
     use_lora: bool = False
+    _shared_expert_intermediate_size: int = PrivateAttr(default=0)
 
     def __call__(self, **kwargs: Any) -> torch.Tensor:
         """Forward pass of the MoE plugin.
@@ -229,3 +165,25 @@ class MixtureOfExpertsPluginInputs(StrictlyTyped):
             expert_weights_1=expert_weights_1.node,
             expert_weights_2=expert_weights_2.node,
         )
+
+
+def get_moe_normalization_mode() -> int:
+    """Get the normalization mode for MoE plugin.
+
+    Returns:
+        int: The normalization mode enum value
+    """
+    # TODO: Set normalization mode for each model.
+    # For Qwen MoE models, it is hard-coded to ExpertScaleNormalizationMode.NONE.
+    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.NONE
+
+
+def get_moe_activation_type() -> int:
+    """Get the activation type for MoE plugin.
+
+    Returns:
+        int: The activation type enum value
+    """
+    # TODO: Set activation type for each model.
+    # For Qwen MoE models, it is hard-coded to swiglu.
+    return activation_str_to_int_map["swiglu"]
