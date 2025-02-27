@@ -584,6 +584,7 @@ native_build() {
     local build_cmd="$TRTLLM_BUILD_SCRIPT $TRTLLM_BUILD_ARGS"
 
     DEBUG_ARTIFACTS_DIR=$TRTLLM_ARTIFACTS_DIR rich_execute "$build_cmd" "$TRTLLM_ENGINE_DIR/build.log" "build native TensorRT-LLM engine"
+    rm -r $TRTLLM_CKPT_DIR
 }
 
 # Compare outputs between two files and print result
@@ -653,7 +654,10 @@ compare_outputs() {
         if [ $? -ne 0 ]; then
             all_succeeded=1
         fi
+        rm -r $DITTO_ENGINE_DIR/lora
     done
+
+    rm $TRTLLM_ENGINE_DIR/rank*.engine $DITTO_ENGINE_DIR/rank*.engine
 
     return $all_succeeded
 }
