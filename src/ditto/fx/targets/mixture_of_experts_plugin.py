@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import tensorrt as trt
 import torch
+from loguru import logger
 from pydantic import PrivateAttr
 from tensorrt_llm.functional import QuantMode, SideStreamIDType
 from tensorrt_llm.layers.moe import MoeConfig as TRTLLMMoeConfig
@@ -25,7 +26,7 @@ from torch.fx import Graph, Node
 from typing_extensions import Self
 
 from ...types import StrictlyTyped
-from ..nodes import Cat, Permute, Stack
+from ..nodes import Cat, Permute, Stack, ToCopy
 from .fake_tensor_mode import is_in_fake_tensor_mode
 from .plugin import Plugin
 
@@ -142,8 +143,11 @@ class MixtureOfExpertsPluginInputs(StrictlyTyped):
     def create_from(cls, moe: "MoESubgraph", graph: Graph) -> Self:
         """Create plugin inputs from MoE subgraph.
 
-        For the MoE plugin, the weight tensors of all experts should be stacked together to be fed into
+        For the MoE plugin,
+        1. the weight tensors of all experts should be stacked together to be fed into
         the plugin, and up-projection weights and gate-projection weights should be concatenated together.
+        2. The router logits should be cast to float32.
+
 
         Args:
             moe (MoESubgraph): MoE subgraph to extract inputs from
@@ -159,9 +163,21 @@ class MixtureOfExpertsPluginInputs(StrictlyTyped):
         assert expert_weights_1.ndim == 3
         expert_weights_1 = Permute.create(graph, expert_weights_1, [0, 2, 1])
         expert_weights_2 = Permute.create(graph, down_weights, [0, 2, 1])
+
+        if moe.router_logits_dtype == torch.bfloat16:
+            router_logits = ToCopy.create(graph, moe.router_logits, dtype=torch.float32).node
+        elif moe.router_logits_dtype == torch.float32:
+            router_logits = moe.router_logits
+        else:
+            logger.warning(
+                f"Router logits with dtype {moe.router_logits_dtype} might not be supported by the MoE plugin. "
+                "Add casting to float32 if it's not supported."
+            )
+            router_logits = moe.router_logits
+
         return cls(
             hidden_states=moe.hidden_states,
-            routing=moe.router_logits,
+            routing=router_logits,
             expert_weights_1=expert_weights_1.node,
             expert_weights_2=expert_weights_2.node,
         )

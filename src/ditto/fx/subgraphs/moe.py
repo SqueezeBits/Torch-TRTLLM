@@ -155,7 +155,18 @@ class MoESubgraph(Subgraph):
         Returns:
             int: Intermediate dimension size for the shared expert network
         """
+        if len(self.shared_expert_weights) == 0:
+            return 0
         return self.shared_expert_weights[0][0].meta["tensor_meta"].shape[1]
+
+    @property
+    def router_logits_dtype(self) -> torch.dtype:
+        """Get the data type of the router logits.
+
+        Returns:
+            torch.dtype: The data type of the router logits tensor
+        """
+        return self.router_logits.meta["val"].dtype
 
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
