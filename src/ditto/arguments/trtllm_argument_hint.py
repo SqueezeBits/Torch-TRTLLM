@@ -312,7 +312,17 @@ class TRTLLMArgumentHint(StrictlyTyped):
         pointers_per_rank = 7
         pointers_of_counter = 2
         workspace_size = pointers_per_rank * self.mapping.tp_size + pointers_of_counter
-        return TensorTypeHint(shape=(workspace_size,), dtype=torch.int64)
+        return TensorTypeHint(
+            shape=(
+                DynamicDimension(
+                    name="workspace_size",
+                    min=workspace_size,
+                    opt=workspace_size,
+                    max=workspace_size,
+                ),
+            ),
+            dtype=torch.int64,
+        )
 
     @model_serializer(mode="wrap")
     def serialize_model(

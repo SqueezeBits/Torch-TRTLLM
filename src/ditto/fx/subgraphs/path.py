@@ -22,7 +22,7 @@ from torch.fx import Node
 from typing_extensions import Self
 
 from ...types import NodeCriterion
-from ..nodes import NodeSpecialization
+from ..nodes import Expand, NodeSpecialization
 from ..utils import get_tensor_metadata
 from .subgraph import Subgraph
 
@@ -120,6 +120,11 @@ class TrailingReformatPath(Path):
         """The sequence of reformat nodes, excluding the top-most node."""
         return self.node_seq[:-1]
 
+    @property
+    def expands(self) -> tuple[Node, ...]:
+        """The sequence of expand nodes."""
+        return tuple(n for n in self.node_seq[:-1] if Expand.specialize_from(n) is not None)
+
     @classmethod
     def get_reformat_targets(cls) -> tuple[OpOverload, ...]:
         """Get the operations classified as reformat targets.
@@ -169,7 +174,11 @@ class TrailingReformatPath(Path):
         """
         if not self.reformats:
             return 1
-        if not ((top := get_tensor_metadata(self.top)) and (bottom := get_tensor_metadata(self.bottom))):
+        if not (
+            (bottom := get_tensor_metadata(self.bottom))
+            and len(expands := self.expands) == 1
+            and (expand_input := get_tensor_metadata(Expand.specialize_from(expands[0]).this))
+        ):
             return None
         # Note that `torch.ops.aten.expand.default` is the only target that can increase the number of elements.
         # A naive implementation would be simple:
@@ -179,13 +188,13 @@ class TrailingReformatPath(Path):
         # As a result, it can affect the `FakeTensorProp` to believe some of the `torch.SymInt` objects are constant.
         # Therefore, we must handle `int` and `torch.SymInt` objects separately here.
         bottom_sym_shape = [s for s in bottom.shape if isinstance(s, torch.SymInt)]
-        top_sym_shape = [s for s in top.shape if isinstance(s, torch.SymInt)]
-        if are_same_as_sets(bottom_sym_shape, top_sym_shape):
+        expand_sym_shape = [s for s in expand_input.shape if isinstance(s, torch.SymInt)]
+        if are_same_as_sets(bottom_sym_shape, expand_sym_shape):
             return None
 
         bottom_ishape = torch.Size(s for s in bottom.shape if isinstance(s, int))
-        top_ishape = torch.Size(s for s in top.shape if isinstance(s, int))
-        return bottom_ishape.numel() // top_ishape.numel()
+        expand_ishape = torch.Size(s for s in expand_input.shape if isinstance(s, int))
+        return bottom_ishape.numel() // expand_ishape.numel()
 
     @classmethod
     @overload

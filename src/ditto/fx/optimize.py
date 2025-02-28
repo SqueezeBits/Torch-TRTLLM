@@ -23,7 +23,6 @@ from ..configs import TRTLLMModelConfig
 from ..constants import FX_TRANSFORM_MAXIMUM_ITERATION
 from ..literals import PassName
 from .passes import (
-    AddTRTLLMInputs,
     BindUnmatchedLoraProtos,
     CanonicalizeCopy,
     CastMMToFP32,
@@ -212,7 +211,6 @@ def get_trtllm_conversion_transform(
         Callable[[GraphModule], GraphModule]: A function that applies TRT-LLM conversion passes to a graph module
     """
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
-        AddTRTLLMInputs(argument_hint=argument_hint),
         *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
         StashLoraSubgraphs,
         CastRouterToFP32,
@@ -221,7 +219,11 @@ def get_trtllm_conversion_transform(
         FuseGatedMLPProjections,
         WrapRoPESubgraphs,
         RewriteIndexAsSingleSlice,
-        ReplaceSDPAByGPTAttentionPlugin(dtype=dtype),
+        ReplaceSDPAByGPTAttentionPlugin(
+            dtype=dtype,
+            tp_size=argument_hint.mapping.tp_size,
+            tp_rank=argument_hint.mapping.tp_rank,
+        ),
         IndexLayers,
         BindUnmatchedLoraProtos,
         PopLoraPlugins(argument_hint=argument_hint),

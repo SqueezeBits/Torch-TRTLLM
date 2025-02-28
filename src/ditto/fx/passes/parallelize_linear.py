@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from itertools import accumulate
-
 import tensorrt as trt
 import torch
 from pydantic import Field
@@ -22,9 +20,9 @@ from torch.fx import Graph, GraphModule, Node
 
 from ...configs import TRTLLMMapping
 from ...types import DataType
-from ..nodes import GetAttr, Permute, Reshape, Slice
-from ..subgraphs import FusedLinear, Linear
-from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs, GPTAttentionPlugin
+from ..nodes import Embedding, Expand, GetAttr, Permute, Reshape
+from ..subgraphs import Linear
+from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs
 from ..utils import forget_all_descendant_fake_tensors, get_val
 from .infra import (
     GraphOptimizationPass,
@@ -48,47 +46,59 @@ class ParallelizeLinear(GraphOptimizationPass):
     mapping: TRTLLMMapping = Field(frozen=True)
 
     def call(self, graph_module: GraphModule) -> PassResult:
-        first_node_rewritten: Node | None = None
+        if self.mapping.tp_size == 1:
+            return PassResult(graph_module=graph_module, modified=False)
+
         overall_modified = False
         graph = graph_module.graph
         lm_head = Linear.find_last(graph)
         for node in graph.nodes:
-            if not ((fused_linear := FusedLinear.configure_from(node)) or (linear := Linear.configure_from(node))):
+            if not (linear := Linear.configure_from(node)):
                 continue
 
-            linear = fused_linear.linear if fused_linear else linear
             tp_type = node.meta.get("tp_type", TensorParallelType.NONE)
             if tp_type == TensorParallelType.COLUMN:
-                slice_dim_sizes: list[int] | None = None
-                if gpt_attn_plugin := get_gpt_plugin(linear):
-                    q_dim = self.mapping.tp_size * gpt_attn_plugin.num_heads * gpt_attn_plugin.head_size
-                    kv_dim = self.mapping.tp_size * gpt_attn_plugin.num_kv_heads * gpt_attn_plugin.head_size
-                    slice_dim_sizes = [q_dim, kv_dim, kv_dim]
-                elif fused_linear:
-                    slice_dim_sizes = []
-                    for slice_node in fused_linear.slices:
-                        assert isinstance(slice_node.start, int) and isinstance(
-                            slice_node.end, int
-                        ), "slice must have int start and end"
-                        slice_dim_sizes.append(slice_node.end - slice_node.start)
-                        self.parallelize_slice(slice_node)
-                self.parallelize_column_linear(
-                    linear,
-                    gather_output=linear == lm_head,
-                    slice_dim_sizes=slice_dim_sizes,
-                )
+                self.parallelize_column_linear(linear, gather_output=linear == lm_head)
             elif tp_type == TensorParallelType.ROW:
                 self.parallelize_row_linear(linear)
 
-            if first_node_rewritten is None:
-                first_node_rewritten = node
-
             overall_modified = True
 
-        if first_node_rewritten is not None:
-            forget_all_descendant_fake_tensors(first_node_rewritten)
+        if overall_modified:
+            # resolve reformatting nodes
+            embedding: Embedding | None = None
+            for node in graph.nodes:
+                if not (
+                    (reshape := Reshape.specialize_from(node) or Expand.specialize_from(node))
+                    and node.meta.get("tp_type", TensorParallelType.NONE) != TensorParallelType.NONE
+                ):
+                    embedding = embedding or Embedding.specialize_from(node)
+                    continue
+                assert reshape.shape.count(-1) == 1, "reshape and expand node must have exactly one dynamic dimension"
 
-        return PassResult(graph_module=graph_module, modified=overall_modified, require_fake_tensor_prop=True)
+                dynamic_dim_idx = reshape.shape.index(-1)
+                if dynamic_dim_idx == 0 and len(reshape.shape) == 2:
+                    shard_dim_idx = 1
+                elif dynamic_dim_idx == 1 and len(reshape.shape) in [3, 4]:
+                    shard_dim_idx = 2
+                elif dynamic_dim_idx == 2 and len(reshape.shape) in [3, 4]:
+                    shard_dim_idx = 1 if len(reshape.shape) == 4 else 0
+                elif dynamic_dim_idx == 3 and len(reshape.shape) == 5:
+                    shard_dim_idx = 1
+                else:
+                    raise ValueError(f"unexpected shape of reformatting node: {reshape.shape}")
+
+                new_shape = list(reshape.shape)
+                new_shape[shard_dim_idx] = new_shape[shard_dim_idx] // self.mapping.tp_size
+                args, kwargs = reshape.args_kwargs(shape=new_shape)
+                reshape.node.args = args
+                reshape.node.kwargs = kwargs
+            assert embedding is not None, "embedding node not found"
+            forget_all_descendant_fake_tensors(embedding.node)
+
+        return PassResult(
+            graph_module=graph_module, modified=overall_modified, require_fake_tensor_prop=overall_modified
+        )
 
     def get_name_of_attr(self, from_name: str) -> str:
         """Create the name of the attribute with the tensor parallel rank.
@@ -106,38 +116,24 @@ class ParallelizeLinear(GraphOptimizationPass):
         linear: Linear,
         *,
         gather_output: bool = True,
-        slice_dim_sizes: list[int] | None = None,
     ) -> None:
         """Parallelize the linear subgraph in column direction.
 
         Args:
             linear (Linear): The linear subgraph to be parallelized
             gather_output (bool, optional): Whether to gather the output. Defaults to True.
-            slice_dim_sizes (list[int] | None, optional): The dimension sizes to slice the weight. Defaults to None.
         """
         if not (weight := GetAttr.specialize_from(linear.weight_node)):
             return
         local_out_features = linear.out_features // self.mapping.tp_size
-        if slice_dim_sizes:
-            assert all(
-                dim % self.mapping.tp_size == 0 for dim in slice_dim_sizes
-            ), "dimension to be sliced must be divisible by tp_size"
-            parallelized_weight_tensor = torch.cat(
-                list(zip(*self.slice_weight(weight.tensor, slice_dim_sizes, linear.has_transposed_weight)))[
-                    self.mapping.tp_rank
-                ],
-                dim=0 if linear.has_transposed_weight else 1,
-            )
+        if linear.has_transposed_weight:
+            parallelized_weight_tensor = weight.tensor[
+                local_out_features * self.mapping.tp_rank : local_out_features * (self.mapping.tp_rank + 1), :
+            ]
         else:
-            slice_size = local_out_features
-            if linear.has_transposed_weight:
-                parallelized_weight_tensor = weight.tensor[
-                    slice_size * self.mapping.tp_rank : slice_size * (self.mapping.tp_rank + 1), :
-                ]
-            else:
-                parallelized_weight_tensor = weight.tensor[
-                    :, slice_size * self.mapping.tp_rank : slice_size * (self.mapping.tp_rank + 1)
-                ]
+            parallelized_weight_tensor = weight.tensor[
+                :, local_out_features * self.mapping.tp_rank : local_out_features * (self.mapping.tp_rank + 1)
+            ]
 
         assert (
             parallelized_weight_tensor.shape
@@ -166,15 +162,9 @@ class ParallelizeLinear(GraphOptimizationPass):
             and linear.add is not None
             and (bias := GetAttr.specialize_from(linear.bias_node))
         ):
-            if slice_dim_sizes:
-                parallelized_bias_tensor = torch.cat(
-                    list(zip(*self.slice_bias(bias.tensor, slice_dim_sizes)))[self.mapping.tp_rank]
-                )
-            else:
-                slice_size = local_out_features
-                parallelized_bias_tensor = bias.tensor[
-                    slice_size * self.mapping.tp_rank : slice_size * (self.mapping.tp_rank + 1)
-                ]
+            parallelized_bias_tensor = bias.tensor[
+                local_out_features * self.mapping.tp_rank : local_out_features * (self.mapping.tp_rank + 1)
+            ]
 
             with graph.inserting_before(bias.node):
                 parallelized_bias = GetAttr.create(graph, self.get_name_of_attr(bias.target), parallelized_bias_tensor)
@@ -249,69 +239,6 @@ class ParallelizeLinear(GraphOptimizationPass):
             eps=eps,
         )
 
-    def parallelize_slice(self, slice_node: Slice) -> None:
-        """Parallelize the slice node.
-
-        This function just updates the slice node to be parallelized in place.
-
-        Args:
-            slice_node (Slice): The slice node to be parallelized
-        """
-        new_start = slice_node.start // self.mapping.tp_size
-        new_end = slice_node.end // self.mapping.tp_size
-        args, kwargs = slice_node.args_kwargs(start=new_start, end=new_end)
-        slice_node.node.args = args
-        slice_node.node.kwargs = kwargs
-
-    def slice_weight(
-        self, weight: torch.Tensor, slice_dim_sizes: list[int], is_transposed: bool
-    ) -> list[list[torch.Tensor]]:
-        """Slice the weight tensor into multiple tensors.
-
-        Args:
-            weight (torch.Tensor): The weight tensor to be sliced
-            slice_dim_sizes (list[int]): The dimension sizes to slice the weight
-            is_transposed (bool): Whether the weight is transposed
-
-        Returns:
-            list[list[torch.Tensor]]: The sliced weight tensors for each tensor parallel rank
-        """
-        cumulative_slice_offsets = list(accumulate([0, *slice_dim_sizes]))
-        sliced_weights: list[list[torch.Tensor]] = []
-        for idx, slice_dim_size in enumerate(slice_dim_sizes):
-            slice_size = slice_dim_size // self.mapping.tp_size
-            if is_transposed:
-                weight_to_be_sliced = weight[cumulative_slice_offsets[idx] : cumulative_slice_offsets[idx + 1], :]
-                slices = [
-                    weight_to_be_sliced[slice_size * i : slice_size * (i + 1), :] for i in range(self.mapping.tp_size)
-                ]
-            else:
-                weight_to_be_sliced = weight[:, cumulative_slice_offsets[idx] : cumulative_slice_offsets[idx + 1]]
-                slices = [
-                    weight_to_be_sliced[:, slice_size * i : slice_size * (i + 1)] for i in range(self.mapping.tp_size)
-                ]
-            sliced_weights.append(slices)
-        return sliced_weights
-
-    def slice_bias(self, bias: torch.Tensor, slice_dim_sizes: list[int]) -> list[list[torch.Tensor]]:
-        """Slice the bias tensor into multiple tensors.
-
-        Args:
-            bias (torch.Tensor): The bias tensor to be sliced
-            slice_dim_sizes (list[int]): The dimension sizes to slice the bias
-
-        Returns:
-            list[list[torch.Tensor]]: The sliced bias tensors for each tensor parallel rank
-        """
-        cumulative_slice_offsets = list(accumulate([0, *slice_dim_sizes]))
-        sliced_biases: list[list[torch.Tensor]] = []
-        for idx, slice_dim_size in enumerate(slice_dim_sizes):
-            slice_size = slice_dim_size // self.mapping.tp_size
-            bias_to_be_sliced = bias[cumulative_slice_offsets[idx] : cumulative_slice_offsets[idx + 1]]
-            slices = [bias_to_be_sliced[slice_size * i : slice_size * (i + 1)] for i in range(self.mapping.tp_size)]
-            sliced_biases.append(slices)
-        return sliced_biases
-
 
 # [TODO] This function is only supported for 2D tensor, it should be extended to support arbitrary dimensions
 # pylint: disable-next=unused-argument
@@ -383,20 +310,3 @@ def insert_allreduce_plugin(
             plugin_inputs.model_dump(),
         )
     to.replace_all_uses_with(allreduce, delete_user_cb=lambda user: user is not allreduce)
-
-
-def get_gpt_plugin(linear: Linear) -> GPTAttentionPlugin | None:
-    """Get the GPTAttentionPlugin from the linear node.
-
-    Args:
-        linear (Linear): The linear node to get the GPTAttentionPlugin from
-
-    Returns:
-        GPTAttentionPlugin | None: The GPTAttentionPlugin from the linear node
-    """
-    return (
-        target
-        if len(users := list(linear.output_node.users)) == 1
-        and isinstance(target := users[0].target, GPTAttentionPlugin)
-        else None
-    )

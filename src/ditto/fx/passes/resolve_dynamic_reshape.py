@@ -14,7 +14,7 @@
 
 from torch.fx import Node
 
-from ..nodes import Reshape, SymSizeInt
+from ..nodes import Expand, Reshape, SymSizeInt
 from .infra import ModifiedInsideThePass, NodewiseOptimizationPass, NodewisePassResult
 
 
@@ -31,7 +31,7 @@ class ResolveDynamicReshape(NodewiseOptimizationPass):
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if (
-            (reshape := Reshape.specialize_from(node))
+            (reshape := Reshape.specialize_from(node) or Expand.specialize_from(node))
             and -1 not in reshape.shape
             and (len([dim for dim in reshape.shape if isinstance(dim, Node) and SymSizeInt.specialize_from(dim)]) == 1)
         ):

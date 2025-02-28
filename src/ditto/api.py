@@ -42,8 +42,8 @@ from .export import export
 from .fx import generate_trtllm_engine_config
 from .fx.utils import find_output_node
 from .inline import inline
-from .literals import DTypeLiteral, PassName
-from .transform import parallelize, transform
+from .literals import DTypeLiteral
+from .transform import transform
 from .types import BuiltInConstant, verify
 
 
@@ -121,80 +121,64 @@ def trtllm_build(
         mapping=mapping,
     )
 
-    graph_module = trtllm_export(
-        model,
-        argument_hint,
-        model_config,
-        model.config.torch_dtype,
+    graph_module = trtllm_export(model, argument_hint)
+
+    for rank, transformed_graph_module in transform(
+        graph_module,
+        argument_hint=argument_hint,
+        model_config=model_config,
+        dtype=model.config.torch_dtype,
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         run_routers_in_model_dtype=run_routers_in_model_dtype,
         extra_passes=[add_outputs(debug_node_names)] if debug_node_names else None,
-    )
-
-    for filename, component in build_trtllm_engine_components(
-        graph_module,
-        argument_hint,
-        build_config=TRTLLMBuildConfig.merge(profile_config, model_config),
-        trt_config=trt_config,
-        engine_cache=engine_cache,
-        network_name=get_network_name(model),
-        debug_node_names=debug_node_names,
     ):
-        save_component(output_dir, filename, component)
+        for filename, component in build_trtllm_engine_components(
+            rank,
+            transformed_graph_module,
+            argument_hint,
+            build_config=TRTLLMBuildConfig.merge(profile_config, model_config),
+            trt_config=trt_config,
+            engine_cache=engine_cache,
+            network_name=get_network_name(model),
+            debug_node_names=debug_node_names,
+        ):
+            save_component(output_dir, filename, component)
 
 
 def trtllm_export(
     model: PreTrainedModel | PeftModel,
     argument_hint: TRTLLMArgumentHint,
-    model_config: TRTLLMModelConfig,
-    dtype: torch.dtype,
     *,
-    run_matmuls_in_fp32: bool = False,
-    run_activations_in_model_dtype: bool = True,
-    skipped_optimizers: list[PassName] | None = None,
-    extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
     enable_experimental_decompositions: bool = False,
-    run_routers_in_model_dtype: bool = False,
 ) -> GraphModule:
-    """Export a PyTorch model to a graph module optimized for TensorRT-LLM.
+    """Export a PyTorch model to a inlined graph module.
 
     This function performs several steps:
     1. Exports the PyTorch model to an exported program using torch.export
     2. Inlines the exported program into a graph module
-    3. Optimizes the graph module for TensorRT-LLM compatibility
 
     Args:
         model (PreTrainedModel | PeftModel): The PyTorch model to export
         argument_hint (TRTLLMArgumentHint): Configuration for input arguments
-        model_config (TRTLLMModelConfig): Model configurations
-        dtype (torch.dtype): Data type for the model
-        run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
-        run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
-        skipped_optimizers (list[PassName] | None, optional): List of optimization passes to skip. Defaults to None.
-        extra_passes (list[Callable[[GraphModule], GraphModule]] | None, optional): Additional transformation passes to
-            apply. Defaults to None.
         enable_experimental_decompositions (bool, optional): Whether to enable experimental decompositions.
             Defaults to False.
-        run_routers_in_model_dtype (bool, optional): Whether to run linear layers for routers in MoE models in model
-            dtype instead of FP32. Defaults to False.
 
     Returns:
-        GraphModule: The optimized graph module for TensorRT-LLM
+        GraphModule: The inlined graph module
     """
     logger.info("Running torch.export")
     hints: dict[str, TensorTypeHint | BuiltInConstant] = {
         INPUT_IDS: argument_hint.batched_input_ids,
         "use_cache": False,
     }
-    device = model.device
-    arguments = TorchExportArguments.from_hints(device=device, **hints)
+    arguments = TorchExportArguments.from_hints(device=model.device, **hints)
     logger.opt(lazy=True).debug("{x}", x=lambda: arguments)
     exported_program = export(model, arguments)
     save_for_debug("exported_program", exported_program)
 
     logger.info("Inlining the exported program into a graph module")
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(model.device))
     graph_module = inline(
         exported_program,
         class_name=get_network_name(model),
@@ -204,25 +188,14 @@ def trtllm_export(
     del exported_program
     torch.cuda.empty_cache()
 
-    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=lambda: get_memory_footprint(device))
-    logger.info("Optimizing the graph module")
-    return transform(
-        graph_module,
-        argument_hint=argument_hint,
-        model_config=model_config,
-        dtype=dtype,
-        skipped_optimizers=skipped_optimizers,
-        run_matmuls_in_fp32=run_matmuls_in_fp32,
-        run_activations_in_model_dtype=run_activations_in_model_dtype,
-        run_routers_in_model_dtype=run_routers_in_model_dtype,
-        extra_passes=extra_passes,
-    )
+    return graph_module
 
 
 EngineComponent: TypeAlias = TRTLLMEngineConfig | bytes | dict[str, torch.Tensor] | LoraConfig
 
 
 def build_trtllm_engine_components(
+    rank: int,
     graph_module: GraphModule,
     argument_hint: TRTLLMArgumentHint,
     *,
@@ -235,6 +208,7 @@ def build_trtllm_engine_components(
     """Build TensorRT-LLM engine components from a graph module.
 
     Args:
+        rank (int): The rank of the engine component
         graph_module (GraphModule): The graph module to convert to TensorRT engines
         argument_hint (TRTLLMArgumentHint): Configuration for input arguments
         build_config (TRTLLMBuildConfig): Configuration for building TensorRT-LLM engines
@@ -249,49 +223,48 @@ def build_trtllm_engine_components(
             - TRTLLMEngineConfig | bytes | dict[str, torch.Tensor]: Either the engine configuration, serialized engine
                 bytes, or Lora state dicts.
     """
-    for rank, graph_module_per_rank in parallelize(graph_module, argument_hint):
-        if rank == 0:
-            yield (
-                "config.json",
-                generate_trtllm_engine_config(
-                    graph_module_per_rank,
-                    build_config,
-                    argument_hint.mapping,
-                    architecture=network_name,
-                ),
-            )
-            if (
-                lora_state_dicts := verify(
-                    graph_module_per_rank.meta.pop("lora_state_dicts", {}),
-                    as_type=dict[int, dict[str, torch.Tensor]],
-                )
-            ) and (
-                peft_configs := verify(
-                    graph_module_per_rank.meta.pop("peft_configs", {}),
-                    as_type=dict[int, LoraConfig],
-                )
-            ):
-                for lora_task_uid, state_dict in lora_state_dicts.items():
-                    yield f"lora/{lora_task_uid}/adapter_model.safetensors", state_dict
-                for lora_task_uid, lora_config in peft_configs.items():
-                    yield f"lora/{lora_task_uid}/adapter_config.json", lora_config
-        logger.opt(lazy=True).debug("Memory Footprint: {m}", m=get_memory_footprint)
-        save_for_debug(f"graph_module_rank{rank}", graph_module_per_rank)
-        logger.info(
-            "Building TensorRT engine{for_rank}",
-            for_rank=f" for rank {rank}" if argument_hint.mapping.world_size > 1 else "",
-        )
+    if rank == 0:
         yield (
-            f"rank{rank}.engine",
-            convert(
-                graph_module_per_rank,
-                argument_hint,
-                trt_config or TensorRTConfig(),
-                engine_cache=engine_cache,
-                network_name=network_name,
-                debug_node_names=debug_node_names,
+            "config.json",
+            generate_trtllm_engine_config(
+                graph_module,
+                build_config,
+                argument_hint.mapping,
+                architecture=network_name,
             ),
         )
+        if (
+            lora_state_dicts := verify(
+                graph_module.meta.pop("lora_state_dicts", {}),
+                as_type=dict[int, dict[str, torch.Tensor]],
+            )
+        ) and (
+            peft_configs := verify(
+                graph_module.meta.pop("peft_configs", {}),
+                as_type=dict[int, LoraConfig],
+            )
+        ):
+            for lora_task_uid, state_dict in lora_state_dicts.items():
+                yield f"lora/{lora_task_uid}/adapter_model.safetensors", state_dict
+            for lora_task_uid, lora_config in peft_configs.items():
+                yield f"lora/{lora_task_uid}/adapter_config.json", lora_config
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=get_memory_footprint)
+    save_for_debug(f"graph_module_rank{rank}", graph_module)
+    logger.info(
+        "Building TensorRT engine{for_rank}",
+        for_rank=f" for rank {rank}" if argument_hint.mapping.world_size > 1 else "",
+    )
+    yield (
+        f"rank{rank}.engine",
+        convert(
+            graph_module,
+            argument_hint,
+            trt_config or TensorRTConfig(),
+            engine_cache=engine_cache,
+            network_name=network_name,
+            debug_node_names=debug_node_names,
+        ),
+    )
 
 
 def save_component(
