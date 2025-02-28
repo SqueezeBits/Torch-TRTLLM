@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .remote_transformers import apply_model_specific_patch
 from .torch import patch_modulelist_getitem
 from .transformers import patch_attention_mask_converter_make_causal_mask
 
