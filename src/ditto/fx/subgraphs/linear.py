@@ -210,3 +210,12 @@ class Linear(Subgraph):
     def lora_prefix(self) -> LoraPluginInputPrefix | None:
         """The LoRA prefix associated with this linear layer."""
         return verify(self.mm.meta.get(LORA_PREFIX), as_type=LoraPluginInputPrefix)
+
+    def mark_as_shared_expert(self) -> None:
+        """Mark this linear layer as a shared expert layer.
+
+        This sets a metadata flag indicating that this linear layer is used as a shared expert
+        across multiple MoE layers in the model. It's used to discriminate linear layers in shared experts
+        from normal linear layers.
+        """
+        self.mm.meta["is_shared_expert"] = True

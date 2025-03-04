@@ -232,6 +232,48 @@ class TrailingReformatPath(Path):
             return node_type.configure_from(TrailingReformatPath.configure_from(node, break_if=break_if).top)
         return node_type.specialize_from(TrailingReformatPath.configure_from(node, break_if=break_if).top)
 
+    @classmethod
+    def get_parents(cls, node: Node) -> list[Node]:
+        """Get parent nodes, skipping over reformat operations.
+
+        This method recursively traverses up the graph to find parent nodes, skipping over any
+        reformat operations (like transpose, reshape, etc) to find the true parent computation nodes.
+
+        Args:
+            node (Node): The node to get parents for.
+
+        Returns:
+            list[Node]: List of parent nodes, excluding reformat operations.
+        """
+        results = []
+        for parent in get_parents(node):
+            if parent.target not in cls.get_reformat_targets():
+                results.append(parent)
+            else:
+                results.extend(cls.get_parents(parent))
+        return results
+
+    @classmethod
+    def get_users(cls, node: Node) -> list[Node]:
+        """Get user nodes, skipping over reformat operations.
+
+        This method recursively traverses down the graph to find user nodes, skipping over any
+        reformat operations (like transpose, reshape, etc) to find the true user computation nodes.
+
+        Args:
+            node (Node): The node to get users for.
+
+        Returns:
+            list[Node]: List of user nodes, excluding reformat operations.
+        """
+        results = []
+        for user in node.users:
+            if user.target not in cls.get_reformat_targets():
+                results.append(user)
+            else:
+                results.extend(cls.get_users(user))
+        return results
+
 
 T = TypeVar("T")
 

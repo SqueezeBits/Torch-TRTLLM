@@ -96,6 +96,7 @@ class Expert(Subgraph):
         return unused_nodes
 
 
+# pylint: disable=too-many-locals
 class MoESubgraph(Subgraph):
     """A Mixture of Experts (MoE) layer subgraph.
 
@@ -185,7 +186,7 @@ class MoESubgraph(Subgraph):
         if not (expert := Expert.find_nearest(one_hot.eq.node, follow_parent=False)):
             raise NotImplementedError(f"Unsupported expert graph found from: {one_hot.eq.node}")
 
-        experts = []
+        experts: list[Expert] = []
         unused_nodes = set()
         for expert_entry in expert.entry_node.this.users:
             if not (expert := Expert.configure_from(expert_entry)):
@@ -199,9 +200,11 @@ class MoESubgraph(Subgraph):
         else:
             expert_hidden_states = gate.mm
 
-        shared_experts = []
-        for user in expert_hidden_states.this.users:
-            if user == expert_hidden_states.node:
+        shared_experts: list[tuple[Linear, Linear, Linear]] = []
+        assert len(TrailingReformatPath.get_parents(expert_hidden_states.this)) == 1
+        common_hidden_states = TrailingReformatPath.get_parents(expert_hidden_states.this)[0]
+        for user in TrailingReformatPath.get_users(common_hidden_states):
+            if user == gate.mm.node or len(user.all_input_nodes[0].users) == len(experts):
                 continue
             if not (
                 Linear.configure_from(user)
@@ -209,7 +212,11 @@ class MoESubgraph(Subgraph):
                 and (down_proj := Linear.find_nearest(gated_mlp.mul.node, follow_parent=False))
             ):
                 continue
-            shared_experts.append((gated_mlp.up_proj, gated_mlp.gate_proj, down_proj))
+            if len(shared_experts) > 0 and down_proj in [down for _, _, down in shared_experts]:
+                continue
+            for linear in (linears := (gated_mlp.up_proj, gated_mlp.gate_proj, down_proj)):
+                linear.mark_as_shared_expert()
+            shared_experts.append(linears)
 
         router_logits = softmax.this
         experts.sort(key=lambda expert: expert.index)

@@ -61,7 +61,11 @@ class GatedMLP(Subgraph):
             return None
 
         if not (
-            gate_proj and up_proj.input_node == gate_proj.input_node and up_proj.add is None and gate_proj.add is None
+            gate_proj
+            and up_proj
+            and up_proj.input_node == gate_proj.input_node
+            and up_proj.add is None
+            and gate_proj.add is None
         ):
             return None
 

@@ -150,7 +150,11 @@ def get_intermediate_size(graph_module: GraphModule) -> int:
     """
     values: set[int] = set()
     for node in graph_module.graph.nodes:
-        if (linear := Linear.configure_from(node)) and linear.lora_prefix == "mlp_4h_to_h":
+        if (
+            (linear := Linear.configure_from(node))
+            and linear.lora_prefix == "mlp_4h_to_h"
+            and not linear.mm.meta.get("is_shared_expert", False)
+        ):
             values.add(linear.in_features)
 
     if len(values) == 0:
