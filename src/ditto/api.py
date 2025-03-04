@@ -152,7 +152,7 @@ def trtllm_export(
     *,
     enable_experimental_decompositions: bool = False,
 ) -> GraphModule:
-    """Export a PyTorch model to a inlined graph module.
+    """Export a PyTorch model to an inlined graph module.
 
     This function performs several steps:
     1. Exports the PyTorch model to an exported program using torch.export

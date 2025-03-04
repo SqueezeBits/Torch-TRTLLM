@@ -63,7 +63,6 @@ from .passes import (
     RewritePowAsMul,
     RewriteReshapeAsUnsqueeze,
     RewriteSplitAsSlices,
-    StashLoraSubgraphs,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
 )
@@ -212,7 +211,6 @@ def get_trtllm_conversion_transform(
     """
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
         *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
-        StashLoraSubgraphs,
         CastRouterToFP32,
         ReplaceMoEByMoEPlugin(dtype=dtype),
         FuseQKVProjections,

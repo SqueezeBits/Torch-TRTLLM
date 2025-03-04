@@ -37,6 +37,7 @@ from .fx import (
     PropagateTensorParallelism,
     ResetCodeGen,
     ResolveDynamicReshape,
+    StashLoraSubgraphs,
     fake_tensor_prop_on_node_creation,
     get_level1_transform,
     get_optimization_transform,
@@ -110,6 +111,7 @@ def transform(
         copied_graph_module = copy_graph_module(graph_module)
         pre_custom_pass_manager = DynamoPassManager.build_from_passlist(
             [
+                StashLoraSubgraphs().as_transform(),
                 ConstantFolding().as_transform(),
                 AddTRTLLMInputs(argument_hint=argument_hint).as_transform(),
                 ResolveDynamicReshape().as_transform(),
