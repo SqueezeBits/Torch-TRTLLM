@@ -140,6 +140,9 @@ We do not support building a tensor-parallelized LoRA-enabled engine yet, but we
 │ --gather-all-logits                   --no-gather-all-logits                                                  Equivalent to `--gather-context-logits                    │
 │                                                                                                               --gather-generation-logits`.                              │
 │                                                                                                               [default: no-gather-all-logits]                           │
+│ --run-routers-in-model-dtype          --no-run-routers-in-model-dtype                                         Run linear layers for routers in MoE models in model      │
+│                                                                                                               dtype instead of FP32.                                    |
+│                                                                                                               [default: no-run-routers-in-model-dtype]                  │
 │ --help                            -h                                                                          Show this message and exit.                               │
 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```

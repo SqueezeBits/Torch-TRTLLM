@@ -21,6 +21,7 @@ from ..configs import (
     TRTLLMEngineConfig,
     TRTLLMLoraConfig,
     TRTLLMMapping,
+    TRTLLMMoEConfig,
     TRTLLMPretrainedConfig,
 )
 from ..literals import DTypeLiteral
@@ -54,6 +55,8 @@ def generate_trtllm_engine_config(
     if (lora_config := graph_module.meta.pop("lora_config", None)) is not None:
         build_config.lora_config = TRTLLMLoraConfig.model_validate(lora_config)
         build_config.plugin_config.lora_plugin = "auto"
+    if graph_module.meta.pop("moe_config", None) is not None:
+        build_config.plugin_config.moe_plugin = "auto"
     return TRTLLMEngineConfig(
         pretrained_config=generate_trtllm_pretrained_config(
             graph_module,
@@ -94,6 +97,8 @@ def generate_trtllm_pretrained_config(
     ):
         # pylint: disable-next=unsupported-assignment-operation
         pretrained_config.extra_fields["qwen_type"] = hf_config.model_type
+    if (moe_config := graph_module.meta.pop("moe_config", None)) is not None:
+        pretrained_config.moe = TRTLLMMoEConfig.model_validate(moe_config)
     return pretrained_config
 
 

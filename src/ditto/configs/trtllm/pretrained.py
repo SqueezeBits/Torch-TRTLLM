@@ -380,6 +380,32 @@ class TRTLLMQuantConfig(StrictlyTyped):
     exclude_modules: list[str] | None = None
 
 
+class TRTLLMMoEConfig(StrictlyTyped):
+    """Configuration for MoE models in TRT-LLM.
+
+    Attributes:
+        num_experts (int): Number of experts in the model.
+        shared_expert_intermediate_size (int): Size of shared expert intermediate layer.
+        top_k (int): Number of experts to route each token to.
+        normalization_mode (int): Mode for normalizing expert routing weights.
+        sparse_mixer_epsilon (float): Small constant for numerical stability in routing.
+        tp_mode (int): Tensor parallelism mode for MoE.
+        device_limited_n_group (int): Number of groups for device-limited MoE.
+        device_limited_topk_group (int): Top-k value for device-limited MoE groups.
+        device_limited_routed_scaling_factor (float): Scaling factor for device-limited routing.
+    """
+
+    num_experts: int = 0
+    shared_expert_intermediate_size: int = 0
+    top_k: int = 0
+    normalization_mode: int = 0
+    sparse_mixer_epsilon: float = 0.01
+    tp_mode: int = 0
+    device_limited_n_group: int = 0
+    device_limited_topk_group: int = 0
+    device_limited_routed_scaling_factor: float = 1.0
+
+
 class TRTLLMPretrainedConfig(StrictlyTyped):
     """Configuration for pretrained models in TRT-LLM.
 
@@ -394,6 +420,7 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
         intermediate_size (int): Size of intermediate layers
         mapping (TRTLLMMapping): Parallel mapping configuration. Defaults to TRTLLMMapping().
         quantization (TRTLLMQuantConfig | None): Quantization configuration. Defaults to None.
+        moe (TRTLLMMoEConfig | None): MoE configuration. Defaults to None.
         extra_fields (dict[str, Any]): Additional configuration fields. Defaults to empty dict.
     """
 
@@ -407,6 +434,7 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
     intermediate_size: int
     mapping: TRTLLMMapping = Field(default_factory=TRTLLMMapping)
     quantization: TRTLLMQuantConfig | None = None
+    moe: TRTLLMMoEConfig | None = Field(default=None, exclude=lambda v: v is None)
     extra_fields: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
     @model_serializer(mode="wrap")

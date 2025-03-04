@@ -181,6 +181,9 @@ def build(
     gather_all_logits: Annotated[
         bool, Option(help="Equivalent to `--gather-context-logits --gather-generation-logits`.")
     ] = False,
+    run_routers_in_model_dtype: Annotated[
+        bool, Option(help="Run linear layers for routers in MoE models in model dtype instead of FP32.")
+    ] = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
     assert not (
@@ -226,6 +229,7 @@ def build(
         logits_dtype=logits_dtype,
         gather_context_logits=gather_context_logits,
         gather_generation_logits=gather_generation_logits,
+        run_routers_in_model_dtype=run_routers_in_model_dtype,
     )
     minutes, seconds = divmod(int(time.perf_counter() - start_time), 60)
     logger.info(f"Build completed in {minutes:02d}:{seconds:02d}")

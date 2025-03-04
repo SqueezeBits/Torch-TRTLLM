@@ -31,6 +31,7 @@ from ..fx.targets import (
     GemmPlugin,
     GPTAttentionPlugin,
     LoraPlugin,
+    MixtureOfExpertsPlugin,
     Plugin,
     RecvPlugin,
     SendPlugin,
@@ -245,6 +246,34 @@ def convert_send_plugin(
     """
     assert isinstance(target, SendPlugin)
     return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="send")
+
+
+@dynamo_tensorrt_converter(
+    MixtureOfExpertsPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_mixture_of_experts_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a MixtureOfExpertsPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The MixtureOfExpertsPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, MixtureOfExpertsPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="mixture_of_experts")
 
 
 def _convert_plugin(

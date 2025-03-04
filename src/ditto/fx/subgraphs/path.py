@@ -14,7 +14,7 @@
 
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 import sys
-from typing import TypeVar
+from typing import TypeVar, overload
 
 import torch
 from torch._ops import OpOverload
@@ -103,6 +103,8 @@ def get_parents(node: Node) -> list[Node]:
 
 # pylint: disable-next=invalid-name
 NodeType = TypeVar("NodeType", bound=NodeSpecialization)
+# pylint: disable-next=invalid-name
+SubgraphType = TypeVar("SubgraphType", bound=Subgraph)
 
 
 class TrailingReformatPath(Path):
@@ -186,6 +188,7 @@ class TrailingReformatPath(Path):
         return bottom_ishape.numel() // top_ishape.numel()
 
     @classmethod
+    @overload
     def traceback(
         cls,
         node_type: type[NodeType],
@@ -193,17 +196,40 @@ class TrailingReformatPath(Path):
         *,
         break_if: NodeCriterion = lambda _: False,
     ) -> NodeType | None:
+        ...
+
+    @classmethod
+    @overload
+    def traceback(
+        cls,
+        node_type: type[SubgraphType],
+        node: Node,
+        *,
+        break_if: NodeCriterion = lambda _: False,
+    ) -> SubgraphType | None:
+        ...
+
+    @classmethod
+    def traceback(
+        cls,
+        node_type: type[NodeType] | type[SubgraphType],
+        node: Node,
+        *,
+        break_if: NodeCriterion = lambda _: False,
+    ) -> NodeType | SubgraphType | None:
         """Traceback to find a specific node type in the trailing reformat path.
 
         Args:
-            node_type (type[NodeType]): The type of node to search for.
+            node_type (type[NodeType] | type[Subgraph]): The type of node or subgraph to search for.
             node (Node): The starting node for the traceback.
             break_if (NodeCriterion, optional): A function to determine when to stop tracing.
                 Defaults to a lambda that always returns False.
 
         Returns:
-            NodeType | None: The specialized node of the given type, or None if not found.
+            NodeType | Subgraph | None: The specialized node/subgraph of the given type, or None if not found.
         """
+        if issubclass(node_type, Subgraph):
+            return node_type.configure_from(TrailingReformatPath.configure_from(node, break_if=break_if).top)
         return node_type.specialize_from(TrailingReformatPath.configure_from(node, break_if=break_if).top)
 
 

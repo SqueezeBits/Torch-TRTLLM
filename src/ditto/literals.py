@@ -63,6 +63,7 @@ PassName = Literal[
     "BindUnmatchedLoraProtos",
     "CanonicalizeCopy",
     "CastMMToFP32",
+    "CastRouterToFP32",
     "ConstantFolding",
     "DecomposeAddMM",
     "DeferCast",
@@ -92,6 +93,7 @@ PassName = Literal[
     "ParallelizePipeline",
     "PopLoraPlugins",
     "PropagateTensorParallelism",
+    "ReplaceMoEByMoEPlugin",
     "ReplaceMMByGemmPlugin",
     "ReplaceSDPAByGPTAttentionPlugin",
     "ReplaceViewByReshape",
@@ -122,4 +124,14 @@ QuantAlgoLiteral = Literal[
     "FP8",
     "FP8_PER_CHANNEL_PER_TOKEN",
     "INT8",
+]
+
+LogLevelLiteral = Literal[
+    "CRITICAL",
+    "FATAL",
+    "ERROR",
+    "WARNING",
+    "INFO",
+    "DEBUG",
+    "NOTSET",
 ]

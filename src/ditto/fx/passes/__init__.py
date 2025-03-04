@@ -17,6 +17,7 @@ from .bind_unmatched_lora_protos import BindUnmatchedLoraProtos
 from .canonicalize_copy import CanonicalizeCopy
 from .cast_mm_to_fp32 import CastMMToFP32
 from .cast_output_logits import CastOutputLogits
+from .cast_router_to_fp32 import CastRouterToFP32
 from .constant_folding import ConstantFolding
 from .decompose_addmm import DecomposeAddMM
 from .defer_cast import DeferCast
@@ -47,6 +48,7 @@ from .parallelize_pipeline import ParallelizePipeline
 from .pop_lora_plugins import PopLoraPlugins
 from .propagate_tensor_parallelism import PropagateTensorParallelism
 from .replace_mm_by_gemm_plugin import ReplaceMMByGemmPlugin
+from .replace_moe_by_mixture_of_experts_plugin import ReplaceMoEByMoEPlugin
 from .replace_sdpa_by_gpt_attention_plugin import ReplaceSDPAByGPTAttentionPlugin
 from .replace_view_by_reshape import ReplaceViewByReshape
 from .reset_code_gen import ResetCodeGen

@@ -12,12 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, TypeVar
+from typing import Any
 
 import numpy as np
 import tensorrt as trt
 import torch
-from loguru import logger
 from pydantic import Field, PrivateAttr
 from tensorrt_llm.functional import (
     AttentionMaskType,
@@ -36,6 +35,7 @@ from ...debug import open_debug_artifact
 from ...types import StrictlyTyped
 from .fake_tensor_mode import is_in_fake_tensor_mode
 from .plugin import Plugin
+from .utils import lookup_attributes
 
 
 class Llama3ScalingConfig(StrictlyTyped):
@@ -379,39 +379,6 @@ class ROPEConfig(StrictlyTyped):
         with open_debug_artifact("rope_config.json") as f:
             if f:
                 f.write(self.model_dump_json(indent=2))
-
-
-T = TypeVar("T")
-
-
-def lookup_attributes(
-    pretrained_config: PretrainedConfig | None,
-    *names: str,
-    default: T,
-    not_found_ok: bool = False,
-) -> T:
-    """Look up attributes from a pretrained config, falling back to default if not found.
-
-    Args:
-        pretrained_config (PretrainedConfig | None): Config object to look up attributes from. Defaults to None.
-        *names (str): Attribute names to search for
-        default (T): Default value to return if attributes not found
-        not_found_ok (bool): If True, suppress warning when attributes not found. Defaults to False.
-
-    Returns:
-        T: Found attribute value or default if not found
-    """
-    if pretrained_config is None:
-        return default
-    for name in names:
-        if hasattr(pretrained_config, name):
-            return getattr(pretrained_config, name)
-    if not not_found_ok:
-        logger.warning(
-            "None of the following attributes are found in pretrained config. "
-            f"Will use the default value {default}: {', '.join(names)}"
-        )
-    return default
 
 
 class GPTAttentionPlugin(Plugin):
