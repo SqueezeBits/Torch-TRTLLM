@@ -55,7 +55,7 @@ def generate_trtllm_engine_config(
     if (lora_config := graph_module.meta.pop("lora_config", None)) is not None:
         build_config.lora_config = TRTLLMLoraConfig.model_validate(lora_config)
         build_config.plugin_config.lora_plugin = "auto"
-    if graph_module.meta.pop("moe_config", None) is not None:
+    if graph_module.meta.get("moe_config", None) is not None:
         build_config.plugin_config.moe_plugin = "auto"
     return TRTLLMEngineConfig(
         pretrained_config=generate_trtllm_pretrained_config(
