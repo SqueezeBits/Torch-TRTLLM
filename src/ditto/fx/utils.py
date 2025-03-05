@@ -22,6 +22,7 @@ from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
 
 from ..contexts import detailed_sym_node_str
+from ..types import NodeCriterion
 
 
 def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
@@ -287,3 +288,42 @@ def find_output_node(graph_or_graph_module: Graph | GraphModule) -> Node:
         raise RuntimeError("Graph contains either multiple output nodes or no output nodes")
 
     return output_node
+
+
+def find_nearest_node(
+    node: Node,
+    criterion: NodeCriterion,
+    *,
+    follow_parents: bool = True,
+    follow_first_only: bool = False,
+) -> Node | None:
+    """Find the nearest node in the graph that matches the criterion.
+
+    Args:
+        node (Node): The starting node to search from
+        criterion (NodeCriterion): The criterion to match
+        follow_parents (bool, optional): Whether to follow parent nodes. Defaults to True
+        follow_first_only (bool, optional): Whether to follow only the first node in the parent or child list.
+            Defaults to False
+
+    Returns:
+        Node | None: The nearest node that matches the criterion or None if no such node is found
+    """
+    seen_nodes: set[Node] = set()
+    queue: list[Node] = [node]
+
+    while queue:
+        n = queue.pop(0)
+        if n in seen_nodes:
+            continue
+        seen_nodes.add(n)
+        if criterion(n):
+            return n
+        if not (next_nodes := list(n.all_input_nodes if follow_parents else n.users)):
+            continue
+        if follow_first_only:
+            queue.append(next_nodes[0])
+        else:
+            queue.extend(next_nodes)
+
+    return None

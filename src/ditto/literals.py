@@ -83,6 +83,7 @@ PassName = Literal[
     "FuseConsecutiveSliceConcat",
     "FuseConsecutiveSplitConcat",
     "FuseConsecutiveToCopys",
+    "FuseDequantizes",
     "FuseGatedMLPProjections",
     "FuseQKVProjections",
     "FuseReciprocalMul",
@@ -95,6 +96,7 @@ PassName = Literal[
     "PropagateTensorParallelism",
     "ReplaceMoEByMoEPlugin",
     "ReplaceMMByGemmPlugin",
+    "ReplaceQMMByQGemmPlugin",
     "ReplaceSDPAByGPTAttentionPlugin",
     "ReplaceViewByReshape",
     "ResetCodeGen",
@@ -103,6 +105,7 @@ PassName = Literal[
     "RewriteReshapeAsUnsqueeze",
     "RewriteSplitAsSlices",
     "StashLoraSubgraphs",
+    "WrapQuantSubgraphs",
     "WrapRoPESubgraphs",
     "WrapSDPASubgraphs",
 ]

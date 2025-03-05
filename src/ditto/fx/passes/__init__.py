@@ -37,6 +37,7 @@ from .fuse_consecutive_reshapes import FuseConsecutiveReshapes
 from .fuse_consecutive_slice_concat import FuseConsecutiveSliceConcat
 from .fuse_consecutive_split_concat import FuseConsecutiveSplitConcat
 from .fuse_consecutive_to_copys import FuseConsecutiveToCopys
+from .fuse_dequantizes import FuseDequantizes
 from .fuse_gated_mlp_projections import FuseGatedMLPProjections
 from .fuse_qkv_projections import FuseQKVProjections
 from .fuse_reciprocal_mul import FuseReciprocalMul
@@ -49,6 +50,7 @@ from .pop_lora_plugins import PopLoraPlugins
 from .propagate_tensor_parallelism import PropagateTensorParallelism
 from .replace_mm_by_gemm_plugin import ReplaceMMByGemmPlugin
 from .replace_moe_by_mixture_of_experts_plugin import ReplaceMoEByMoEPlugin
+from .replace_qmm_by_qgemm_plugin import ReplaceQMMByQGemmPlugin
 from .replace_sdpa_by_gpt_attention_plugin import ReplaceSDPAByGPTAttentionPlugin
 from .replace_view_by_reshape import ReplaceViewByReshape
 from .reset_code_gen import ResetCodeGen
@@ -59,5 +61,6 @@ from .rewrite_pow_as_mul import RewritePowAsMul
 from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
 from .rewrite_split_as_slices import RewriteSplitAsSlices
 from .stash_lora_subgraphs import StashLoraSubgraphs
+from .wrap_quant_subgraphs import WrapQuantSubgraphs
 from .wrap_rope_subgraphs import WrapRoPESubgraphs
 from .wrap_sdpa_subgraphs import WrapSDPASubgraphs

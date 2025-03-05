@@ -46,6 +46,7 @@ from .passes import (
     FuseConsecutiveSliceConcat,
     FuseConsecutiveSplitConcat,
     FuseConsecutiveToCopys,
+    FuseDequantizes,
     FuseGatedMLPProjections,
     FuseQKVProjections,
     FuseReciprocalMul,
@@ -55,6 +56,7 @@ from .passes import (
     PopLoraPlugins,
     ReplaceMMByGemmPlugin,
     ReplaceMoEByMoEPlugin,
+    ReplaceQMMByQGemmPlugin,
     ReplaceSDPAByGPTAttentionPlugin,
     ReplaceViewByReshape,
     ResolveDynamicReshape,
@@ -215,6 +217,7 @@ def get_trtllm_conversion_transform(
         ReplaceMoEByMoEPlugin(dtype=dtype),
         FuseQKVProjections,
         FuseGatedMLPProjections,
+        FuseDequantizes,
         WrapRoPESubgraphs,
         RewriteIndexAsSingleSlice,
         ReplaceSDPAByGPTAttentionPlugin(
@@ -225,6 +228,7 @@ def get_trtllm_conversion_transform(
         IndexLayers,
         BindUnmatchedLoraProtos,
         PopLoraPlugins(argument_hint=argument_hint),
+        ReplaceQMMByQGemmPlugin(model_dtype=dtype),
         ReplaceMMByGemmPlugin,
         CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]

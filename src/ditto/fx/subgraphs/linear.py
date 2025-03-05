@@ -23,7 +23,7 @@ from typing_extensions import Self
 from ...literals import LoraPluginInputPrefix
 from ...types import verify
 from ..metadata_keys import FREE_LORA_PROTO, LAYER_INDEX, LORA_PREFIX, LORA_PROTOS
-from ..nodes import MM, AddTensorTensor, Gemm, Reshape
+from ..nodes import MM, AddTensorTensor, Gemm, Reshape, WeightOnlyGroupwiseQuantMatmul, WeightOnlyQuantMatmul
 from ..targets import LoraProto
 from ..utils import get_val
 from .subgraph import Subgraph
@@ -44,7 +44,7 @@ class Linear(Subgraph):
         add (AddTensor | None): The bias addition operation node, if present
     """
 
-    mm: MM | Gemm
+    mm: MM | Gemm | WeightOnlyGroupwiseQuantMatmul | WeightOnlyQuantMatmul
     add: AddTensorTensor | None
 
     @property
@@ -139,7 +139,12 @@ class Linear(Subgraph):
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
         if not (
-            (mm := MM.specialize_from(node) or Gemm.specialize_from(node))
+            (
+                mm := MM.specialize_from(node)
+                or Gemm.specialize_from(node)
+                or WeightOnlyGroupwiseQuantMatmul.specialize_from(node)
+                or WeightOnlyQuantMatmul.specialize_from(node)
+            )
             and (input_node := get_val(mm.this, torch.Tensor)) is not None
             and (weight := get_val(mm.other, torch.Tensor)) is not None
             and input_node.ndim == 2

@@ -90,6 +90,7 @@ class GlobalQuantConfig(StrictlyTyped):
                 bits=quantization_config.bits,
                 symmetric=None,
                 group_size=quantization_config.group_size,
+                has_zero_point=quantization_config.zero_point,
             )
 
         raise RuntimeError(f"Unsupported quantization algorithm: {quantization_config}")
@@ -185,7 +186,7 @@ def unpack_qzeros(tensor: torch.Tensor, bits: int, quant_method: QuantizationMet
         if bits == 4:
             tensor = unpack_int32_into_int8(tensor, quant_method is QuantizationMethod.AWQ)
         else:
-            tensor = tensor.view(torch.uint8)
+            tensor = tensor.view(torch.int8)
         tensor = -tensor + 2 ** (bits - 1) - 1 * (quant_method is QuantizationMethod.GPTQ)
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
