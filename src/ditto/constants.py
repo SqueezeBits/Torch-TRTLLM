@@ -59,7 +59,7 @@ try:
         if DEBUG_ARTIFACTS_DIR is not None:
             DEFAULT_TRT_PROFILING_VERBOSITY = trt.ProfilingVerbosity.DETAILED
             logger.info(
-                "Automatically setting 'DEFAULT_TRT_PROFILING_VERBOSITY' to 'DETAILED' as 'DEBUG_ARTIFACT_DIR' is set."
+                "Automatically setting 'DEFAULT_TRT_PROFILING_VERBOSITY' to 'DETAILED' as 'DEBUG_ARTIFACTS_DIR' is set."
             )
 except KeyError as e:
     raise ValueError(
