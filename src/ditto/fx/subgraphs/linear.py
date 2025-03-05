@@ -24,7 +24,7 @@ from ...literals import LoraPluginInputPrefix
 from ...types import verify
 from ..metadata_keys import FREE_LORA_PROTO, LAYER_INDEX, LORA_PREFIX, LORA_PROTOS
 from ..nodes import MM, AddTensorTensor, Gemm, Reshape, WeightOnlyGroupwiseQuantMatmul, WeightOnlyQuantMatmul
-from ..targets import LoraProto
+from ..targets import Dequantize, LoraProto
 from ..utils import get_val
 from .subgraph import Subgraph
 
@@ -215,3 +215,8 @@ class Linear(Subgraph):
     def lora_prefix(self) -> LoraPluginInputPrefix | None:
         """The LoRA prefix associated with this linear layer."""
         return verify(self.mm.meta.get(LORA_PREFIX), as_type=LoraPluginInputPrefix)
+
+    @property
+    def has_weight_quantization(self) -> bool:
+        """Whether the weight has quantization."""
+        return isinstance(self.mm.other.target, Dequantize)
