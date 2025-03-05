@@ -44,11 +44,34 @@ pip install git+https://github.com/SqueezeBits/Torch-TRTLLM.git@latest --extra-i
 ### III. Using Triton Inference Server
 **Tested with nvcr.io/nvidia/tritonserver:24.12-trtllm-python-py3**
 
-As NGC triton server docker image comes with tensorrt-llm with broken dependencies, make sure to uninstall it before installing Ditto.
+As NGC triton server docker image comes with broken dependencies, make sure to install and use Ditto in virtual envrionment.
+However, when using the Ditto built engine built with triton server, make sure to deactivate the virtual environment so that the system can refer to it's preinstalled dependencies.
 
+#### 1. Install python venv
 ```
-pip uninstall tensorrt_llm -y
+apt update && apt install python3-venv -y
+```
+
+#### 2. Create and activate the virtual envrionment
+```
+python3 -m venv ditto
+source ditto/bin/activate
+```
+
+#### 3. Install Ditto in the virtual environment
+```
 pip install git+https://github.com/SqueezeBits/Torch-TRTLLM.git@latest --extra-index-url https://pypi.nvidia.com
+```
+
+#### 4. Build engine with Ditto
+```
+ditto build  <model-id-or-hf-model-directory>
+```
+
+#### 5. Deactivate the venv when using the engine
+```
+deactivate
+do sth with the engine
 ```
 
 ### IIII. Using Ditto Docker Image
