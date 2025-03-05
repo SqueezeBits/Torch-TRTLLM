@@ -22,7 +22,7 @@ from ...constants import INPUT_IDS
 from ...types import DataType
 from ..nodes import AddTensorTensor, BinaryElementwise, SymSizeInt, Unsqueeze
 from ..targets import GPTAttentionPlugin, RecvPlugin, SendPlugin
-from ..utils import find_closest_common_descendant, get_val
+from ..utils import find_closest_common_descendant, find_nearest_node, get_val
 from .infra import (
     GraphOptimizationPass,
     PassResult,
@@ -130,28 +130,13 @@ def find_input_node_of_pipeline(node: Node) -> Node | None:
     Returns:
         Node | None: The input node in the pipeline or None if no such node is found
     """
-
-    def find_nearest_add_node() -> Node | None:
-        """Find the nearest succeeding add node in the graph.
-
-        Returns:
-            Node | None: The nearest add node in the graph or None if no such node is found
-        """
-        visited: set[Node] = set()
-        queue: list[Node] = [node]
-        while queue:
-            current = queue.pop(0)
-            if current in visited:
-                continue
-            visited.add(current)
-            if (add := AddTensorTensor.specialize_from(current)) and add.this.op == add.other.op == "call_function":
-                return current
-            if current.users:
-                queue.extend(current.users)
-
-        return None
-
-    if not (expected_output_node := find_nearest_add_node()):
+    if not (
+        expected_output_node := find_nearest_node(
+            node,
+            lambda n: (add := AddTensorTensor.specialize_from(n)) and add.this.op == add.other.op == "call_function",
+            follow_parents=False,
+        )
+    ):
         return None
     visited: set[Node] = set()
     queue: list[Node] = [node]
