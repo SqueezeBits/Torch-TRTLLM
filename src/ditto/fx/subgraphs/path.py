@@ -172,7 +172,7 @@ class TrailingReformatPath(Path):
 
         Calculated as the ratio of the number of elements in the bottom-most and top-most nodes.
         """
-        if not self.reformats:
+        if not self.reformats or not self.expands:
             return 1
         if not (
             (bottom := get_tensor_metadata(self.bottom))
