@@ -19,4 +19,5 @@ from .node_specialization import NodeSpecialization
 from .operator import GetItem
 from .placeholder import Placeholder
 from .plugins import Gemm, GPTAttention
+from .rope import Rope
 from .scaled_dot_product_attention import ScaledDotProductAttention
