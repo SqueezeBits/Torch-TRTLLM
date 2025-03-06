@@ -20,8 +20,8 @@ from torch.fx import Graph, GraphModule, Node
 
 from ...configs import TRTLLMMapping
 from ...types import DataType
-from ..nodes import Embedding, Expand, GetAttr, Permute, Reshape
-from ..subgraphs import Linear
+from ..nodes import Embedding, Expand, GetAttr, Permute, Reshape, Slice
+from ..subgraphs import FusedLinear, Linear
 from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs
 from ..utils import forget_all_descendant_fake_tensors, get_val
 from .infra import (
@@ -53,12 +53,20 @@ class ParallelizeLinear(GraphOptimizationPass):
         graph = graph_module.graph
         lm_head = Linear.find_last(graph)
         for node in graph.nodes:
-            if not (linear := Linear.configure_from(node)):
+            if not ((fused_linear := FusedLinear.configure_from(node)) or (linear := Linear.configure_from(node))):
                 continue
 
+            linear = fused_linear.linear if fused_linear else linear
             tp_type = node.meta.get("tp_type", TensorParallelType.NONE)
             if tp_type == TensorParallelType.COLUMN:
-                self.parallelize_column_linear(linear, gather_output=linear == lm_head)
+                slice_dim: list[int] | None = None
+                if fused_linear:
+                    slice_dim = [0]
+                    for slice_node in fused_linear.slices:
+                        slice_dim.append(slice_node.end)
+                        self.parallelize_slice(slice_node)
+
+                self.parallelize_column_linear(linear, slice_dim=slice_dim, gather_output=linear == lm_head)
             elif tp_type == TensorParallelType.ROW:
                 self.parallelize_row_linear(linear)
 
@@ -68,31 +76,23 @@ class ParallelizeLinear(GraphOptimizationPass):
             # resolve reformatting nodes
             embedding: Embedding | None = None
             for node in graph.nodes:
-                if not (
-                    (reshape := Reshape.specialize_from(node) or Expand.specialize_from(node))
-                    and node.meta.get("tp_type", TensorParallelType.NONE) != TensorParallelType.NONE
-                ):
+                if node.meta.get("tp_type", TensorParallelType.NONE) == TensorParallelType.NONE:
                     embedding = embedding or Embedding.specialize_from(node)
                     continue
-                assert reshape.shape.count(-1) == 1, "reshape and expand node must have exactly one dynamic dimension"
 
-                dynamic_dim_idx = reshape.shape.index(-1)
-                if dynamic_dim_idx == 0 and len(reshape.shape) == 2:
-                    shard_dim_idx = 1
-                elif dynamic_dim_idx == 1 and len(reshape.shape) in [3, 4]:
-                    shard_dim_idx = 2
-                elif dynamic_dim_idx == 2 and len(reshape.shape) in [3, 4]:
-                    shard_dim_idx = 1 if len(reshape.shape) == 4 else 0
-                elif dynamic_dim_idx == 3 and len(reshape.shape) == 5:
-                    shard_dim_idx = 1
-                else:
-                    raise ValueError(f"unexpected shape of reformatting node: {reshape.shape}")
+                if reshape := Reshape.specialize_from(node) or Expand.specialize_from(node):
+                    assert (
+                        reshape.shape.count(-1) == 1
+                    ), "reshape and expand node must have exactly one dynamic dimension"
 
-                new_shape = list(reshape.shape)
-                new_shape[shard_dim_idx] = new_shape[shard_dim_idx] // self.mapping.tp_size
-                args, kwargs = reshape.args_kwargs(shape=new_shape)
-                reshape.node.args = args
-                reshape.node.kwargs = kwargs
+                    shard_dim_idx = get_shard_dim_idx(reshape)
+
+                    new_shape = list(reshape.shape)
+                    new_shape[shard_dim_idx] = new_shape[shard_dim_idx] // self.mapping.tp_size
+                    args, kwargs = reshape.args_kwargs(shape=new_shape)
+                    reshape.node.args = args
+                    reshape.node.kwargs = kwargs
+
             assert embedding is not None, "embedding node not found"
             forget_all_descendant_fake_tensors(embedding.node)
 
@@ -115,38 +115,50 @@ class ParallelizeLinear(GraphOptimizationPass):
         self,
         linear: Linear,
         *,
+        slice_dim: list[int] | None = None,
         gather_output: bool = True,
     ) -> None:
         """Parallelize the linear subgraph in column direction.
 
         Args:
             linear (Linear): The linear subgraph to be parallelized
+            slice_dim (list[int], optional): The dimension to slice. Defaults to None.
             gather_output (bool, optional): Whether to gather the output. Defaults to True.
         """
         if not (weight := GetAttr.specialize_from(linear.weight_node)):
             return
+        weight_tensor = weight.tensor
         local_out_features = linear.out_features // self.mapping.tp_size
         if linear.has_transposed_weight:
-            parallelized_weight_tensor = weight.tensor[
-                local_out_features * self.mapping.tp_rank : local_out_features * (self.mapping.tp_rank + 1), :
-            ]
+            weight_tensor = weight_tensor.T
+
+        if slice_dim:
+            parallelized_weight_tensor = torch.concat(
+                [
+                    weight_tensor[
+                        :,
+                        slice_dim[i]
+                        + (slice_dim[i + 1] - slice_dim[i])
+                        // self.mapping.tp_size
+                        * self.mapping.tp_rank : slice_dim[i]
+                        + (slice_dim[i + 1] - slice_dim[i]) // self.mapping.tp_size * (self.mapping.tp_rank + 1),
+                    ]
+                    for i in range(len(slice_dim) - 1)
+                ],
+                dim=1,
+            )
         else:
-            parallelized_weight_tensor = weight.tensor[
+            parallelized_weight_tensor = weight_tensor[
                 :, local_out_features * self.mapping.tp_rank : local_out_features * (self.mapping.tp_rank + 1)
             ]
 
-        assert (
-            parallelized_weight_tensor.shape
-            == (
-                local_out_features,
-                linear.in_features,
-            )
-            if linear.has_transposed_weight
-            else (
-                linear.in_features,
-                local_out_features,
-            )
+        assert parallelized_weight_tensor.shape == (
+            linear.in_features,
+            local_out_features,
         ), "unexpected shape of parallelized weight"
+
+        if linear.has_transposed_weight:
+            parallelized_weight_tensor = parallelized_weight_tensor.T
 
         graph = weight.node.graph
         with graph.inserting_before(weight.node):
@@ -162,9 +174,24 @@ class ParallelizeLinear(GraphOptimizationPass):
             and linear.add is not None
             and (bias := GetAttr.specialize_from(linear.bias_node))
         ):
-            parallelized_bias_tensor = bias.tensor[
-                local_out_features * self.mapping.tp_rank : local_out_features * (self.mapping.tp_rank + 1)
-            ]
+            if slice_dim:
+                parallelized_bias_tensor = torch.concat(
+                    [
+                        bias.tensor[
+                            slice_dim[i]
+                            + (slice_dim[i + 1] - slice_dim[i])
+                            // self.mapping.tp_size
+                            * self.mapping.tp_rank : slice_dim[i]
+                            + (slice_dim[i + 1] - slice_dim[i]) // self.mapping.tp_size * (self.mapping.tp_rank + 1),
+                        ]
+                        for i in range(len(slice_dim) - 1)
+                    ],
+                    dim=0,
+                )
+            else:
+                parallelized_bias_tensor = bias.tensor[
+                    local_out_features * self.mapping.tp_rank : local_out_features * (self.mapping.tp_rank + 1)
+                ]
 
             with graph.inserting_before(bias.node):
                 parallelized_bias = GetAttr.create(graph, self.get_name_of_attr(bias.target), parallelized_bias_tensor)
@@ -239,6 +266,18 @@ class ParallelizeLinear(GraphOptimizationPass):
             eps=eps,
         )
 
+    def parallelize_slice(self, slice_node: Slice) -> None:
+        """Parallelize the slice node.
+
+        Args:
+            slice_node (Slice): The slice node to be parallelized
+        """
+        new_start = slice_node.start // self.mapping.tp_size
+        new_end = slice_node.end // self.mapping.tp_size
+        args, kwargs = slice_node.args_kwargs(start=new_start, end=new_end)
+        slice_node.node.args = args
+        slice_node.node.kwargs = kwargs
+
 
 # [TODO] This function is only supported for 2D tensor, it should be extended to support arbitrary dimensions
 # pylint: disable-next=unused-argument
@@ -310,3 +349,27 @@ def insert_allreduce_plugin(
             plugin_inputs.model_dump(),
         )
     to.replace_all_uses_with(allreduce, delete_user_cb=lambda user: user is not allreduce)
+
+
+def get_shard_dim_idx(reshape: Reshape | Expand) -> int:
+    """Get the shard dimension index of the reshape or expand node.
+
+    Args:
+        reshape (Reshape | Expand): The reshape or expand node
+
+    Returns:
+        int: The shard dimension index
+    """
+    dynamic_dim_idx = reshape.shape.index(-1)
+    if dynamic_dim_idx == 0 and len(reshape.shape) == 2:
+        shard_dim_idx = 1
+    elif dynamic_dim_idx == 1 and len(reshape.shape) in [3, 4]:
+        shard_dim_idx = 2
+    elif dynamic_dim_idx == 2 and len(reshape.shape) in [3, 4]:
+        shard_dim_idx = 1 if len(reshape.shape) == 4 else 0
+    elif dynamic_dim_idx == 3 and len(reshape.shape) == 5:
+        shard_dim_idx = 1
+    else:
+        raise ValueError(f"unexpected shape of reformatting node: {reshape.shape}")
+
+    return shard_dim_idx
