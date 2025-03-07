@@ -20,6 +20,7 @@ from typing_extensions import Self
 
 from ...types import SymbolicInteger
 from ..nodes import MM, Gemm, IndexPut, MulTensorTensor, SelectInt, Softmax, ToCopy
+from ..utils import get_tensor_metadata
 from .gated_mlp import GatedMLP
 from .linear import Linear
 from .one_hot import OneHot
@@ -137,7 +138,10 @@ class MoESubgraph(Subgraph):
         Returns:
             int: Hidden dimension size for expert networks
         """
-        return self.expert_weights[0][0].meta["tensor_meta"].shape[0]
+        assert (
+            expert_weight := get_tensor_metadata(self.expert_weights[0][0])
+        ) is not None, "expert weight's metadata is not found"
+        return expert_weight.shape[0]
 
     @property
     def expert_inter_size(self) -> int:
@@ -146,7 +150,10 @@ class MoESubgraph(Subgraph):
         Returns:
             int: Intermediate dimension size for expert networks
         """
-        return self.expert_weights[0][0].meta["tensor_meta"].shape[1]
+        assert (
+            expert_weight := get_tensor_metadata(self.expert_weights[0][0])
+        ) is not None, "expert weight's metadata is not found"
+        return expert_weight.shape[1]
 
     @property
     def shared_expert_intermediate_size(self) -> int:
@@ -155,7 +162,10 @@ class MoESubgraph(Subgraph):
         Returns:
             int: Intermediate dimension size for the shared expert network
         """
-        return self.shared_expert_weights[0][0].meta["tensor_meta"].shape[1]
+        assert (
+            shared_expert_weight := get_tensor_metadata(self.shared_expert_weights[0][0])
+        ) is not None, "shared expert weight's metadata is not found"
+        return shared_expert_weight.shape[1]
 
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
