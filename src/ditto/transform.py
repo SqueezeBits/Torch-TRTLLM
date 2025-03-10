@@ -26,14 +26,18 @@ from torch_tensorrt.dynamo.lowering.passes import (
 from .arguments import TRTLLMArgumentHint
 from .configs import TRTLLMModelConfig
 from .contexts import ignore_symbolic_shapes_warning
-from .debug import save_for_debug
+from .debug import get_memory_footprint, save_for_debug
 from .fx import (
+    AddTRTLLMInputs,
+    ConstantFolding,
     ForgetSubmodules,
     ParallelizeLinear,
     ParallelizePipeline,
     Plugin,
     PropagateTensorParallelism,
     ResetCodeGen,
+    ResolveDynamicReshape,
+    StashLoraSubgraphs,
     fake_tensor_prop_on_node_creation,
     get_level1_transform,
     get_optimization_transform,
@@ -54,8 +58,14 @@ def transform(
     run_activations_in_model_dtype: bool = True,
     run_routers_in_model_dtype: bool = False,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
-) -> GraphModule:
+) -> Generator[tuple[int, GraphModule], None, None]:
     """Transform a PyTorch GraphModule by applying a series of optimization passes.
+
+    This function performs the following steps:
+    1. Runs the post-inlining passes
+    2. Runs the pre-custom passes for each rank
+    3. Runs the custom passes for each rank
+    4. Runs the post-custom passes for each rank
 
     Args:
         graph_module (GraphModule): The input PyTorch GraphModule to transform
@@ -71,8 +81,11 @@ def transform(
             dtype instead of FP32. Defaults to False.
 
     Returns:
-        GraphModule: The transformed PyTorch GraphModule after applying optimization passes
+        Generator[tuple[int, GraphModule], None, None]: A generator of tuples containing the rank and the transformed
+            GraphModule after applying optimization passes
     """
+    logger.opt(lazy=True).debug("Memory Footprint: {m}", m=get_memory_footprint)
+    logger.info("Optimizing the graph module")
     post_inline_pass_manager = DynamoPassManager.build_from_passlist(
         [
             ResetCodeGen().as_transform(),
@@ -93,61 +106,47 @@ def transform(
 
     save_for_debug("initial_graph_module", graph_module)
 
-    custom_pass_manager = DynamoPassManager.build_from_passlist(
-        [
-            get_optimization_transform(
-                argument_hint,
-                model_config,
-                dtype,
-                skipped_optimizers=skipped_optimizers,
-                run_matmuls_in_fp32=run_matmuls_in_fp32,
-                run_activations_in_model_dtype=run_activations_in_model_dtype,
-                run_routers_in_model_dtype=run_routers_in_model_dtype,
-            ),
-            *(extra_passes or []),
-        ]
-    )
-    logger.debug("Running custom passes")
-    with fake_tensor_prop_on_node_creation(graph_module), ignore_symbolic_shapes_warning():
-        return custom_pass_manager(graph_module)
-
-
-def parallelize(
-    graph_module: GraphModule,
-    argument_hint: TRTLLMArgumentHint,
-) -> Generator[tuple[int, GraphModule], None, None]:
-    """Parallelize the graph module.
-
-    This function is used to parallelize the graph module for each rank, and update the mapping's rank in the argument
-    hint.
-
-    Args:
-        graph_module (GraphModule): The input graph module to parallelize
-        argument_hint (TRTLLMArgumentHint): The argument hint of the parallelized graph module
-
-    Returns:
-        Generator[tuple[int, GraphModule], None, None]:
-            A generator that yields the parallelized graph module for each rank
-    """
-    if argument_hint.mapping.world_size == 1:
-        argument_hint.mapping.rank = 0
-        yield 0, graph_module
-        return
-
-    logger.info("Parallelizing the graph module")
-    save_for_debug("graph_module_before_parallelization", graph_module)
     for rank in range(argument_hint.mapping.world_size):
-        logger.debug(f"Running parallelize passes for rank {rank}")
-        copied_graph_module = copy_graph_module(graph_module)
         argument_hint.mapping.rank = rank
-        parallelize_pass_manager = DynamoPassManager()
-        if argument_hint.mapping.tp_size > 1:
-            parallelize_pass_manager.add_pass(PropagateTensorParallelism(mapping=argument_hint.mapping).as_transform())
-            parallelize_pass_manager.add_pass(ParallelizeLinear(mapping=argument_hint.mapping).as_transform())
-        if argument_hint.mapping.pp_size > 1:
-            parallelize_pass_manager.add_pass(ParallelizePipeline(argument_hint=argument_hint).as_transform())
+        copied_graph_module = copy_graph_module(graph_module)
+        pre_custom_pass_manager = DynamoPassManager.build_from_passlist(
+            [
+                StashLoraSubgraphs().as_transform(),
+                ConstantFolding().as_transform(),
+                AddTRTLLMInputs(argument_hint=argument_hint).as_transform(),
+                ResolveDynamicReshape().as_transform(),
+                PropagateTensorParallelism(mapping=argument_hint.mapping).as_transform(),
+                ParallelizeLinear(mapping=argument_hint.mapping).as_transform(),
+            ]
+        )
+        logger.debug(f"Running pre-custom passes for rank {rank}")
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
-            yield rank, parallelize_pass_manager(copied_graph_module)
+            copied_graph_module = pre_custom_pass_manager(copied_graph_module)
+
+        custom_pass_manager = DynamoPassManager.build_from_passlist(
+            [
+                get_optimization_transform(
+                    argument_hint,
+                    model_config,
+                    dtype,
+                    skipped_optimizers=skipped_optimizers,
+                    run_matmuls_in_fp32=run_matmuls_in_fp32,
+                    run_activations_in_model_dtype=run_activations_in_model_dtype,
+                    run_routers_in_model_dtype=run_routers_in_model_dtype,
+                ),
+                *(extra_passes or []),
+            ]
+        )
+        logger.debug(f"Running custom passes for rank {rank}")
+        with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
+            copied_graph_module = custom_pass_manager(copied_graph_module)
+
+        post_pass_manager = DynamoPassManager.build_from_passlist(
+            [ParallelizePipeline(argument_hint=argument_hint).as_transform()]
+        )
+        logger.debug(f"Running post-custom passes for rank {rank}")
+        with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
+            yield rank, post_pass_manager(copied_graph_module)
 
 
 def copy_graph_module(graph_module: GraphModule) -> GraphModule:
