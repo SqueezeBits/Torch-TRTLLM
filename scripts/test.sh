@@ -48,7 +48,7 @@ main() {
 
     for MODEL_SPECIFIC_ARG in "${MODEL_SPECIFIC_ARGS[@]}"; do
         echo "Testing $(echo ${MODEL_SPECIFIC_ARG} | sed 's/[[:space:]]\{2,\}/\n    /g')"
-        ${SCRIPT_DIR}/compare.sh ${MODEL_SPECIFIC_ARG} $@
+        ${SCRIPT_DIR}/compare.sh ${MODEL_SPECIFIC_ARG} --cleanup $@
     done
 }
 

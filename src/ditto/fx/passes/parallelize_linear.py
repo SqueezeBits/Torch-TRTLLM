@@ -80,7 +80,7 @@ class ParallelizeLinear(GraphOptimizationPass):
                     embedding = embedding or Embedding.specialize_from(node)
                     continue
 
-                if reshape := Reshape.specialize_from(node) or Expand.specialize_from(node):
+                if (reshape := Reshape.specialize_from(node) or Expand.specialize_from(node)) and -1 in reshape.shape:
                     assert (
                         reshape.shape.count(-1) == 1
                     ), "reshape and expand node must have exactly one dynamic dimension"
