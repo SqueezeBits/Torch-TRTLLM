@@ -12,16 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from enum import Enum, auto
 from typing import Any
 
 import torch
 from auto_gptq.nn_modules.qlinear import qlinear_cuda_old
+from compressed_tensors.config import CompressionFormat
 from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
 from tensorrt_llm.quantization.functional import unpack_int32_into_int8
 from transformers import PretrainedConfig, PreTrainedModel
 from transformers.utils.quantization_config import (
     AwqConfig,
+    CompressedTensorsConfig,
     GPTQConfig,
     QuantizationConfigMixin,
     QuantizationMethod,
@@ -29,6 +32,80 @@ from transformers.utils.quantization_config import (
 from typing_extensions import Self
 
 from .types import StrictlyTyped
+
+
+class QuantizeMode(Enum):
+    """Quantization mode.
+
+    Attributes:
+        PER_TENSOR (auto): Quantization mode for the quantized tensor.
+        PER_GROUP (auto): Quantization mode for the quantized tensor.
+        PER_CHANNEL (auto): Quantization mode for the quantized tensor.
+        PER_TOKEN (auto): Quantization mode for the quantized tensor.
+        UNKNOWN (auto): Quantization mode for the quantized tensor.
+    """
+
+    PER_TENSOR = auto()
+    PER_GROUP = auto()
+    PER_CHANNEL = auto()
+    PER_TOKEN = auto()
+    UNKNOWN = auto()
+
+
+class QuantizeAlgorithm(Enum):
+    """Quantization algorithm.
+
+    Attributes:
+        PTQ (auto): Post-training quantization.
+        GPTQ (auto): GPTQ quantization.
+        AWQ (auto): AWQ quantization.
+        SMOOTHQUANT (auto): SmoothQuant quantization.
+    """
+
+    PTQ = auto()
+    GPTQ = auto()
+    AWQ = auto()
+    SMOOTHQUANT = auto()
+
+    @classmethod
+    def from_hf_quant_method(cls, hf_quant_method: QuantizationMethod) -> "QuantizeAlgorithm":
+        """Convert Hugging Face quantization method to Ditto quantization algorithm.
+
+        Args:
+            hf_quant_method (QuantizationMethod): The Hugging Face quantization method
+
+        Returns:
+            Self: The Ditto quantization algorithm
+        """
+        if hf_quant_method == QuantizationMethod.GPTQ:
+            return cls.GPTQ
+        if hf_quant_method == QuantizationMethod.AWQ:
+            return cls.AWQ
+        if hf_quant_method == QuantizationMethod.COMPRESSED_TENSORS:
+            # Note: only support PTQ for compressed tensors currently
+            return cls.PTQ
+
+        raise NotImplementedError(f"Unsupported quantization method: {hf_quant_method}")
+
+
+class QuantScheme(StrictlyTyped):
+    """Quantization scheme.
+
+    Attributes:
+        bits (int): The number of bits used for quantization.
+        mode (QuantizeMode): The quantization mode.
+        dynamic (bool): Whether the quantization is dynamic.
+        type (str | None): The type of the quantization.
+        group_size (int | None): The size of the quantization group.
+        has_zero_point (bool): Whether the quantization uses a zero point.
+    """
+
+    bits: int
+    mode: QuantizeMode
+    dynamic: bool = False
+    type: str | None = None
+    group_size: int | None = None
+    has_zero_point: bool = False
 
 
 class GlobalQuantConfig(StrictlyTyped):
@@ -40,18 +117,15 @@ class GlobalQuantConfig(StrictlyTyped):
         bits (int): The number of bits used for quantization
         trtllm_kv_cache_quant_algo (QuantAlgo | None): The quantization algorithm used by TRT-LLM for the KV cache.
             Defaults to None.
-        symmetric (bool | None): Whether the quantization is symmetric. Defaults to None.
         group_size (int | None): The size of the quantization group. Defaults to None.
         has_zero_point (bool): Whether the quantization uses a zero point. Defaults to False.
     """
 
     hf_quant_method: QuantizationMethod
     trtllm_quant_algo: QuantAlgo
-    bits: int
     trtllm_kv_cache_quant_algo: QuantAlgo | None = None
-    symmetric: bool | None = None
-    group_size: int | None = None
-    has_zero_point: bool = False
+    input_quant_scheme: QuantScheme | None = None
+    weight_quant_scheme: QuantScheme | None = None
 
     @classmethod
     def create_from(cls, pretrained_config: Any) -> Self | None:
@@ -77,20 +151,54 @@ class GlobalQuantConfig(StrictlyTyped):
             return cls(
                 hf_quant_method=quantization_config.quant_method,
                 trtllm_quant_algo=QuantAlgo.W4A16_GPTQ if quantization_config.bits == 4 else QuantAlgo.W8A16_GPTQ,
-                bits=quantization_config.bits,
-                symmetric=quantization_config.sym,
-                group_size=quantization_config.group_size,
+                input_quant_scheme=None,
+                weight_quant_scheme=QuantScheme(
+                    bits=quantization_config.bits,
+                    mode=QuantizeMode.PER_GROUP,
+                    group_size=quantization_config.group_size,
+                ),
             )
+
         if isinstance(quantization_config, AwqConfig):
             if quantization_config.bits not in (4, 8):
                 raise ValueError(f"Unsupported AWQ bits: {quantization_config.bits=}")
             return cls(
                 hf_quant_method=quantization_config.quant_method,
                 trtllm_quant_algo=QuantAlgo.W4A16_AWQ if quantization_config.bits == 4 else QuantAlgo.W8A16,
-                bits=quantization_config.bits,
-                symmetric=None,
-                group_size=quantization_config.group_size,
-                has_zero_point=quantization_config.zero_point,
+                input_quant_scheme=None,
+                weight_quant_scheme=QuantScheme(
+                    bits=quantization_config.bits,
+                    mode=QuantizeMode.PER_GROUP,
+                    group_size=quantization_config.group_size,
+                    has_zero_point=quantization_config.zero_point,
+                ),
+            )
+
+        if isinstance(quantization_config, CompressedTensorsConfig):
+            if quantization_config.quantization_config.format != CompressionFormat.float_quantized.value:
+                raise NotImplementedError()
+            assert (
+                len(configs := quantization_config.quantization_config.config_groups) == 1
+            ), "Only one config group is supported currently"
+            return cls(
+                hf_quant_method=quantization_config.quantization_config.quant_method,
+                trtllm_quant_algo=QuantAlgo.FP8,
+                input_quant_scheme=QuantScheme(
+                    bits=configs["group_0"].input_activations.num_bits,
+                    mode=QuantizeMode.UNKNOWN,
+                    dynamic=configs["group_0"].input_activations.dynamic,
+                    type=configs["group_0"].input_activations.type,
+                )
+                if hasattr(configs["group_0"], "input_activations")
+                else None,
+                weight_quant_scheme=QuantScheme(
+                    bits=configs["group_0"].weights.num_bits,
+                    mode=QuantizeMode.UNKNOWN,
+                    dynamic=configs["group_0"].weights.dynamic,
+                    type=configs["group_0"].weights.type,
+                )
+                if hasattr(configs["group_0"], "weights")
+                else None,
             )
 
         raise RuntimeError(f"Unsupported quantization algorithm: {quantization_config}")
@@ -164,6 +272,8 @@ def unpack_qweight(tensor: torch.Tensor, bits: int, quant_method: QuantizationMe
                 else tensor.view(torch.uint8).contiguous()
             )
             tensor = (tensor - 128).to(torch.int8)
+    elif quant_method == QuantizationMethod.COMPRESSED_TENSORS:
+        assert bits == 8, f"Unsupported compressed tensors bits: {bits=}"
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
 

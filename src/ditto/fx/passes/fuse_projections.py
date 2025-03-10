@@ -19,7 +19,7 @@ from torch.fx import Node
 
 from ...constants import MATMUL_FUSION_MAX_OUTPUT_SIZE
 from ...literals import LoraPluginInputPrefix
-from ..metadata_keys import LORA_PREFIX
+from ..metadata_keys import ACTIVATION_QUANT_SCALE, LORA_PREFIX
 from ..nodes import MM, AddTensor, Cat, Slice
 from ..subgraphs import Linear
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
@@ -73,9 +73,16 @@ class FuseProjections(NodewiseOptimizationPass):
             ]
             fused_param = Cat.create(graph, weight_nodes, weight_out_features_dim)
             fused_node: Node = MM.create(graph, linears[0].input_node, fused_param).node
-            fused_node.meta[LORA_PREFIX] = self.fused_lora_prefix
             nodes_to_replace = [linear.mm.node for linear in linears]
             propagate_metadata_from(*nodes_to_replace, to=fused_node)
+            fused_node.meta[LORA_PREFIX] = self.fused_lora_prefix
+            if act_scales := [
+                linear.activation_quant_scale for linear in linears if linear.activation_quant_scale is not None
+            ]:
+                assert len(act_scales) == len(linears) and all(
+                    act_scales[0].item() == act_scale.item() for act_scale in act_scales
+                )
+                fused_node.meta[ACTIVATION_QUANT_SCALE] = act_scales[0]
 
             if all(linear.bias_node is not None for linear in linears):
                 # The existing bias nodes must be recreated in order to avoid breaking topological orders.

@@ -18,16 +18,16 @@ from torch.fx import Node
 from transformers.utils.quantization_config import QuantizationMethod
 from typing_extensions import Self
 
-from ...quantization import GlobalQuantConfig, unpack_qweight, unpack_qzeros
+from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode, unpack_qweight, unpack_qzeros
 from ...types import StrictlyTyped
-from ..nodes import MM, GetAttr, MulTensorTensor
+from ..nodes import MM, GetAttr, MulTensorTensor, Permute
 from ..targets import Dequantize
 from ..utils import find_nearest_node, get_val
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class WrapQuantSubgraphs(NodewiseOptimizationPass):
-    """Match and replace fake quantization or dequantization by a single fake_quantize or fake_dequantize node.
+class WrapWeightDequantSubgraphs(NodewiseOptimizationPass):
+    """Match and replace fake dequantization by a single fake_dequantize node.
 
     This pass supports only fake dequantization currently.
 
@@ -42,6 +42,7 @@ class WrapQuantSubgraphs(NodewiseOptimizationPass):
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             self.global_quant_config is not None
+            and self.global_quant_config.weight_quant_scheme is not None
             and (mm := MM.specialize_from(node))
             and (
                 dequantize_path := TrailingDequantizePath.configure_from(
@@ -51,9 +52,12 @@ class WrapQuantSubgraphs(NodewiseOptimizationPass):
         ):
             return {}
 
-        self.global_quant_config.has_zero_point = (
-            self.global_quant_config.has_zero_point or dequantize_path.zero is not None
+        if self.global_quant_config.weight_quant_scheme.mode == QuantizeMode.UNKNOWN:
+            self.global_quant_config.weight_quant_scheme.mode = dequantize_path.quantize_mode
+        self.global_quant_config.weight_quant_scheme.has_zero_point = (
+            self.global_quant_config.weight_quant_scheme.has_zero_point or dequantize_path.zero is not None
         )
+
         unpacked_qweight = unpack_qweight(
             dequantize_path.qweight.tensor, dequantize_path.bits, self.global_quant_config.hf_quant_method
         )
@@ -62,9 +66,12 @@ class WrapQuantSubgraphs(NodewiseOptimizationPass):
             if dequantize_path.zero is not None
             else None
         )
+
         with node.graph.inserting_before(dequantize_path.qweight.node):
             unpacked_qweight_getattr = GetAttr.create(
-                node.graph, f"{dequantize_path.qweight.name}_unpacked", unpacked_qweight
+                node.graph,
+                f"{dequantize_path.qweight.name}_unpacked",
+                unpacked_qweight.T.contiguous() if dequantize_path.has_permuted_weight else unpacked_qweight,
             )
             unpacked_qzeros_getattr = (
                 GetAttr.create(node.graph, f"{dequantize_path.zero.name}_unpacked", unpacked_qzeros)
@@ -77,6 +84,8 @@ class WrapQuantSubgraphs(NodewiseOptimizationPass):
             global_quant_config=self.global_quant_config,
             output_shape=dequantize_path.org_weight_shape,
             bits=dequantize_path.bits,
+            mode=dequantize_path.quantize_mode,
+            algorithm=dequantize_path.quantize_algorithm,
             group_size=dequantize_path.group_size,
         )
         with node.graph.inserting_before(mm.other):
@@ -109,6 +118,9 @@ class TrailingDequantizePath(StrictlyTyped):
     scale: GetAttr = None
     zero: GetAttr | None = None
     group_size: int | None = None
+    has_permuted_weight: bool = False
+    quantize_mode: QuantizeMode
+    quantize_algorithm: QuantizeAlgorithm
 
     @classmethod
     def configure_from(cls, node: Node, quant_method: QuantizationMethod) -> Self | None:
@@ -136,6 +148,11 @@ class TrailingDequantizePath(StrictlyTyped):
         ):
             return None
         group_size = get_group_size(scale.tensor.shape, org_weight_tensor.shape, quant_method)
+        quantize_mode = (
+            get_quantize_mode(scale.tensor.shape, org_weight_tensor.shape, quant_method)
+            if group_size is None
+            else QuantizeMode.PER_GROUP
+        )
         qweight, zero = find_qweight_and_zero_node(
             [n for n in ancestors_with_maxdepth if n is not scale_node and GetAttr.specialize_from(n)],
             org_weight_tensor.shape,
@@ -150,6 +167,11 @@ class TrailingDequantizePath(StrictlyTyped):
             scale=scale,
             zero=zero,
             group_size=group_size,
+            has_permuted_weight=(
+                (permute := Permute.specialize_from(node)) is not None and permute.ndim == 2 and permute.dims == [1, 0]
+            ),
+            quantize_mode=quantize_mode,
+            quantize_algorithm=QuantizeAlgorithm.from_hf_quant_method(quant_method),
         )
 
 
@@ -217,6 +239,25 @@ def get_group_size(
     return None
 
 
+def get_quantize_mode(
+    scale_shape: torch.Size, org_weight_shape: torch.Size, quant_method: QuantizationMethod
+) -> QuantizeMode:
+    """Get the quantize mode for the quantized weight.
+
+    Args:
+        scale_shape (torch.Size): The shape of the scale tensor
+        org_weight_shape (torch.Size): The shape of the original weight
+        quant_method (QuantizationMethod): The quantization method used to quantize the weight
+    """
+    ndim = len(scale_shape)
+    if ndim in (0, 1):
+        return QuantizeMode.PER_TENSOR
+    if ndim == 2 and scale_shape[1 if quant_method == QuantizationMethod.COMPRESSED_TENSORS else 0] == 1:
+        return QuantizeMode.PER_CHANNEL
+
+    raise RuntimeError(f"Could not infer a quantization mode for {scale_shape=} and {org_weight_shape=}.")
+
+
 def find_qweight_and_zero_node(
     nodes: list[Node], org_weight_shape: torch.Size, quant_method: QuantizationMethod, *, group_size: int | None = None
 ) -> tuple[GetAttr, GetAttr | None]:
@@ -243,6 +284,8 @@ def find_qweight_and_zero_node(
                 break
         else:
             raise ValueError("QWeight node not found")
+        nodes.remove(qweight.node)
+
         for node in nodes:
             shape = get_val(node).shape
             if (
@@ -255,5 +298,22 @@ def find_qweight_and_zero_node(
             raise ValueError("Zero node not found")
 
         return qweight, zero
+
+    if quant_method == QuantizationMethod.COMPRESSED_TENSORS:
+        for node in nodes:
+            shape = get_val(node).shape
+            if (
+                len(shape) == 2
+                and shape[1] == org_weight_shape[0]
+                and shape[0] != 1
+                and (qweight := GetAttr.specialize_from(node))
+            ):
+                break
+        else:
+            raise ValueError("QWeight node not found")
+        nodes.remove(qweight.node)
+
+        # TODO: add zero node
+        return qweight, None
 
     raise NotImplementedError(f"Quantization for {quant_method} is not implemented yet.")

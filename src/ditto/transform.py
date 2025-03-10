@@ -28,20 +28,14 @@ from .configs import TRTLLMModelConfig
 from .contexts import ignore_symbolic_shapes_warning
 from .debug import get_memory_footprint, save_for_debug
 from .fx import (
-    AddTRTLLMInputs,
-    ConstantFolding,
     ForgetSubmodules,
-    ParallelizeLinear,
     ParallelizePipeline,
     Plugin,
-    PropagateTensorParallelism,
     ResetCodeGen,
-    ResolveDynamicReshape,
-    StashLoraSubgraphs,
-    WrapQuantSubgraphs,
     fake_tensor_prop_on_node_creation,
     get_level1_transform,
     get_optimization_transform,
+    get_preoptimization_transform,
     update_argument_hint,
 )
 from .literals import PassName
@@ -109,18 +103,14 @@ def transform(
         copied_graph_module = copy_graph_module(graph_module)
         pre_custom_pass_manager = DynamoPassManager.build_from_passlist(
             [
-                WrapQuantSubgraphs(global_quant_config=global_quant_config, dtype=dtype).as_transform(),
-                StashLoraSubgraphs().as_transform(),
-                ConstantFolding().as_transform(),
-                AddTRTLLMInputs(argument_hint=argument_hint).as_transform(),
-                ResolveDynamicReshape().as_transform(),
-                PropagateTensorParallelism(mapping=argument_hint.mapping).as_transform(),
-                ParallelizeLinear(mapping=argument_hint.mapping).as_transform(),
+                get_preoptimization_transform(argument_hint, global_quant_config, dtype),
             ]
         )
         logger.debug(f"Running pre-custom passes for rank {rank}")
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
             copied_graph_module = pre_custom_pass_manager(copied_graph_module)
+
+        save_for_debug(f"pre_optimization_graph_module_rank{rank}", copied_graph_module)
 
         custom_pass_manager = DynamoPassManager.build_from_passlist(
             [

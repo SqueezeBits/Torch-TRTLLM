@@ -19,15 +19,21 @@ from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
 from torch.fx import Node
 
-from ...quantization import inference_trtllm_quant_algo, postprocess_qweight_for_trtllm, postprocess_qzeros_for_trtllm
+from ...quantization import (
+    QuantizeMode,
+    inference_trtllm_quant_algo,
+    postprocess_qweight_for_trtllm,
+    postprocess_qzeros_for_trtllm,
+)
 from ...types import DataType
-from ..nodes import MM, GetAttr
-from ..targets import Dequantize, WeightOnlyGroupwiseQuantMatmulPlugin, WeightOnlyQuantMatmulPlugin
+from ..nodes import Dequantize, GetAttr
+from ..subgraphs import Linear
+from ..targets import WeightOnlyGroupwiseQuantMatmulPlugin, WeightOnlyQuantMatmulPlugin
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
-class ReplaceQMMByQGemmPlugin(NodewiseOptimizationPass):
-    """Replace QLinear node by plugin for quantization (required for trtllm).
+class ReplaceMMByWoGQGemmPlugin(NodewiseOptimizationPass):
+    """Replace MM node by plugin for weight-only groupwise quantization (required for trtllm).
 
     Attributes:
         model_dtype (torch.dtype): The data type of the model
@@ -37,41 +43,45 @@ class ReplaceQMMByQGemmPlugin(NodewiseOptimizationPass):
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
-            (mm := MM.specialize_from(node))
-            and isinstance(mm_output := mm.output, torch.Tensor)
-            and (isinstance(dequantize := mm.other.target, Dequantize))
-            and (unpacked_weight := GetAttr.specialize_from(mm.other.args[0]))
-            and (scale := GetAttr.specialize_from(mm.other.args[1]))
+            (linear := Linear.configure_from(node))
+            and linear.activation_quant_scale is None
+            and linear.dequantize_node is not None
+            and (dequantize := Dequantize.specialize_from(linear.dequantize_node))
+            and dequantize.target.mode == QuantizeMode.PER_GROUP
+            and (unpacked_weight := GetAttr.specialize_from(dequantize.qweight))
+            and (scale := GetAttr.specialize_from(dequantize.scale))
         ):
             return {}
 
         local_trtllm_quant_algo = inference_trtllm_quant_algo(
-            dequantize.bits, dequantize.dtype, hf_quant_method=dequantize.global_quant_config.hf_quant_method
+            dequantize.target.bits,
+            dequantize.target.dtype,
+            hf_quant_method=dequantize.target.global_quant_config.hf_quant_method,
         )
-        if dequantize.global_quant_config.trtllm_quant_algo != local_trtllm_quant_algo:
+        if dequantize.target.global_quant_config.trtllm_quant_algo != local_trtllm_quant_algo:
             logger.warning(
                 f"The quantization algorithm of the dequantize node ({local_trtllm_quant_algo}) is different from "
-                f"the global quantization algorithm ({dequantize.global_quant_config.trtllm_quant_algo}). "
+                f"the global quantization algorithm ({dequantize.target.global_quant_config.trtllm_quant_algo}). "
                 f"This is not expected and may lead to incorrect behavior."
             )
 
         postprocessed_qweight_tensor = postprocess_qweight_for_trtllm(
             unpacked_weight.tensor,
-            dequantize.bits,
-            dequantize.global_quant_config.hf_quant_method,
+            dequantize.target.bits,
+            dequantize.target.global_quant_config.hf_quant_method,
             model_dtype=self.model_dtype,
         )
         with node.graph.inserting_before(unpacked_weight.node):
             postprocessed_qweight = GetAttr.create(node.graph, unpacked_weight.name, postprocessed_qweight_tensor)
 
-        plugin_inputs: list[Node] = [mm.this, postprocessed_qweight.node, scale.node]
+        plugin_inputs: list[Node] = [linear.input_node, postprocessed_qweight.node, scale.node]
 
-        qzeros = GetAttr.specialize_from(mm.other.args[2]) if mm.other.args[2] is not None else None
+        qzeros = GetAttr.specialize_from(dequantize.zeros) if dequantize.zeros is not None else None
         if qzeros is not None:
             postprocessed_qzeros_tensor = postprocess_qzeros_for_trtllm(
                 qzeros.tensor,
-                dequantize.bits,
-                dequantize.global_quant_config.hf_quant_method,
+                dequantize.target.bits,
+                dequantize.target.global_quant_config.hf_quant_method,
                 scale=scale.tensor,
                 model_dtype=self.model_dtype,
             )
@@ -87,9 +97,9 @@ class ReplaceQMMByQGemmPlugin(NodewiseOptimizationPass):
                 QuantAlgo.W4A16_AWQ,
                 QuantAlgo.W8A16,
             ):
-                if dequantize.group_size is not None:
+                if dequantize.target.group_size is not None:
                     plugin = WeightOnlyGroupwiseQuantMatmulPlugin(
-                        type_id=DataType(mm_output.dtype).to(trt.DataType),
+                        type_id=DataType(dequantize.target.dtype).to(trt.DataType),
                         quant_algo=get_weightonly_groupwise_quant_algo(
                             False,
                             qzeros is not None,
@@ -97,19 +107,18 @@ class ReplaceQMMByQGemmPlugin(NodewiseOptimizationPass):
                             local_trtllm_quant_algo == QuantAlgo.W4A8_AWQ,
                             unpacked_weight.tensor.dtype == torch.int8,
                         ),
-                        group_size=dequantize.global_quant_config.group_size,
+                        group_size=dequantize.target.group_size,
                     )
                 else:
                     plugin = WeightOnlyQuantMatmulPlugin(
-                        type_id=DataType(mm_output.dtype).to(trt.DataType),
+                        type_id=DataType(dequantize.target.dtype).to(trt.DataType),
                         weight_type_id=DataType(postprocessed_qweight_tensor.dtype).to(trt.DataType),
                     )
             else:
-                raise NotImplementedError(
-                    f"Quantization algorithm {local_trtllm_quant_algo} is not supported currently."
-                )
+                raise ValueError(f"Wrong quantization algorithm {local_trtllm_quant_algo}.")
+
             plugin_node = node.graph.call_function(plugin, tuple(plugin_inputs))
-            propagate_metadata_from(mm, to=plugin_node)
+            propagate_metadata_from(linear.mm, to=plugin_node)
 
         return {node: ReplaceAllUses(by=plugin_node)}
 
