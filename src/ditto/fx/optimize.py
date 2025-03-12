@@ -17,6 +17,7 @@ from collections.abc import Callable
 import torch
 from loguru import logger
 from torch.fx import GraphModule
+from torch_tensorrt.dynamo.lowering.passes import constant_fold
 
 from ..arguments import TRTLLMArgumentHint
 from ..configs import TRTLLMModelConfig
@@ -29,7 +30,6 @@ from .passes import (
     CastMMToFP32,
     CastOutputLogits,
     CastRouterToFP32,
-    ConstantFolding,
     DecomposeAddMM,
     DeferCast,
     DeferUnsqueeze,
@@ -112,7 +112,7 @@ def get_optimization_transform(
             run_routers_in_model_dtype=run_routers_in_model_dtype,
         ),
         get_level2_transform(skipped_optimizers),
-        ConstantFolding().as_transform(),
+        constant_fold,
     )
 
 
