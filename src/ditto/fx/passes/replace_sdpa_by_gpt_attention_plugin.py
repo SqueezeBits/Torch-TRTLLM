@@ -23,7 +23,7 @@ from ...types import DataType, StrictlyTyped, SymbolicShape, expect_identical
 from ..nodes import GetAttr, Permute, Reshape, ScaledDotProductAttention, ToCopy
 from ..subgraphs import FusedLinear, Linear, TrailingReformatPath
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
-from ..utils import get_tensor_metadata
+from ..utils import find_nearest, get_tensor_metadata
 from .infra import GraphOptimizationPass, PassResult
 
 
@@ -201,9 +201,9 @@ class MHAConfig(StrictlyTyped):
         if not (
             q_rope.target in FAKE_ROPE_TARGETS.values()
             and k_rope.target in FAKE_ROPE_TARGETS.values()
-            and (q_proj := Linear.find_nearest(sdpa.query))
-            and (k_proj := Linear.find_nearest(sdpa.key))
-            and (v_proj := Linear.find_nearest(sdpa.value))
+            and (q_proj := find_nearest(Linear, sdpa.query))
+            and (k_proj := find_nearest(Linear, sdpa.key))
+            and (v_proj := find_nearest(Linear, sdpa.value))
             and q_proj.output_node == k_proj.output_node == v_proj.output_node
             and (fused_linear := FusedLinear.configure_from(q_proj.mm.node))
             and tuple(s.node for s in fused_linear.slices) == (q, k, v)

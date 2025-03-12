@@ -22,6 +22,7 @@ from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
 
 from ..contexts import detailed_sym_node_str
+from ..types import NodeCriterion
 
 
 def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
@@ -287,3 +288,83 @@ def find_output_node(graph_or_graph_module: Graph | GraphModule) -> Node:
         raise RuntimeError("Graph contains either multiple output nodes or no output nodes")
 
     return output_node
+
+
+# pylint: disable-next=invalid-name
+NodeType = TypeVar("NodeType", bound="NodeSpecialization")  # type: ignore # noqa: F821
+# pylint: disable-next=invalid-name
+SubgraphType = TypeVar("SubgraphType", bound="Subgraph")  # type: ignore # noqa: F821
+
+
+@overload
+# pylint: disable-next=too-many-positional-arguments
+def find_nearest(
+    node_type: type[SubgraphType],
+    from_node: Node,
+    follow_parent: bool = True,
+    follow_first_only: bool = True,
+    break_if: NodeCriterion | None = None,
+    continue_if: NodeCriterion | None = None,
+) -> SubgraphType | None:
+    ...
+
+
+@overload
+# pylint: disable-next=too-many-positional-arguments
+def find_nearest(
+    node_type: type[NodeType],
+    from_node: Node,
+    follow_parent: bool = True,
+    follow_first_only: bool = True,
+    break_if: NodeCriterion | None = None,
+    continue_if: NodeCriterion | None = None,
+) -> NodeType | None:
+    ...
+
+
+# pylint: disable-next=too-many-positional-arguments
+def find_nearest(
+    node_type: type[NodeType] | type[SubgraphType],
+    from_node: Node,
+    follow_parent: bool = True,
+    follow_first_only: bool = True,
+    break_if: NodeCriterion | None = None,
+    continue_if: NodeCriterion | None = None,
+) -> NodeType | SubgraphType | None:
+    """Find the nearest node that can be specialized to this type using breadth-first search.
+
+    Args:
+        node_type (type[NodeType]): The node specialization type to search for
+        from_node (Node): Starting node to search from
+        follow_parent (bool, optional): Whether to follow parent nodes (True) or child nodes
+            (False). Defaults to True.
+        follow_first_only (bool, optional): Whether to only follow the first connected node.
+            Defaults to True.
+        break_if (NodeCriterion | None, optional): Function that returns True to break search
+            at a node. Defaults to None.
+        continue_if (NodeCriterion | None, optional): Function that returns True to skip a node
+            but continue searching its neighbors. Defaults to None.
+
+    Returns:
+        NodeType | None: The nearest specialized node if found, otherwise None
+    """
+    if hasattr(node_type, "specialize_from"):
+        specialize_func = node_type.specialize_from
+    else:
+        specialize_func = node_type.configure_from
+    queue = [from_node]
+    while queue:
+        node = queue.pop(0)
+        if target_node := specialize_func(node):
+            return target_node
+        if break_if is not None and break_if(node):
+            break
+        if continue_if is not None and continue_if(node):
+            continue
+        if not (next_nodes := list(node.all_input_nodes if follow_parent else node.users)):
+            continue
+        if follow_first_only:
+            queue.append(next_nodes[0])
+        else:
+            queue.extend(next_nodes)
+    return None

@@ -20,6 +20,7 @@ from typing_extensions import Self
 
 from ...types import SymbolicInteger
 from ..nodes import MM, Gemm, IndexPut, MulTensorTensor, SelectInt, Softmax, ToCopy
+from ..utils import find_nearest
 from .gated_mlp import GatedMLP
 from .linear import Linear
 from .one_hot import OneHot
@@ -52,8 +53,8 @@ class Expert(Subgraph):
     def configure_from(cls, node: Node) -> Self | None:
         if not (
             (select := SelectInt.specialize_from(node))
-            and (gated_mlp := GatedMLP.find_nearest(select.node, follow_parent=False, follow_first_only=False))
-            and (down_proj := Linear.find_nearest(gated_mlp.mul.node, follow_parent=False))
+            and (gated_mlp := find_nearest(GatedMLP, select.node, follow_parent=False, follow_first_only=False))
+            and (down_proj := find_nearest(Linear, gated_mlp.mul.node, follow_parent=False))
             and (len(users := list(down_proj.output_node.users)) == 1)
             and (weighted_expert := MulTensorTensor.specialize_from(users[0]))
             and (len(users := list(weighted_expert.users)) == 1)
@@ -183,7 +184,7 @@ class MoESubgraph(Subgraph):
         ):
             return None
 
-        if not (expert := Expert.find_nearest(one_hot.eq.node, follow_parent=False)):
+        if not (expert := find_nearest(Expert, one_hot.eq.node, follow_parent=False)):
             raise NotImplementedError(f"Unsupported expert graph found from: {one_hot.eq.node}")
 
         experts: list[Expert] = []
@@ -208,8 +209,8 @@ class MoESubgraph(Subgraph):
                 continue
             if not (
                 Linear.configure_from(user)
-                and (gated_mlp := GatedMLP.find_nearest(user, follow_parent=False))
-                and (down_proj := Linear.find_nearest(gated_mlp.mul.node, follow_parent=False))
+                and (gated_mlp := find_nearest(GatedMLP, user, follow_parent=False))
+                and (down_proj := find_nearest(Linear, gated_mlp.mul.node, follow_parent=False))
             ):
                 continue
             if len(shared_experts) > 0 and down_proj in [down for _, _, down in shared_experts]:

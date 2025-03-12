@@ -22,8 +22,7 @@ from torch.fx import Node
 from typing_extensions import Self
 
 from ...types import NodeCriterion
-from ..nodes import NodeSpecialization
-from ..utils import get_tensor_metadata
+from ..utils import NodeType, SubgraphType, get_tensor_metadata
 from .subgraph import Subgraph
 
 
@@ -99,12 +98,6 @@ def get_parents(node: Node) -> list[Node]:
         list[Node]: A list of parent nodes.
     """
     return [n for n in node.all_input_nodes if n.target is not torch.ops.aten.sym_size.int]
-
-
-# pylint: disable-next=invalid-name
-NodeType = TypeVar("NodeType", bound=NodeSpecialization)
-# pylint: disable-next=invalid-name
-SubgraphType = TypeVar("SubgraphType", bound=Subgraph)
 
 
 class TrailingReformatPath(Path):

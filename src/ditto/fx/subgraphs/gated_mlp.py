@@ -16,7 +16,7 @@ from torch.fx import Node
 from typing_extensions import Self
 
 from ..nodes import MM, MulTensorTensor
-from ..utils import find_closest_common_descendant
+from ..utils import find_closest_common_descendant, find_nearest
 from .fused_linear import FusedLinear
 from .linear import Linear
 from .path import TrailingReformatPath
@@ -44,11 +44,11 @@ class GatedMLP(Subgraph):
         this_top = TrailingReformatPath.configure_from(mul.this).top
         other_top = TrailingReformatPath.configure_from(mul.other).top
         if up_proj := Linear.configure_from(this_top):
-            gate_proj = Linear.find_nearest(other_top)
+            gate_proj = find_nearest(Linear, other_top)
         elif up_proj := Linear.configure_from(other_top):
-            gate_proj = Linear.find_nearest(this_top)
+            gate_proj = find_nearest(Linear, this_top)
         elif (
-            (fused_proj := FusedLinear.find_nearest(this_top, break_if=lambda n: MM.specialize_from(n) is not None))
+            (fused_proj := find_nearest(FusedLinear, this_top, break_if=lambda n: MM.specialize_from(n) is not None))
             and len(fused_proj) == 2
             and find_closest_common_descendant(
                 fused_proj.slices[0].node,
