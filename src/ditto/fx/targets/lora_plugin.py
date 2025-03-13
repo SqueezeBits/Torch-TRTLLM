@@ -27,7 +27,7 @@ from typing_extensions import Self
 from ...arguments import DynamicDimensionType, TensorTypeHint, TRTLLMArgumentHint
 from ...literals import LoraPluginInputPrefix, LoraStateDictSuffix
 from ...types import DataType, StrictlyTyped
-from ..nodes import Placeholder
+from ..nodes.placeholder import Placeholder
 from .fake_tensor_mode import is_in_fake_tensor_mode
 from .plugin import Plugin
 

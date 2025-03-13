@@ -22,7 +22,9 @@ from ..arguments import TRTLLMArgumentHint
 from ..configs import TRTLLMModelConfig
 from ..constants import FX_TRANSFORM_MAXIMUM_ITERATION
 from ..literals import PassName
+from ..quantization import GlobalQuantConfig
 from .passes import (
+    AddTRTLLMInputs,
     BindUnmatchedLoraProtos,
     CanonicalizeCopy,
     CastMMToFP32,
@@ -53,10 +55,13 @@ from .passes import (
     HerdConstantsToTheRight,
     IndexLayers,
     InsertGatherLastTokenIds,
+    ParallelizeLinear,
     PopLoraPlugins,
+    PropagateTensorParallelism,
+    ReplaceMMByFp8GemmPlugin,
     ReplaceMMByGemmPlugin,
+    ReplaceMMByWoQGemmPlugin,
     ReplaceMoEByMoEPlugin,
-    ReplaceQMMByQGemmPlugin,
     ReplaceSDPAByGPTAttentionPlugin,
     ReplaceViewByReshape,
     ResolveDynamicReshape,
@@ -65,11 +70,42 @@ from .passes import (
     RewritePowAsMul,
     RewriteReshapeAsUnsqueeze,
     RewriteSplitAsSlices,
+    StashActQuantSubgraphs,
+    StashLoraSubgraphs,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
+    WrapWeightDequantSubgraphs,
 )
 from .passes.defer_unsqueeze import SwapUnsqueezeWithSymSizeInt
 from .passes.infra import GraphOptimizationPass, PassManager
+
+
+def get_preoptimization_transform(
+    argument_hint: TRTLLMArgumentHint,
+    global_quant_config: GlobalQuantConfig,
+    dtype: torch.dtype,
+) -> Callable[[GraphModule], GraphModule]:
+    """Get the pre-optimization transform.
+
+    Args:
+        argument_hint (TRTLLMArgumentHint): the type hints for TRTLLM inputs
+        global_quant_config (GlobalQuantConfig): the global quantization configuration
+        dtype (torch.dtype): the data type for the plugins
+
+    Returns:
+        Callable[[GraphModule], GraphModule]: the pre-optimization transform
+    """
+    return compose(
+        WrapWeightDequantSubgraphs(global_quant_config=global_quant_config, dtype=dtype).as_transform(),
+        StashActQuantSubgraphs(global_quant_config=global_quant_config).as_transform(),
+        StashLoraSubgraphs().as_transform(),
+        ConstantFolding().as_transform(),
+        AddTRTLLMInputs(argument_hint=argument_hint).as_transform(),
+        ResolveDynamicReshape().as_transform(),
+        EliminateCommonExpressions().as_transform(),
+        PropagateTensorParallelism(mapping=argument_hint.mapping).as_transform(),
+        ParallelizeLinear(mapping=argument_hint.mapping).as_transform(),
+    )
 
 
 # pylint: disable=duplicate-code
@@ -228,7 +264,8 @@ def get_trtllm_conversion_transform(
         IndexLayers,
         BindUnmatchedLoraProtos,
         PopLoraPlugins(argument_hint=argument_hint),
-        ReplaceQMMByQGemmPlugin(model_dtype=dtype),
+        ReplaceMMByWoQGemmPlugin(model_dtype=dtype),
+        ReplaceMMByFp8GemmPlugin,
         ReplaceMMByGemmPlugin,
         CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]

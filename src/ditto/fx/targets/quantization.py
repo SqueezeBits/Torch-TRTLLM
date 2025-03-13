@@ -14,29 +14,67 @@
 
 import torch
 
-from ...quantization import GlobalQuantConfig
+from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode
 from ...types import StrictlyTyped
 from .fake_tensor_mode import is_in_fake_tensor_mode
+from .plugin import Plugin
+
+
+class Quantize(Plugin):
+    """Quantization target."""
+
+    @property
+    def __name__(self) -> str:
+        """Get the name of the class.
+
+        Returns:
+            str: Name of the class
+        """
+        return "quantize"
+
+    def __call__(
+        self,
+        x: torch.Tensor,
+        scale: torch.Tensor,
+        output_dtype: torch.dtype,
+    ) -> torch.Tensor:
+        """Apply node operation to input tensors.
+
+        This method is only required for fake tensor mode.
+
+        Args:
+            x (torcyh.Tensor): Input tensor
+            scale (torch.Tensor): Scale tensor
+            output_dtype (torch.dtype): Output data type
+        Returns:
+            torch.Tensor: Output tensor
+        """
+        out = x * scale
+        return out.to(output_dtype)
 
 
 class Dequantize(StrictlyTyped):
-    """Fake dequantization node.
+    """Fake dequantization target.
 
-    This node wraps the subgraph that holds the quantization information of the linear layer
-    into a single dequantize node. It is used to convert the mm node to a plugin node for quantization.
+    This target wraps the subgraph that holds the quantization information of the linear layer
+    into a single dequantize target. It is used to convert the mm node to a plugin node for quantization.
 
     Attributes:
         dtype (torch.dtype): Data type of the model
         global_quant_config (GlobalQuantConfig): Global quantization configuration
         output_shape (torch.Size): Shape of the output tensor
         bits (int): Number of bits for quantization
-        group_size (int | None): Size of quantization groups
+        mode (QuantizeMode): Mode of quantization
+        algorithm (QuantizeAlgorithm): Algorithm of quantization. Defaults to PTQ.
+        group_size (int | None): Size of quantization groups. Defaults to None.
     """
 
     dtype: torch.dtype
     global_quant_config: GlobalQuantConfig
     output_shape: torch.Size
     bits: int
+    mode: QuantizeMode
+    algorithm: QuantizeAlgorithm = QuantizeAlgorithm.PTQ
     group_size: int | None = None
 
     @property

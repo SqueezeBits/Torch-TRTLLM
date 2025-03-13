@@ -394,8 +394,12 @@ class TRTLLMQuantConfig(StrictlyTyped):
         return cls(
             quant_algo=global_quant_config.trtllm_quant_algo,
             kv_cache_quant_algo=global_quant_config.trtllm_kv_cache_quant_algo,
-            group_size=global_quant_config.group_size,
-            has_zero_point=global_quant_config.has_zero_point,
+            group_size=global_quant_config.weight_quant_scheme.group_size
+            if global_quant_config.weight_quant_scheme is not None
+            else None,
+            has_zero_point=global_quant_config.weight_quant_scheme.has_zero_point
+            if global_quant_config.weight_quant_scheme is not None
+            else None,
         )
 
 

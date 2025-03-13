@@ -20,9 +20,9 @@ from torch.fx import Graph, GraphModule, Node
 
 from ...configs import TRTLLMMapping
 from ...types import DataType
-from ..nodes import Embedding, Expand, GetAttr, Permute, Reshape, Slice
+from ..nodes import Dequantize, Embedding, Expand, GetAttr, Permute, Reshape, Slice
 from ..subgraphs import FusedLinear, Linear
-from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs, Dequantize
+from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs
 from ..utils import forget_all_descendant_fake_tensors, get_val
 from .infra import (
     GraphOptimizationPass,
@@ -124,7 +124,40 @@ class ParallelizeLinear(GraphOptimizationPass):
             gather_output (bool, optional): Whether to gather the output. Defaults to True.
         """
         graph = linear.mm.node.graph
-        if not linear.has_weight_quantization:
+
+        if linear.dequantize_node is not None and (dequantize := Dequantize.specialize_from(linear.dequantize_node)):
+            input_nodes: list[Node] = []
+            for dequant_input_node in linear.mm.other.all_input_nodes:
+                assert (
+                    tensor := GetAttr.specialize_from(dequant_input_node)
+                ), "dequantize's input node is not specialized to GetAttr"
+                with graph.inserting_before(tensor.node):
+                    parallelized_weight = GetAttr.create(
+                        graph,
+                        self.get_name_of_attr(tensor.target),
+                        parallelize_2d_tensor(
+                            tensor.tensor,
+                            tp_size=self.mapping.tp_size,
+                            tp_rank=self.mapping.tp_rank,
+                            is_column=True,
+                            is_transposed=False,
+                        ),
+                    )
+                    propagate_metadata_from(tensor, to=parallelized_weight)
+                dequant_input_node.replace_all_uses_with(parallelized_weight.node)
+                input_nodes.append(parallelized_weight.node)
+            parallelized_dequantize = dequantize.target.model_copy(
+                update={
+                    "output_shape": torch.Size(
+                        [dequantize.target.output_shape[0], dequantize.target.output_shape[1] // self.mapping.tp_size]
+                    )
+                }
+            )
+            with graph.inserting_before(linear.mm.other):
+                parallelized_dequantize_node = graph.call_function(parallelized_dequantize, tuple(input_nodes))
+                propagate_metadata_from(linear.mm.other, to=parallelized_dequantize_node)
+            linear.mm.other.replace_all_uses_with(parallelized_dequantize_node)
+        else:
             assert (
                 weight := GetAttr.specialize_from(linear.weight_node)
             ) is not None, "weight node is not specialized to GetAttr"
@@ -147,42 +180,6 @@ class ParallelizeLinear(GraphOptimizationPass):
                 )
                 propagate_metadata_from(weight, to=parallelized_weight)
             weight.node.replace_all_uses_with(parallelized_weight.node)
-        else:
-            assert isinstance(
-                dequantize := linear.mm.other.target, Dequantize
-            ), "weight node doesn't have dequantize target"
-
-            input_nodes: list[Node] = []
-            for dequant_input_node in linear.mm.other.all_input_nodes:
-                assert (
-                    tensor := GetAttr.specialize_from(dequant_input_node)
-                ), "dequantize's input node is not specialized to GetAttr"
-                with graph.inserting_before(tensor.node):
-                    parallelized_weight = GetAttr.create(
-                        graph,
-                        self.get_name_of_attr(tensor.target),
-                        parallelize_2d_tensor(
-                            tensor.tensor,
-                            tp_size=self.mapping.tp_size,
-                            tp_rank=self.mapping.tp_rank,
-                            is_column=True,
-                            is_transposed=False,
-                        ),
-                    )
-                    propagate_metadata_from(tensor, to=parallelized_weight)
-                dequant_input_node.replace_all_uses_with(parallelized_weight.node)
-                input_nodes.append(parallelized_weight.node)
-            parallelized_dequantize = dequantize.model_copy(
-                update={
-                    "output_shape": torch.Size(
-                        [dequantize.output_shape[0], dequantize.output_shape[1] // self.mapping.tp_size]
-                    )
-                }
-            )
-            with graph.inserting_before(linear.mm.other):
-                parallelized_dequantize_node = graph.call_function(parallelized_dequantize, tuple(input_nodes))
-                propagate_metadata_from(linear.mm.other, to=parallelized_dequantize_node)
-            linear.mm.other.replace_all_uses_with(parallelized_dequantize_node)
 
         if (
             linear.bias_node is not None
@@ -238,29 +235,7 @@ class ParallelizeLinear(GraphOptimizationPass):
             eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
         """
         graph = linear.mm.node.graph
-        if not linear.has_weight_quantization:
-            assert (
-                weight := GetAttr.specialize_from(linear.weight_node)
-            ) is not None, "weight node is not specialized to GetAttr"
-            with graph.inserting_before(weight.node):
-                parallelized_weight = GetAttr.create(
-                    graph,
-                    self.get_name_of_attr(weight.target),
-                    parallelize_2d_tensor(
-                        weight.tensor,
-                        tp_size=self.mapping.tp_size,
-                        tp_rank=self.mapping.tp_rank,
-                        is_column=False,
-                        is_transposed=linear.has_transposed_weight,
-                    ),
-                )
-                propagate_metadata_from(weight, to=parallelized_weight)
-            weight.node.replace_all_uses_with(parallelized_weight.node)
-        else:
-            assert isinstance(
-                (dequantize := linear.mm.other.target), Dequantize
-            ), "weight node doesn't have dequantize target"
-
+        if linear.dequantize_node is not None and (dequantize := Dequantize.specialize_from(linear.dequantize_node)):
             input_nodes: list[Node] = []
             for dequant_input_node in linear.mm.other.all_input_nodes:
                 assert (
@@ -281,10 +256,10 @@ class ParallelizeLinear(GraphOptimizationPass):
                     propagate_metadata_from(tensor, to=parallelized_weight)
                 dequant_input_node.replace_all_uses_with(parallelized_weight.node)
                 input_nodes.append(parallelized_weight.node)
-            parallelized_dequantize = dequantize.model_copy(
+            parallelized_dequantize = dequantize.target.model_copy(
                 update={
                     "output_shape": torch.Size(
-                        [dequantize.output_shape[0] // self.mapping.tp_size, dequantize.output_shape[1]]
+                        [dequantize.target.output_shape[0] // self.mapping.tp_size, dequantize.target.output_shape[1]]
                     )
                 }
             )
@@ -292,6 +267,24 @@ class ParallelizeLinear(GraphOptimizationPass):
                 parallelized_dequantize_node = graph.call_function(parallelized_dequantize, tuple(input_nodes))
                 propagate_metadata_from(linear.mm.other, to=parallelized_dequantize_node)
             linear.mm.other.replace_all_uses_with(parallelized_dequantize_node)
+        else:
+            assert (
+                weight := GetAttr.specialize_from(linear.weight_node)
+            ) is not None, "weight node is not specialized to GetAttr"
+            with graph.inserting_before(weight.node):
+                parallelized_weight = GetAttr.create(
+                    graph,
+                    self.get_name_of_attr(weight.target),
+                    parallelize_2d_tensor(
+                        weight.tensor,
+                        tp_size=self.mapping.tp_size,
+                        tp_rank=self.mapping.tp_rank,
+                        is_column=False,
+                        is_transposed=linear.has_transposed_weight,
+                    ),
+                )
+                propagate_metadata_from(weight, to=parallelized_weight)
+            weight.node.replace_all_uses_with(parallelized_weight.node)
 
         insert_allreduce_plugin(
             graph,
