@@ -15,7 +15,7 @@
 from torch.fx import Node
 from typing_extensions import Self
 
-from ..nodes import MM, MulTensorTensor
+from ..nodes import MM, Gelu, MulTensorTensor
 from ..utils import find_closest_common_descendant
 from .fused_linear import FusedLinear
 from .linear import Linear
@@ -34,10 +34,15 @@ class GatedMLP(Subgraph):
 
     up_proj: Linear
     gate_proj: Linear
-    mul: MulTensorTensor
+    mul: MulTensorTensor | None
 
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
+        if gelu := Gelu.specialize_from(node):
+            # It assumes that up_proj and gate_proj are already fused.
+            up_proj = gate_proj = Linear.find_nearest(gelu.node)
+            return cls(up_proj=up_proj, gate_proj=gate_proj, mul=None)
+
         if not (mul := MulTensorTensor.specialize_from(node)):
             return None
 
