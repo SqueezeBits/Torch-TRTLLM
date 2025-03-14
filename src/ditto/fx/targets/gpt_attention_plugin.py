@@ -86,9 +86,13 @@ class ROPEConfig(StrictlyTyped):
     rotary_embedding_max_positions: int = 1024
     rotary_embedding_original_max_positions: int = 1024
     llama3_scaling_config: Llama3ScalingConfig = Field(default_factory=Llama3ScalingConfig, exclude=True)
+    rotary_embedding_beta_fast: int | None = Field(default=None, exclude=True)
+    rotary_embedding_beta_slow: int | None = Field(default=None, exclude=True)
+    rotary_embedding_mscale: float | None = Field(default=None, exclude=True)
+    rotary_embedding_mscale_all_dim: float | None = Field(default=None, exclude=True)
     _longrope_scaling_short_factors: list[float] = PrivateAttr(default_factory=list)
     _longrope_scaling_long_factors: list[float] = PrivateAttr(default_factory=list)
-    _rotary_inv_freq: np.ndarray = PrivateAttr(default_factory=lambda: np.array([]))
+    _rotary_inv_freq: np.ndarray | None = PrivateAttr(default=None)
     _rotary_cos_sin: np.ndarray = PrivateAttr(default_factory=lambda: np.array([]))
     _long_rope_rotary_inv_freq: np.ndarray | None = PrivateAttr(default=None)
     _long_rope_rotary_cos_sin: np.ndarray | None = PrivateAttr(default=None)
@@ -105,7 +109,9 @@ class ROPEConfig(StrictlyTyped):
         Returns:
             bool: True if using RoPE embeddings and dimension is non-zero
         """
-        return self.position_embedding_type.is_rope() and self.rotary_embedding_dim != 0
+        return (self.position_embedding_type.is_rope() and self.rotary_embedding_dim != 0) or (
+            self.rotary_embedding_scale_type == RotaryScalingType.yarn
+        )
 
     @property
     def longrope_scaling_short_factors(self) -> np.ndarray:
@@ -150,7 +156,7 @@ class ROPEConfig(StrictlyTyped):
         self._longrope_scaling_long_factors = value
 
     @property
-    def rotary_inv_freq(self) -> torch.nn.Parameter:
+    def rotary_inv_freq(self) -> torch.nn.Parameter | None:
         """Get the inverse frequency tensor for rotary embeddings.
 
         This attribute is used as an input for GPTAttentionPlugin.
@@ -158,10 +164,12 @@ class ROPEConfig(StrictlyTyped):
         Returns:
             torch.nn.Parameter: Inverse frequency tensor as a Parameter.
         """
+        if self._rotary_inv_freq is None:
+            return None
         return torch.nn.Parameter(torch.from_numpy(self._rotary_inv_freq))
 
     @rotary_inv_freq.setter
-    def rotary_inv_freq(self, value: np.ndarray) -> None:
+    def rotary_inv_freq(self, value: np.ndarray | None) -> None:
         """Set the inverse frequency tensor for rotary embeddings.
 
         Args:
@@ -270,6 +278,11 @@ class ROPEConfig(StrictlyTyped):
                 - Additional parameters for Llama3 scaling
         """
         rope_config = cls()
+        model_type = lookup_attributes(
+            pretrained_config,
+            "model_type",
+            default="llama",
+        )
         rope_config.rotary_embedding_base = lookup_attributes(
             pretrained_config,
             "rope_theta",
@@ -287,21 +300,26 @@ class ROPEConfig(StrictlyTyped):
             not_found_ok=True,
         )
 
+        if positional_embedding_type is not None:
+            rope_config.position_embedding_type = positional_embedding_type
+        if rotary_embedding_dim is not None:
+            rope_config.rotary_embedding_dim = rotary_embedding_dim
         if rope_scaling:
             rope_config.rotary_embedding_scale = rope_scaling.get("factor", rope_config.rotary_embedding_scale)
-            rope_config.rotary_embedding_original_max_positions = DEFAULT_ROTARY_EMBEDDING_ORIGINAL_MAX_POSITIONS
+            rope_config.rotary_embedding_original_max_positions = rope_scaling.get(
+                "original_max_position_embeddings", DEFAULT_ROTARY_EMBEDDING_ORIGINAL_MAX_POSITIONS
+            )
             rotary_scaling_type: str | None = rope_scaling.get("type", rope_scaling.get("rope_type", None))
             if rotary_scaling_type is not None:
                 rope_config.rotary_embedding_scale_type = RotaryScalingType.from_string(rotary_scaling_type)
             rope_config.llama3_scaling_config = Llama3ScalingConfig(**rope_scaling)
             if rotary_scaling_type == "longrope":
                 assert all(factor in rope_scaling for factor in ("short_factor", "long_factor"))
-                # NOTE: The rope_config.position_embedding_type of long_rope will be overwritten by
-                #       positional_embedding_type parameter. TensorRT-LLM uses long_rope
-                #       position_embedding_type for phi-3.5, but setting it to long_rope results in an error in
-                #       Ditto. However, since this doesn't affect functionality, we can ignore it for now.
+                # NOTE: TensorRT-LLM uses long_rope position_embedding_type for phi-3.5,
+                #       but setting it to long_rope results in an error in Ditto.
+                #       However, since this doesn't affect functionality, we can ignore it for now.
+                # rope_config.position_embedding_type = PositionEmbeddingType.long_rope
                 # TODO: Fix above issue.
-                rope_config.position_embedding_type = PositionEmbeddingType.long_rope
                 original_max_position_embeddings = lookup_attributes(
                     pretrained_config,
                     "original_max_position_embeddings",
@@ -310,49 +328,74 @@ class ROPEConfig(StrictlyTyped):
                 rope_config.rotary_embedding_original_max_positions = original_max_position_embeddings
                 rope_config.longrope_scaling_short_factors = rope_scaling["short_factor"]
                 rope_config.longrope_scaling_long_factors = rope_scaling["long_factor"]
-        if positional_embedding_type is not None:
-            rope_config.position_embedding_type = positional_embedding_type
-        if rotary_embedding_dim is not None:
-            rope_config.rotary_embedding_dim = rotary_embedding_dim
-        rope_config.compute_rope_constants()
+            if model_type == "deepseek_v2":
+                rope_config.position_embedding_type = PositionEmbeddingType.learned_absolute
+                rope_config.rotary_embedding_beta_fast = rope_scaling.get("beta_fast", None)
+                rope_config.rotary_embedding_beta_slow = rope_scaling.get("beta_slow", None)
+                rope_config.rotary_embedding_mscale = rope_scaling.get("mscale", None)
+                rope_config.rotary_embedding_mscale_all_dim = rope_scaling.get("mscale_all_dim", None)
+                rope_config.rotary_embedding_dim = 0
+
         return rope_config
 
-    def compute_rope_constants(self) -> None:
+    def compute_rope_constants(self, qk_rope_head_dim: int | None = None) -> None:
         """Compute RoPE constants used by the GPT attention plugin.
 
         This method computes the inverse frequency and cosine/sine tensors needed for RoPE,
         handling both standard RoPE and long RoPE configurations.
         """
         # TODO: replace this by `Attention.create_attention_const_params`
-        if self.rotary_embedding_scale_type != RotaryScalingType.longrope:
-            (
-                rotary_inv_freq,
-                embed_positions_for_gpt_attention,
-            ) = RopeEmbeddingUtils.create_sinusoidal_positions_for_attention_plugin(
-                self.rotary_embedding_max_positions,
-                self.rotary_embedding_dim,
-                self.rotary_embedding_base,
-                self.rotary_embedding_scale,
-                self.rotary_embedding_scale_type,
-                self.llama3_scaling_config.model_dump(),
-            )
-            long_rope_rotary_inv_freq, long_rope_embed_positions_for_gpt_attention = None, None
-        else:
-            (
-                _,
-                _,
-                (rotary_inv_freq, embed_positions_for_gpt_attention),
-                (long_rope_rotary_inv_freq, long_rope_embed_positions_for_gpt_attention),
-                mscale,
-            ) = RopeEmbeddingUtils.create_sinusoidal_positions_long_rope(
-                self.rotary_embedding_max_positions,
-                self.rotary_embedding_original_max_positions,
-                self.rotary_embedding_dim,
-                self.rotary_embedding_base,
-                self.longrope_scaling_short_factors,
-                self.longrope_scaling_long_factors,
-            )
-            self.rotary_embedding_short_m_scale = self.rotary_embedding_long_m_scale = mscale
+        rotary_inv_freq, long_rope_rotary_inv_freq, long_rope_embed_positions_for_gpt_attention = None, None, None
+        match self.rotary_embedding_scale_type:
+            case RotaryScalingType.longrope:
+                (
+                    _,
+                    _,
+                    (rotary_inv_freq, embed_positions_for_gpt_attention),
+                    (long_rope_rotary_inv_freq, long_rope_embed_positions_for_gpt_attention),
+                    mscale,
+                ) = RopeEmbeddingUtils.create_sinusoidal_positions_long_rope(
+                    self.rotary_embedding_max_positions,
+                    self.rotary_embedding_original_max_positions,
+                    self.rotary_embedding_dim,
+                    self.rotary_embedding_base,
+                    self.longrope_scaling_short_factors,
+                    self.longrope_scaling_long_factors,
+                )
+                self.rotary_embedding_short_m_scale = self.rotary_embedding_long_m_scale = mscale
+
+            case RotaryScalingType.yarn:
+                assert self.rotary_embedding_beta_fast is not None
+                assert self.rotary_embedding_beta_slow is not None
+                assert self.rotary_embedding_mscale is not None
+                assert self.rotary_embedding_mscale_all_dim is not None
+                assert qk_rope_head_dim is not None
+                embed_positions_for_gpt_attention = (
+                    RopeEmbeddingUtils.create_sinusoidal_positions_for_deepseek_attention_plugin(
+                        self.rotary_embedding_max_positions,
+                        qk_rope_head_dim,
+                        int(self.rotary_embedding_base),
+                        self.rotary_embedding_scale,
+                        self.rotary_embedding_original_max_positions,
+                        self.rotary_embedding_beta_fast,
+                        self.rotary_embedding_beta_slow,
+                        self.rotary_embedding_mscale,
+                        self.rotary_embedding_mscale_all_dim,
+                    )
+                )
+
+            case _:
+                (
+                    rotary_inv_freq,
+                    embed_positions_for_gpt_attention,
+                ) = RopeEmbeddingUtils.create_sinusoidal_positions_for_attention_plugin(
+                    self.rotary_embedding_max_positions,
+                    self.rotary_embedding_dim,
+                    self.rotary_embedding_base,
+                    self.rotary_embedding_scale,
+                    self.rotary_embedding_scale_type,
+                    self.llama3_scaling_config.model_dump(),
+                )
 
         self.rotary_inv_freq = rotary_inv_freq
         self.rotary_cos_sin = embed_positions_for_gpt_attention
@@ -362,9 +405,14 @@ class ROPEConfig(StrictlyTyped):
         with open_debug_artifact("rope_inputs.pt", "wb") as f:
             if f:
                 rope_inputs = {
-                    "rotary_inv_freq": torch.from_numpy(rotary_inv_freq),
                     "rotary_cos_sin": torch.from_numpy(embed_positions_for_gpt_attention),
                 }
+                if rotary_inv_freq is not None:
+                    rope_inputs.update(
+                        {
+                            "rotary_inv_freq": torch.from_numpy(rotary_inv_freq),
+                        }
+                    )
                 if long_rope_rotary_inv_freq is not None:
                     rope_inputs.update(
                         {
@@ -537,7 +585,8 @@ class GPTAttentionPlugin(Plugin):
         """
         if is_in_fake_tensor_mode():
             # Note that this is merely for the fake tensor propagation
-            q_size = self.num_heads * self.head_size
+            head_size = self.head_size if self.v_head_dim == 0 else self.v_head_dim
+            q_size = self.num_heads * head_size
             return qkv[..., :q_size]
         raise NotImplementedError(f"{type(self).__name__} doesn't have implementation")
 

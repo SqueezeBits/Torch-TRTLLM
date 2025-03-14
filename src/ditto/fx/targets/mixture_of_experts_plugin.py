@@ -23,6 +23,7 @@ from tensorrt_llm.functional import QuantMode, SideStreamIDType
 from tensorrt_llm.layers.moe import MoeConfig as TRTLLMMoeConfig
 from tensorrt_llm.layers.moe import activation_str_to_int_map
 from torch.fx import Graph, Node
+from transformers import PretrainedConfig
 from typing_extensions import Self
 
 from ...types import StrictlyTyped
@@ -183,15 +184,34 @@ class MixtureOfExpertsPluginInputs(StrictlyTyped):
         )
 
 
-def get_moe_normalization_mode() -> int:
+# mypy: disable-error-code="union-attr"
+# pylint: disable=too-many-return-statements
+def get_moe_normalization_mode(pretrained_config: PretrainedConfig | None) -> int:
     """Get the normalization mode for MoE plugin.
 
     Returns:
         int: The normalization mode enum value
     """
-    # TODO: Set normalization mode for each model.
-    # For Qwen MoE models, it is hard-coded to ExpertScaleNormalizationMode.NONE.
-    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.NONE
+    model_type = pretrained_config.model_type if pretrained_config else None
+    # Following the rules defined in tensorrt_llm/models/{model_type}.
+    # Default is RENORMALIZE.
+    if model_type is None:
+        return TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
+    match model_type:
+        case "qwen2_moe":
+            return TRTLLMMoeConfig.ExpertScaleNormalizationMode.NONE
+        case "deepseek_v2":
+            if pretrained_config.topk_method == "group_limited_greedy":
+                if pretrained_config.num_experts_per_tok > 1 and pretrained_config.norm_topk_prob:
+                    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.DEVICE_LIMITED_RENORM
+                return TRTLLMMoeConfig.ExpertScaleNormalizationMode.DEVICE_LIMITED
+            if pretrained_config.topk_method == "greedy":
+                if pretrained_config.num_experts_per_tok > 1 and pretrained_config.norm_topk_prob:
+                    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
+                return TRTLLMMoeConfig.ExpertScaleNormalizationMode.NONE
+        case _:
+            return TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
+    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
 
 
 def get_moe_activation_type() -> int:

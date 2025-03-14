@@ -14,7 +14,6 @@
 
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 
-import math
 import operator
 from functools import reduce
 
@@ -107,15 +106,7 @@ class ScaledDotProductAttentionSubgraph(Subgraph):
             Node | None: The resulting fused graph node, or None if the fusion is not
                 feasible (e.g., due to unsupported scaling factors).
         """
-        if not (
-            (query_shape := self.query.output_shape_arg)
-            and (output_tensor := self.av_bmm.output_shape_arg)
-            and isinstance(head_size := query_shape[-1], int)
-        ):
-            return None
-
-        if not math.isclose(self.scale, head_size ** (-0.5)):
-            # TODO: Support attentions with non-default scale
+        if not ((query_shape := self.query.output_shape_arg) and (output_tensor := self.av_bmm.output_shape_arg)):
             return None
 
         for scaling in self.external_qk_scalings:
@@ -125,8 +116,8 @@ class ScaledDotProductAttentionSubgraph(Subgraph):
         with graph.inserting_before(self.av_bmm.node):
             q = Reshape.create(graph, self.query, get_unsqueezed_shape(query_shape))
             k = Reshape.create(graph, Permute.create(graph, self.key, [0, 2, 1]), get_unsqueezed_shape(query_shape))
-            v = Reshape.create(graph, self.value, get_unsqueezed_shape(query_shape))
-            sdpa = ScaledDotProductAttention.create(graph, q, k, v)
+            v = Reshape.create(graph, self.value, get_unsqueezed_shape(output_tensor))
+            sdpa = ScaledDotProductAttention.create(graph, q, k, v, scale=self.scale)
             output = Reshape.create(graph, sdpa.node, get_unsqueezed_shape(output_tensor))
         return output.node
 
