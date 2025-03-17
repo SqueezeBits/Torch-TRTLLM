@@ -149,13 +149,17 @@ def get_intermediate_size(graph_module: GraphModule) -> int:
         PretrainedConfigGenerationError: If no or multiple intermediate sizes are found.
     """
     values: set[int] = set()
+    values_with_shared_expert: set[int] = set()
     for node in graph_module.graph.nodes:
-        if (
-            (linear := Linear.configure_from(node))
-            and linear.lora_prefix == "mlp_4h_to_h"
-            and not linear.mm.meta.get("is_shared_expert", False)
-        ):
-            values.add(linear.in_features)
+        if (linear := Linear.configure_from(node)) and linear.lora_prefix == "mlp_4h_to_h":
+            # TODO: get intermediate size properly for MoE models without shared experts
+            if linear.mm.meta.get("is_shared_expert", False):
+                values_with_shared_expert.add(linear.in_features)
+            else:
+                values.add(linear.in_features)
+
+    if len(values) == 0:
+        values = values_with_shared_expert
 
     if len(values) == 0:
         raise PretrainedConfigGenerationError("No intermediate size found in graph module")
