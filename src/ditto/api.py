@@ -38,6 +38,7 @@ from .configs import (
 from .constants import INPUT_IDS
 from .convert import convert
 from .debug import get_memory_footprint, save_for_debug
+from .debug.mla import save_mla_weights_for_debug
 from .export import export
 from .fx import generate_trtllm_engine_config
 from .fx.utils import find_output_node
@@ -131,6 +132,7 @@ def trtllm_build(
         run_routers_in_model_dtype=run_routers_in_model_dtype,
         extra_passes=[add_outputs(debug_node_names)] if debug_node_names else None,
     )
+    save_mla_weights_for_debug(graph_module)
 
     for filename, component in build_trtllm_engine_components(
         graph_module,
