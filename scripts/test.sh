@@ -44,6 +44,8 @@ main() {
         # "CohereForAI/aya-expanse-8b --model-type commandr --pp-size 2" # unsupported in TensorRT-LLM
         # MoE
         "Qwen/Qwen1.5-MoE-A2.7B-Chat"
+        "deepseek-ai/deepseek-moe-16b-chat --trust-remote-code --dtype bfloat16 --model-type deepseek_v1"
+        "deepseek-ai/DeepSeek-V2-Lite-Chat  --trust-remote-code --dtype bfloat16"
     )
 
     for MODEL_SPECIFIC_ARG in "${MODEL_SPECIFIC_ARGS[@]}"; do
