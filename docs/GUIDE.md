@@ -2,6 +2,15 @@
 
 ## A. Installation
 
+Note that `pip` may complain about dependency mismatch due to `torch-tensorrt`, even if you follow the instructions below without any mistakes.
+However, you are ***completely OK*** to ignore these messages as we've tested out `torch-tensorrt==2.5.0` to be compatible with `tensorrt-cu12*==10.7.0`.
+```
+ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
+torch-tensorrt 2.5.0 requires tensorrt-cu12==10.3.0, but you have tensorrt-cu12 10.7.0 which is incompatible.
+torch-tensorrt 2.5.0 requires tensorrt-cu12-bindings==10.3.0, but you have tensorrt-cu12-bindings 10.7.0 which is incompatible.
+torch-tensorrt 2.5.0 requires tensorrt-cu12-libs==10.3.0, but you have tensorrt-cu12-libs 10.7.0 which is incompatible.
+```
+
 ### I. Using conda (recommended)
 First, clone the repository.
 ```
@@ -14,7 +23,7 @@ conda create -f conda/environment.yml
 ```
 Finally, install Ditto.
 ```
-pip install .
+pip install . --extra-index-url https://pypi.nvidia.com
 ```
 
 ### II. Manual Installation
@@ -29,10 +38,43 @@ It is recommended to use conda to create a virtual environment with dependencies
 
 With the prerequisites installed, install Ditto with following command. 
 ```
-pip install git+https://github.com/SqueezeBits/Torch-TRTLLM.git@latest
+pip install git+https://github.com/SqueezeBits/Torch-TRTLLM.git@latest --extra-index-url https://pypi.nvidia.com
 ```
 
-### III. Using Docker
+### III. Using Triton Inference Server
+**Tested with nvcr.io/nvidia/tritonserver:24.12-trtllm-python-py3**
+
+As NGC triton server docker image comes with broken dependencies, make sure to install and use Ditto in virtual envrionment.
+However, when using the Ditto built engine built with triton server, make sure to deactivate the virtual environment so that the system can refer to it's preinstalled dependencies.
+
+#### 1. Install python venv
+```
+apt update && apt install python3-venv -y
+```
+
+#### 2. Create and activate the virtual envrionment
+```
+python3 -m venv ditto
+source ditto/bin/activate
+```
+
+#### 3. Install Ditto in the virtual environment
+```
+pip install git+https://github.com/SqueezeBits/Torch-TRTLLM.git@latest --extra-index-url https://pypi.nvidia.com
+```
+
+#### 4. Build engine with Ditto
+```
+ditto build  <model-id-or-hf-model-directory>
+```
+
+#### 5. Deactivate the venv when using the engine
+```
+deactivate
+do sth with the engine
+```
+
+### IIII. Using Ditto Docker Image
 #### 1. Build a docker image
 **WARNING: This might take a few hours.**
 Run from the root directory of the repository:

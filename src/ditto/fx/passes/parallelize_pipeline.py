@@ -20,7 +20,7 @@ from torch.fx import Graph, GraphModule, Node
 from ...arguments import TRTLLMArgumentHint
 from ...constants import INPUT_IDS
 from ...types import DataType
-from ..nodes import AddTensorTensor, BinaryElementwise, Placeholder, SymSizeInt, Unsqueeze
+from ..nodes import AddTensorTensor, BinaryElementwise, SymSizeInt, Unsqueeze
 from ..targets import GPTAttentionPlugin, RecvPlugin, SendPlugin
 from ..utils import find_closest_common_descendant, get_val
 from .infra import (
@@ -31,7 +31,7 @@ from .infra import (
 )
 
 
-# pylint: disable=too-many-locals
+# pylint: disable=too-many-locals, too-many-boolean-expressions
 class ParallelizePipeline(GraphOptimizationPass):
     """Parallelize the pipeline in the graph (Pipeline Parallelism).
 
@@ -42,6 +42,9 @@ class ParallelizePipeline(GraphOptimizationPass):
     argument_hint: TRTLLMArgumentHint
 
     def call(self, graph_module: GraphModule) -> PassResult:
+        if self.argument_hint.mapping.pp_size == 1:
+            return PassResult(graph_module=graph_module, modified=False)
+
         overall_modified = False
         graph = graph_module.graph
         mapping = self.argument_hint.mapping
@@ -62,17 +65,15 @@ class ParallelizePipeline(GraphOptimizationPass):
                 and (pipeline_input_node := find_input_node_of_pipeline(node))
                 and (input_ids_node := find_input_ids_node(graph))
                 and self.argument_hint.hidden_states_input is not None
+                and (placeholders := {p.name: p for p in graph.find_nodes(op="placeholder")})
+                and (hidden_states_input := placeholders.get("hidden_states_input")) is not None
             ):
-                with graph.inserting_after(input_ids_node):
-                    hidden_states_input = Placeholder.create(
-                        graph, "hidden_states_input", self.argument_hint.hidden_states_input
-                    )
                 input_ids_node.replace_all_uses_with(
-                    hidden_states_input.node,
+                    hidden_states_input,
                     delete_user_cb=lambda user: SymSizeInt.specialize_from(user) is None,
                 )
 
-                recv_node = insert_recv_plugin(graph, hidden_states_input.node, mapping.prev_pp_rank)
+                recv_node = insert_recv_plugin(graph, hidden_states_input, mapping.prev_pp_rank)
                 pipeline_input_node.replace_all_uses_with(recv_node)
                 if (
                     len(users := list(recv_node.users)) == 2

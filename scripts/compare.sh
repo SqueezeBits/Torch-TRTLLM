@@ -21,6 +21,7 @@ declare REBUILD_NATIVE=false
 declare RERUN_NATIVE=false
 declare TP_SIZE=1
 declare PP_SIZE=1
+declare CLEANUP=false
 
 # Global variables for engine and artifact directories
 declare DITTO_ENGINE_DIR=""
@@ -102,6 +103,8 @@ print_help() {
     echo "  --redo-native          Equivalent to --rebuild-native --rerun-native"
     echo "  --rebuild-native       Rebuild native TensorRT-LLM engine even if it already exists"
     echo "  --rerun-native         Run native TensorRT-LLM engine even if output files exist"
+    echo
+    echo "  --cleanup              Cleanup all engines and artifacts after comparison"
     echo
     echo "[Example: Simply run meta-llama/Llama-2-7b-chat-hf]"
     echo "  $0 meta-llama/Llama-2-7b-chat-hf"
@@ -270,6 +273,10 @@ parse_args() {
                     exit 1
                 fi
                 shift 2
+                ;;
+            --cleanup)
+                CLEANUP=true
+                shift
                 ;;
             -*)
                 echo "Error: Unrecognized option: $1"
@@ -585,6 +592,9 @@ native_build() {
     local build_cmd="$TRTLLM_BUILD_SCRIPT $TRTLLM_BUILD_ARGS"
 
     DEBUG_ARTIFACTS_DIR=$TRTLLM_ARTIFACTS_DIR rich_execute "$build_cmd" "$TRTLLM_ENGINE_DIR/build.log" "build native TensorRT-LLM engine"
+    if [ "$CLEANUP" = true ]; then
+        rm -r $TRTLLM_CKPT_DIR
+    fi
 }
 
 # Compare outputs between two files and print result
@@ -655,6 +665,10 @@ compare_outputs() {
             all_succeeded=1
         fi
     done
+
+    if [ "$CLEANUP" = true ]; then
+        rm -r $TRTLLM_ENGINE_DIR -r $DITTO_ENGINE_DIR
+    fi
 
     return $all_succeeded
 }

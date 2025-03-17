@@ -17,8 +17,7 @@ from enum import Enum
 from torch.fx import Node
 
 from ...configs.trtllm.pretrained import TRTLLMMapping
-from ..subgraphs.linear import Linear
-from ..targets import GPTAttentionPlugin
+from ..nodes import MM
 from .infra import NodewiseOptimizationPass, NodewisePassResult
 
 
@@ -59,16 +58,11 @@ class PropagateTensorParallelism(NodewiseOptimizationPass):
     mapping: TRTLLMMapping
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+        if self.mapping.tp_size == 1:
+            return {}
         prev_tp_type = get_previous_tp_type(node)
 
-        if isinstance(node.target, GPTAttentionPlugin):
-            node.target.num_heads = node.target.num_heads // self.mapping.tp_size
-            node.target.num_kv_heads = (node.target.num_kv_heads + self.mapping.tp_size - 1) // self.mapping.tp_size
-            node.target.tp_size = self.mapping.tp_size
-            node.target.tp_rank = self.mapping.tp_rank
-            node.meta["tp_type"] = prev_tp_type
-            return {}
-        if not Linear.configure_from(node):
+        if not MM.specialize_from(node):
             node.meta["tp_type"] = prev_tp_type
             return {}
 
