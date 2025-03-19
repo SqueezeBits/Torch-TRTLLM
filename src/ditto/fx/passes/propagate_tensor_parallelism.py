@@ -17,6 +17,7 @@ from enum import Enum
 from torch.fx import Node
 
 from ...configs.trtllm.pretrained import TRTLLMMapping
+from ..metadata_keys import EXPERT_TYPE
 from ..nodes import MM
 from .infra import NodewiseOptimizationPass, NodewisePassResult
 
@@ -106,6 +107,7 @@ def should_exclude_from_tp(node: Node) -> bool:
     Returns:
         bool: True if the node should be excluded from tensor parallelism, False otherwise
     """
-    if node.meta.get("is_router", False):
+    assert MM.specialize_from(node)
+    if node.meta.get(EXPERT_TYPE) == "router":
         return True
     return False
