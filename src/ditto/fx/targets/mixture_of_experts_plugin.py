@@ -157,12 +157,12 @@ class MixtureOfExpertsPluginInputs(StrictlyTyped):
         Returns:
             MixtureOfExpertsPluginInputs: Container with plugin inputs
         """
-        up_weights = Stack.create(graph, [up_weight for (up_weight, _, _) in moe.expert_weights])
-        gate_weights = Stack.create(graph, [gate_weight for (_, gate_weight, _) in moe.expert_weights])
-        down_weights = Stack.create(graph, [down_weight for (_, _, down_weight) in moe.expert_weights])
+        up_weights = Stack.create(graph, [moe.extract_weights(expert)[0] for expert in moe.experts])
+        gate_weights = Stack.create(graph, [moe.extract_weights(expert)[1] for expert in moe.experts])
+        down_weights = Stack.create(graph, [moe.extract_weights(expert)[2] for expert in moe.experts])
         expert_weights_1 = Cat.create(graph, [up_weights, gate_weights], -1)
         assert expert_weights_1.ndim == 3
-        expert_weights_1 = Permute.create(graph, expert_weights_1, [0, 2, 1])
+        expert_weights_1 = Permute.create(graph, expert_weights_1, [0, 2, 1])  # type: ignore[assignment]
         expert_weights_2 = Permute.create(graph, down_weights, [0, 2, 1])
 
         if moe.router_logits_dtype == torch.bfloat16:

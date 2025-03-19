@@ -40,16 +40,16 @@ class CastRouterToFP32(NodewiseOptimizationPass):
         """
         if not (
             (moe := MoESubgraph.configure_from(node))
-            and (output_dtype := moe.router.output_dtype)
+            and (output_dtype := moe.router.mm.output_dtype)
             and output_dtype != torch.float32
         ):
             return {}
 
         graph = node.graph
-        with graph.inserting_before(moe.router.node):
-            lhs_cast = ToCopy.create(graph, moe.router.this, dtype=torch.float32)
-            rhs_cast = ToCopy.create(graph, moe.router.other, dtype=torch.float32)
+        with graph.inserting_before(moe.router.mm.node):
+            lhs_cast = ToCopy.create(graph, moe.router.mm.this, dtype=torch.float32)
+            rhs_cast = ToCopy.create(graph, moe.router.mm.other, dtype=torch.float32)
             router_fp32 = MM.create(graph, lhs_cast, rhs_cast)
-            propagate_metadata_from(moe.router, to=router_fp32)
-            output_cast = ToCopy.create(graph, router_fp32, dtype=moe.router.output_dtype)
-        return {moe.router.node: ReplaceAllUses(by=output_cast.node)}
+            propagate_metadata_from(moe.router.mm, to=router_fp32)
+            output_cast = ToCopy.create(graph, router_fp32, dtype=moe.router.mm.output_dtype)
+        return {moe.router.mm.node: ReplaceAllUses(by=output_cast.node)}
