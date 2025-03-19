@@ -20,6 +20,7 @@ from typing_extensions import Self
 
 from ...types import SymbolicInteger
 from ..nodes import IndexPut, MulTensorTensor, SelectInt, Softmax, ToCopy
+from ..targets import AllReducePlugin
 from ..utils import find_nearest, get_tensor_metadata
 from .gated_mlp import GatedMLP
 from .linear import Linear, MMType
@@ -57,7 +58,12 @@ class Expert(Subgraph):
             and (gated_mlp_mul := gated_mlp.mul)
             and (down_proj := find_nearest(Linear, gated_mlp_mul.node, follow_parent=False))
             and (len(users := list(down_proj.output_node.users)) == 1)
-            and (weighted_expert := MulTensorTensor.specialize_from(users[0]))
+            and (
+                expert_hidden_states := (
+                    list(users[0].users)[0] if isinstance(users[0].target, AllReducePlugin) else users[0]
+                )
+            )
+            and (weighted_expert := MulTensorTensor.specialize_from(expert_hidden_states))
             and (len(users := list(weighted_expert.users)) == 1)
             and (final_hidden_states := IndexPut.specialize_from(users[0]))
         ):
