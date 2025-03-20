@@ -108,6 +108,6 @@ def should_exclude_from_tp(node: Node) -> bool:
         bool: True if the node should be excluded from tensor parallelism, False otherwise
     """
     assert MM.specialize_from(node)
-    if node.meta.get(EXPERT_TYPE) == "router":
+    if node.meta.get(EXPERT_TYPE) in ("router", "shared_expert_gate"):
         return True
     return False
