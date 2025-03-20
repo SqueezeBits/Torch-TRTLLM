@@ -165,7 +165,7 @@ class MixtureOfExpertsPluginInputs(StrictlyTyped):
         expert_weights_1 = Permute.create(graph, expert_weights_1, [0, 2, 1])  # type: ignore[assignment]
         expert_weights_2 = Permute.create(graph, down_weights, [0, 2, 1])
 
-        if moe.router_logits_dtype == torch.bfloat16:
+        if moe.router_logits_dtype in (torch.bfloat16, torch.float16):
             router_logits = ToCopy.create(graph, moe.router_logits, dtype=torch.float32).node
         elif moe.router_logits_dtype == torch.float32:
             router_logits = moe.router_logits
