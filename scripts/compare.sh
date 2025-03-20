@@ -275,7 +275,7 @@ parse_args() {
                 shift 2
                 ;;
             --cleanup)
-                CLEANUP=false
+                CLEANUP=true
                 shift
                 ;;
             -*)
