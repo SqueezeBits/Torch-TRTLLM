@@ -36,6 +36,8 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
     """
 
     dtype: torch.dtype
+    tp_size: int
+    tp_rank: int
     plugin: MixtureOfExpertsPlugin | None = None
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
@@ -63,6 +65,8 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
             type_id=DataType(self.dtype).to(trt.DataType),
             weight_type_id=DataType(self.dtype).to(trt.DataType),
             output_type_id=DataType(self.dtype).to(trt.DataType),
+            tp_size=self.tp_size,
+            tp_rank=self.tp_rank,
         )
         moe_plugin._shared_expert_intermediate_size = moe.shared_expert_intermediate_size
         if self.plugin is None:

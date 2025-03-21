@@ -256,7 +256,11 @@ def get_trtllm_conversion_transform(
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
         *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
         CastRouterToFP32,
-        ReplaceMoEByMoEPlugin(dtype=dtype),
+        ReplaceMoEByMoEPlugin(
+            dtype=dtype,
+            tp_size=argument_hint.mapping.tp_size,
+            tp_rank=argument_hint.mapping.tp_rank,
+        ),
         FuseQKVProjections,
         FuseGatedMLPProjections,
         FuseDequantizes,
