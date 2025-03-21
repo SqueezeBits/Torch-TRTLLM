@@ -22,9 +22,7 @@ from .infra import NodewiseOptimizationPass, NodewisePassResult
 
 
 class MarkMoELinears(NodewiseOptimizationPass):
-    """Mark linear nodes in Mixture of Experts (MoE) layers with the corresponding type.
-
-    This pass identifies and marks linear nodes in MoE layers to exclude them from tensor parallelism.
+    """Mark linear nodes in MoE layers with the corresponding type to exclude them from tensor parallelism.
 
     It is a preprocessing of parallelize_linear pass required for proper conversion of MoE plugins
     with Tensor Parallelism.
@@ -48,10 +46,7 @@ class MarkMoELinears(NodewiseOptimizationPass):
             return {}
 
         moe.router.mark_expert_type_as("router")
-        for up_proj, gate_proj, down_proj in moe.shared_experts:
-            up_proj.mark_expert_type_as("shared_expert")
-            gate_proj.mark_expert_type_as("shared_expert")
-            down_proj.mark_expert_type_as("shared_expert")
+        for _, _, down_proj in moe.shared_experts:
             if shared_expert_gating := MulTensorTensor.specialize_from(list(down_proj.output_node.users)[0]):
                 # Normally, the output of shared expert is directly added to the output of MoE layers.
                 # In some models(e.g. Qwen) however, there is an additional shared expert gate.
