@@ -42,8 +42,10 @@ class WrapWeightDequantSubgraphs(NodewiseOptimizationPass):
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             self.global_quant_config is not None
-            and self.global_quant_config.weight_quant_scheme is not None
+            and len(self.global_quant_config.quant_configs) == 1
+            and (weight_quant_scheme := self.global_quant_config.quant_configs[0].weight_quant_scheme) is not None
             and (mm := MM.specialize_from(node))
+            and self.global_quant_config.quant_configs[0].target == mm.target
             and (
                 dequantize_path := TrailingDequantizePath.configure_from(
                     mm.other, self.global_quant_config.hf_quant_method
@@ -52,11 +54,9 @@ class WrapWeightDequantSubgraphs(NodewiseOptimizationPass):
         ):
             return {}
 
-        if self.global_quant_config.weight_quant_scheme.mode == QuantizeMode.UNKNOWN:
-            self.global_quant_config.weight_quant_scheme.mode = dequantize_path.quantize_mode
-        self.global_quant_config.weight_quant_scheme.has_zero_point = (
-            self.global_quant_config.weight_quant_scheme.has_zero_point or dequantize_path.zero is not None
-        )
+        if weight_quant_scheme.mode == QuantizeMode.UNKNOWN:
+            weight_quant_scheme.mode = dequantize_path.quantize_mode
+        weight_quant_scheme.has_zero_point = weight_quant_scheme.has_zero_point or dequantize_path.zero is not None
 
         unpacked_qweight = unpack_qweight(
             dequantize_path.qweight.tensor, dequantize_path.bits, self.global_quant_config.hf_quant_method

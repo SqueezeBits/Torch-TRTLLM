@@ -36,7 +36,8 @@ class StashActQuantSubgraphs(NodewiseOptimizationPass):
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             self.global_quant_config is not None
-            and self.global_quant_config.input_quant_scheme is not None
+            and len(self.global_quant_config.quant_configs) == 1
+            and (input_quant_scheme := self.global_quant_config.quant_configs[0].input_quant_scheme) is not None
             and (linear := Linear.configure_from(node))
             and (
                 mul := MulTensorTensor.specialize_from(
@@ -52,7 +53,7 @@ class StashActQuantSubgraphs(NodewiseOptimizationPass):
             return {}
 
         assert mul_scale.tensor.ndim in (0, 1), "Only per-tensor quantization is supported currently"
-        if self.global_quant_config.input_quant_scheme.mode == QuantizeMode.UNKNOWN:
-            self.global_quant_config.input_quant_scheme.mode = QuantizeMode.PER_TENSOR
+        if input_quant_scheme.mode == QuantizeMode.UNKNOWN:
+            input_quant_scheme.mode = QuantizeMode.PER_TENSOR
         linear.activation_quant_scale = mul_scale.tensor
         return {mul.node: ReplaceAllUses(by=div.this)}

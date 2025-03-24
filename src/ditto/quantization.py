@@ -18,10 +18,11 @@ from typing import Any
 import torch
 from auto_gptq.nn_modules.qlinear import qlinear_cuda_old
 from compressed_tensors.config import CompressionFormat
-from compressed_tensors.quantization import QuantizationStrategy
+from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy
 from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
 from tensorrt_llm.quantization.functional import unpack_int32_into_int8
+from torch._ops import OpOverload
 from transformers import PretrainedConfig, PreTrainedModel
 from transformers.utils.quantization_config import (
     AwqConfig,
@@ -95,18 +96,32 @@ class QuantScheme(StrictlyTyped):
     Attributes:
         bits (int): The number of bits used for quantization.
         mode (QuantizeMode): The quantization mode.
-        dynamic (bool): Whether the quantization is dynamic.
         type (str | None): The type of the quantization.
         group_size (int | None): The size of the quantization group.
         has_zero_point (bool): Whether the quantization uses a zero point.
+        dynamic (bool): Whether the quantization is dynamic.
     """
 
     bits: int
     mode: QuantizeMode
-    dynamic: bool = False
     type: str | None = None
     group_size: int | None = None
     has_zero_point: bool = False
+    dynamic: bool = False
+
+
+class TargetQuantConfig(StrictlyTyped):
+    """Target quantization config.
+
+    Attributes:
+        target (OpOverload): The target operator.
+        input_quant_scheme (QuantScheme | None): The input quantization scheme.
+        weight_quant_scheme (QuantScheme | None): The weight quantization scheme.
+    """
+
+    target: OpOverload
+    input_quant_scheme: QuantScheme | None
+    weight_quant_scheme: QuantScheme | None
 
 
 class GlobalQuantConfig(StrictlyTyped):
@@ -115,18 +130,15 @@ class GlobalQuantConfig(StrictlyTyped):
     Attributes:
         hf_quant_method (QuantizationMethod): The quantization method used by the Hugging Face model
         trtllm_quant_algo (QuantAlgo): The quantization algorithm used by TRT-LLM
-        bits (int): The number of bits used for quantization
         trtllm_kv_cache_quant_algo (QuantAlgo | None): The quantization algorithm used by TRT-LLM for the KV cache.
             Defaults to None.
-        group_size (int | None): The size of the quantization group. Defaults to None.
-        has_zero_point (bool): Whether the quantization uses a zero point. Defaults to False.
+        quant_configs (list[TargetQuantConfig]): The quantization schemes for the target operators.
     """
 
     hf_quant_method: QuantizationMethod
     trtllm_quant_algo: QuantAlgo
     trtllm_kv_cache_quant_algo: QuantAlgo | None = None
-    input_quant_scheme: QuantScheme | None = None
-    weight_quant_scheme: QuantScheme | None = None
+    quant_configs: list[TargetQuantConfig] = []
 
     @classmethod
     def create_from(cls, pretrained_config: Any) -> Self | None:
@@ -152,12 +164,17 @@ class GlobalQuantConfig(StrictlyTyped):
             return cls(
                 hf_quant_method=quantization_config.quant_method,
                 trtllm_quant_algo=QuantAlgo.W4A16_GPTQ if quantization_config.bits == 4 else QuantAlgo.W8A16_GPTQ,
-                input_quant_scheme=None,
-                weight_quant_scheme=QuantScheme(
-                    bits=quantization_config.bits,
-                    mode=QuantizeMode.PER_GROUP,
-                    group_size=quantization_config.group_size,
-                ),
+                quant_configs=[
+                    TargetQuantConfig(
+                        target=torch.ops.aten.mm.default,
+                        input_quant_scheme=None,
+                        weight_quant_scheme=QuantScheme(
+                            bits=quantization_config.bits,
+                            mode=QuantizeMode.PER_GROUP,
+                            group_size=quantization_config.group_size,
+                        ),
+                    ),
+                ],
             )
 
         if isinstance(quantization_config, AwqConfig):
@@ -166,50 +183,64 @@ class GlobalQuantConfig(StrictlyTyped):
             return cls(
                 hf_quant_method=quantization_config.quant_method,
                 trtllm_quant_algo=QuantAlgo.W4A16_AWQ if quantization_config.bits == 4 else QuantAlgo.W8A16,
-                input_quant_scheme=None,
-                weight_quant_scheme=QuantScheme(
-                    bits=quantization_config.bits,
-                    mode=QuantizeMode.PER_GROUP,
-                    group_size=quantization_config.group_size,
-                    has_zero_point=quantization_config.zero_point,
-                ),
+                quant_configs=[
+                    TargetQuantConfig(
+                        target=torch.ops.aten.mm.default,
+                        input_quant_scheme=None,
+                        weight_quant_scheme=QuantScheme(
+                            bits=quantization_config.bits,
+                            mode=QuantizeMode.PER_GROUP,
+                            group_size=quantization_config.group_size,
+                            has_zero_point=quantization_config.zero_point,
+                        ),
+                    ),
+                ],
             )
 
-        if isinstance(quantization_config, CompressedTensorsConfig):
+        if (
+            isinstance(quantization_config, CompressedTensorsConfig)
+            and quantization_config.quantization_config is not None
+            and len(quantization_config.quantization_config.config_groups) == 1
+            and isinstance(
+                config := quantization_config.quantization_config.config_groups["group_0"],
+                QuantizationScheme,
+            )
+        ):
+            assert (
+                len(config.targets) == 1 and config.targets[0] == "Linear"
+            ), f"Unsupported targets: {config.targets=}. Only Linear is supported currently."
             assert quantization_config.quantization_config.format in (
                 CompressionFormat.float_quantized.value,
                 CompressionFormat.naive_quantized.value,
-            ), f"Unsupported compressed tensors format: {quantization_config.quantization_config.format}"
+            ), f"Unsupported compressed tensors format currently: {quantization_config.quantization_config.format}"
             assert (
-                len(configs := quantization_config.quantization_config.config_groups) == 1
-            ), "Only one config group is supported currently"
-            assert (
-                configs["group_0"].input_activations.strategy is not None
-                and configs["group_0"].input_activations.strategy == QuantizationStrategy.TENSOR
-                and configs["group_0"].input_activations.num_bits == 8
-                and configs["group_0"].weights.strategy is not None
-                and configs["group_0"].weights.strategy == QuantizationStrategy.TENSOR
-                and configs["group_0"].weights.num_bits == 8
+                config.input_activations.strategy is not None
+                and config.input_activations.strategy == QuantizationStrategy.TENSOR
+                and config.input_activations.num_bits == 8
+                and config.weights.strategy is not None
+                and config.weights.strategy == QuantizationStrategy.TENSOR
+                and config.weights.num_bits == 8
             ), "Only per-tensor quantization and 8-bit quantization is supported currently"
             return cls(
                 hf_quant_method=quantization_config.quantization_config.quant_method,
                 trtllm_quant_algo=QuantAlgo.FP8,
-                input_quant_scheme=QuantScheme(
-                    bits=configs["group_0"].input_activations.num_bits,
-                    mode=QuantizeMode.UNKNOWN,
-                    dynamic=configs["group_0"].input_activations.dynamic,
-                    type=configs["group_0"].input_activations.type,
-                )
-                if hasattr(configs["group_0"], "input_activations")
-                else None,
-                weight_quant_scheme=QuantScheme(
-                    bits=configs["group_0"].weights.num_bits,
-                    mode=QuantizeMode.UNKNOWN,
-                    dynamic=configs["group_0"].weights.dynamic,
-                    type=configs["group_0"].weights.type,
-                )
-                if hasattr(configs["group_0"], "weights")
-                else None,
+                quant_configs=[
+                    TargetQuantConfig(
+                        target=torch.ops.aten.mm.default,
+                        input_quant_scheme=QuantScheme(
+                            bits=config.input_activations.num_bits,
+                            mode=QuantizeMode.UNKNOWN,
+                            dynamic=config.input_activations.dynamic,
+                            type=config.input_activations.type,
+                        ),
+                        weight_quant_scheme=QuantScheme(
+                            bits=config.weights.num_bits,
+                            mode=QuantizeMode.UNKNOWN,
+                            dynamic=config.weights.dynamic,
+                            type=config.weights.type,
+                        ),
+                    ),
+                ],
             )
 
         raise RuntimeError(f"Unsupported quantization algorithm: {quantization_config}")
@@ -284,9 +315,7 @@ def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: QuantizationM
             )
             qweight = (qweight - 128).to(torch.int8)
     elif quant_method == QuantizationMethod.COMPRESSED_TENSORS:
-        assert (
-            bits == 8
-        ), f"Unsupported compressed tensors bits: {bits=}. Only 8-bit quantization (FP8) is supported currently."
+        assert bits == 8, f"Unsupported bits: {bits=}. Only 8-bit quantization (FP8) is supported currently."
         assert qweight.dtype.itemsize == 1, f"Wrong dtype of qweight: {qweight.dtype=}"
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
@@ -312,6 +341,9 @@ def unpack_zeros(zeros: torch.Tensor, bits: int, quant_method: QuantizationMetho
         else:
             zeros = zeros.view(torch.int8)
         zeros = -zeros + 2 ** (bits - 1) - 1 * (quant_method is QuantizationMethod.GPTQ)
+    elif quant_method == QuantizationMethod.COMPRESSED_TENSORS:
+        assert bits == 8, f"Unsupported bits: {bits=}. Only 8-bit quantization (FP8) is supported currently."
+        assert zeros.dtype.itemsize == 1, f"Wrong dtype of zeros: {zeros.dtype=}"
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
 
@@ -337,7 +369,7 @@ def postprocess_qweight_for_trtllm(
         torch.Tensor: The postprocessed weight tensor for TensorRT-LLM
     """
     if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
-        assert qweight.dtype == torch.uint8, f"Unsupported tensor dtype: {qweight.dtype=}"
+        assert qweight.dtype in (torch.uint8, torch.int8), f"Unsupported tensor dtype: {qweight.dtype=}"
         assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
         if bits == 4:
             qweight = (qweight[:, 1::2] * 16 + qweight[:, ::2]).view(torch.int8)

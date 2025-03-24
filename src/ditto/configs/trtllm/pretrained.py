@@ -391,14 +391,17 @@ class TRTLLMQuantConfig(StrictlyTyped):
         Returns:
             Self: The created TRTLLMQuantConfig
         """
+        if not global_quant_config.quant_configs:
+            return cls()
+
         return cls(
             quant_algo=global_quant_config.trtllm_quant_algo,
             kv_cache_quant_algo=global_quant_config.trtllm_kv_cache_quant_algo,
-            group_size=global_quant_config.weight_quant_scheme.group_size
-            if global_quant_config.weight_quant_scheme is not None
+            group_size=global_quant_config.quant_configs[0].weight_quant_scheme.group_size
+            if global_quant_config.quant_configs[0].weight_quant_scheme is not None
             else None,
-            has_zero_point=global_quant_config.weight_quant_scheme.has_zero_point
-            if global_quant_config.weight_quant_scheme is not None
+            has_zero_point=global_quant_config.quant_configs[0].weight_quant_scheme.has_zero_point
+            if global_quant_config.quant_configs[0].weight_quant_scheme is not None
             else None,
         )
 
