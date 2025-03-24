@@ -26,6 +26,17 @@ class FuseDequantizes(NodewiseOptimizationPass):
     """Fuse consecutive dequantize nodes with cat node."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+        def name_generator(graph_module: GraphModule) -> Generator[str, None, None]:
+            name = "dequantize_fused_constant"
+            if not hasattr(graph_module, name):
+                yield name
+
+            idx = 1
+            while True:
+                if not hasattr(graph_module, f"{name}_{idx}"):
+                    yield f"{name}_{idx}"
+                idx += 1
+
         if not (
             (cat := Cat.specialize_from(node))
             and len(dequantize_nodes := cat.tensors) > 1
@@ -111,26 +122,6 @@ def are_fusible(dequantizes: list[Dequantize]) -> bool:
             return False
 
     return True
-
-
-def name_generator(graph_module: GraphModule) -> Generator[str, None, None]:
-    """Generate a unique name for the fused dequantize node.
-
-    Args:
-        graph_module (GraphModule): The graph module to generate the name for
-
-    Returns:
-        Generator[str, None, None]: A generator of unique names
-    """
-    name = "dequantize_fused_constant"
-    if not hasattr(graph_module, name):
-        yield name
-
-    idx = 1
-    while True:
-        if not hasattr(graph_module, f"{name}_{idx}"):
-            yield f"{name}_{idx}"
-        idx += 1
 
 
 def fuse_weights(

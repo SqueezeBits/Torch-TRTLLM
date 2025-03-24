@@ -31,6 +31,17 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
     """Replace torch.ops.aten.mm.default by GemmPlugin for FP8 precision (required for trtllm)."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
+        def name_generator(graph_module: GraphModule) -> Generator[str, None, None]:
+            name = "act_scale"
+            if not hasattr(graph_module, name):
+                yield name
+
+            idx = 1
+            while True:
+                if not hasattr(graph_module, f"{name}_{idx}"):
+                    yield f"{name}_{idx}"
+                idx += 1
+
         if not (
             (linear := Linear.configure_from(node))
             and (this := get_tensor_metadata(linear.mm.this))
@@ -71,23 +82,3 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
             propagate_metadata_from(linear.mm, to=plugin_node)
 
         return {node: ReplaceAllUses(by=plugin_node)}
-
-
-def name_generator(graph_module: GraphModule) -> Generator[str, None, None]:
-    """Generate unique names for the nodes.
-
-    Args:
-        graph_module (GraphModule): The graph module
-
-    Returns:
-        Generator[str, None, None]: A generator of unique names
-    """
-    name = "act_scale"
-    if not hasattr(graph_module, name):
-        yield name
-
-    idx = 1
-    while True:
-        if not hasattr(graph_module, f"{name}_{idx}"):
-            yield f"{name}_{idx}"
-        idx += 1

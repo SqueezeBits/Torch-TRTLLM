@@ -18,12 +18,9 @@ import torch
 from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
 from torch.fx import Node
+from transformers.utils.quantization_config import QuantizationMethod
 
-from ...quantization import (
-    inference_trtllm_quant_algo,
-    postprocess_qweight_for_trtllm,
-    postprocess_zeros_for_trtllm,
-)
+from ...quantization import inference_trtllm_quant_algo
 from ...types import DataType
 from ..nodes import Dequantize, GetAttr
 from ..subgraphs import Linear
@@ -137,3 +134,66 @@ def get_weightonly_groupwise_quant_algo(
     """
     flags = [has_bias, has_zeros, has_pre_quant_scale, is_w4a8_awq, is_int8_weight]
     return sum((flag << i) for i, flag in enumerate(flags))
+
+
+def postprocess_qweight_for_trtllm(
+    qweight: torch.Tensor,
+    bits: int,
+    quant_method: QuantizationMethod,
+    *,
+    model_dtype: torch.dtype,
+) -> torch.Tensor:
+    """Postprocess the quantized weight tensor for TensorRT-LLM.
+
+    Args:
+        qweight (torch.Tensor): The quantized weight tensor
+        bits (int): The number of bits used for quantization
+        quant_method (QuantizationMethod): The quantization method used
+        model_dtype (torch.dtype): The model data type.
+
+    Returns:
+        torch.Tensor: The postprocessed weight tensor for TensorRT-LLM
+    """
+    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
+        assert qweight.dtype in (torch.uint8, torch.int8), f"Unsupported tensor dtype: {qweight.dtype=}"
+        assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
+        if bits == 4:
+            qweight = (qweight[:, 1::2] * 16 + qweight[:, ::2]).view(torch.int8)
+        weight_dtype = torch.int8 if bits == 8 else torch.quint4x2
+        qweight = torch.ops.trtllm.preprocess_weights_for_mixed_gemm(qweight, weight_dtype, torch.float16).view(
+            model_dtype
+        )
+    else:
+        raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
+
+    return qweight
+
+
+def postprocess_zeros_for_trtllm(
+    zeros: torch.Tensor,
+    bits: int,
+    quant_method: QuantizationMethod,
+    *,
+    scale: torch.Tensor,
+    model_dtype: torch.dtype,
+) -> torch.Tensor:
+    """Postprocess the quantized zero point tensor for TensorRT-LLM.
+
+    Args:
+        zeros (torch.Tensor): The quantized zero point tensor
+        bits (int): The number of bits used for quantization
+        quant_method (QuantizationMethod): The quantization method used
+        scale (torch.Tensor): The scale tensor
+        model_dtype (torch.dtype): The model data type
+
+    Returns:
+        torch.Tensor: The postprocessed zero point tensor for TensorRT-LLM
+    """
+    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
+        assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
+        zeros = zeros * scale
+        zeros = zeros.to(model_dtype)
+    else:
+        raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
+
+    return zeros

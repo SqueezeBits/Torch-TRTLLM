@@ -14,11 +14,12 @@
 
 
 import torch
+from tensorrt_llm.quantization.functional import unpack_int32_into_int8
 from torch.fx import Node
 from transformers.utils.quantization_config import QuantizationMethod
 from typing_extensions import Self
 
-from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode, unpack_qweight, unpack_zeros
+from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode
 from ...types import StrictlyTyped
 from ..nodes import MM, GetAttr, MulTensorTensor, Permute
 from ..targets import Dequantize
@@ -318,3 +319,68 @@ def find_qweight_and_zero_node(
         return qweight, None
 
     raise NotImplementedError(f"Quantization for {quant_method} is not implemented yet.")
+
+
+def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: QuantizationMethod) -> torch.Tensor:
+    """Unpack the quantized weight tensor.
+
+    Args:
+        qweight (torch.Tensor): The quantized weight tensor
+        bits (int): The number of bits used for quantization
+        quant_method (QuantizationMethod): The quantization method used
+
+    Returns:
+        torch.Tensor: The unpacked weight tensor
+    """
+    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
+        assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
+        if bits == 4:
+            qweight = unpack_int32_into_int8(
+                qweight if quant_method is QuantizationMethod.AWQ else qweight.T,
+                quant_method is QuantizationMethod.AWQ,
+            )
+            qweight = qweight.T if quant_method is QuantizationMethod.GPTQ else qweight
+            qweight = qweight - 8
+            qweight[qweight < 0] += 16
+            qweight = qweight.view(torch.uint8).contiguous()
+        else:
+            qweight = (
+                qweight.T.contiguous().view(torch.uint8).T.contiguous()
+                if quant_method is QuantizationMethod.GPTQ
+                else qweight.view(torch.uint8).contiguous()
+            )
+            qweight = (qweight - 128).to(torch.int8)
+    elif quant_method == QuantizationMethod.COMPRESSED_TENSORS:
+        assert bits == 8, f"Unsupported bits: {bits=}. Only 8-bit quantization (FP8) is supported currently."
+        assert qweight.dtype.itemsize == 1, f"Wrong dtype of qweight: {qweight.dtype=}"
+    else:
+        raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
+
+    return qweight
+
+
+def unpack_zeros(zeros: torch.Tensor, bits: int, quant_method: QuantizationMethod) -> torch.Tensor:
+    """Unpack the quantized zero point tensor.
+
+    Args:
+        zeros (torch.Tensor): The quantized zero point tensor
+        bits (int): The number of bits used for quantization
+        quant_method (QuantizationMethod): The quantization method used
+
+    Returns:
+        torch.Tensor: The unpacked zero point tensor
+    """
+    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
+        assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
+        if bits == 4:
+            zeros = unpack_int32_into_int8(zeros, quant_method is QuantizationMethod.AWQ)
+        else:
+            zeros = zeros.view(torch.int8)
+        zeros = -zeros + 2 ** (bits - 1) - 1 * (quant_method is QuantizationMethod.GPTQ)
+    elif quant_method == QuantizationMethod.COMPRESSED_TENSORS:
+        assert bits == 8, f"Unsupported bits: {bits=}. Only 8-bit quantization (FP8) is supported currently."
+        assert zeros.dtype.itemsize == 1, f"Wrong dtype of zeros: {zeros.dtype=}"
+    else:
+        raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
+
+    return zeros
