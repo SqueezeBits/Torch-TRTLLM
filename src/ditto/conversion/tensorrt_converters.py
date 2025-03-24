@@ -61,7 +61,6 @@ def convert_quantize(
     )
 
     quantize_layer = ctx.net.add_quantize(input_tensor, scale_tensor, DataType(output_dtype).to(trt.DataType))
-    # quantize_layer.set_output_type(0, DataType(output_dtype).to(trt.DataType))
     set_layer_name(quantize_layer, target, name + "_quantize", SourceIR.ATEN)
 
     return quantize_layer.get_output(0)

@@ -104,7 +104,7 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
                         zeros is not None,
                         False,
                         local_trtllm_quant_algo == QuantAlgo.W4A8_AWQ,
-                        unpacked_weight.tensor.dtype == torch.int8,
+                        dequantize.target.bits == 8,
                     ),
                     group_size=dequantize.target.group_size,
                 )
