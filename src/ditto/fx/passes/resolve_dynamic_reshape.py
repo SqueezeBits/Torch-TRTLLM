@@ -12,32 +12,77 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from torch import SymInt, Tensor
 from torch.fx import Node
 
 from ..nodes import Expand, Reshape, SymSizeInt
+from ..utils import get_val
 from .infra import ModifiedInsideThePass, NodewiseOptimizationPass, NodewisePassResult
 
 
 class ResolveDynamicReshape(NodewiseOptimizationPass):
-    """Resolve reshape operations containing a single dynamic(symbolic) dimension.
+    """Resolve reshape operations containing a single dynamic(symbolic int) dimension.
 
     It replaces the dynamic dimension with the automatic inference value (-1) when the target reshape operation
-    has a single symbolic dimension.
+    has a single symbolic dimension. If there is already a inference value, it will be replaced with the proper value.
 
-    Example:
-        Before: reshape(x, [dim0, dynamic_dim, dim2])
+    Example1:
+        Before: reshape(x, [dim0, symint, dim2])
+        After: reshape(x, [dim0, -1, dim2])
+
+    Example2:
+        Before: reshape(x, [dim0, symint, -1])
         After: reshape(x, [dim0, -1, dim2])
     """
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if (
             (reshape := Reshape.specialize_from(node) or Expand.specialize_from(node))
-            and -1 not in reshape.shape
-            and (len([dim for dim in reshape.shape if isinstance(dim, Node) and SymSizeInt.specialize_from(dim)]) == 1)
+            and (num_auto_infer_values := len([dim for dim in reshape.shape if dim == -1])) <= 1
+            and len([dim for dim in reshape.shape if isinstance(dim, Node) and SymSizeInt.specialize_from(dim)]) == 1
         ):
-            new_shape = [dim if isinstance(dim, int) else -1 for dim in reshape.shape]
+            preprocessed_shape = reshape.shape[:]
+            if (
+                num_auto_infer_values == 1
+                and (output_val := get_val(node, expected_type=Tensor)) is not None
+                and is_possible_to_resolve_automatic_inference_value(reshape.shape, list(output_val.shape))
+            ):
+                for i, output_dim in enumerate(output_val.shape):
+                    if isinstance(preprocessed_shape[i], int) and preprocessed_shape[i] == -1:
+                        preprocessed_shape[i] = output_dim
+
+            new_shape = [dim if isinstance(dim, int) else -1 for dim in preprocessed_shape]
             args, kwargs = reshape.args_kwargs(shape=new_shape)
             reshape.node.args = args
             reshape.node.kwargs = kwargs
             return {node: ModifiedInsideThePass()}
+
         return {}
+
+
+def is_possible_to_resolve_automatic_inference_value(shape: list[Node | int], output_shape: list[int]) -> bool:
+    """Check if the shape can be resolved to the output shape.
+
+    Args:
+        shape (list[Node | int]): The shape to check.
+        output_shape (list[int]): The output shape to check against.
+    """
+    if len(shape) != len(output_shape):
+        return False
+
+    for dim, output_dim in zip(shape, output_shape):
+        if isinstance(dim, int) and dim == -1:
+            continue
+
+        # pylint: disable-next=too-many-boolean-expressions
+        if (isinstance(dim, int) and isinstance(output_dim, int) and dim != output_dim) or (
+            (
+                isinstance(dim, Node)
+                and (symint_dim := SymSizeInt.specialize_from(dim))
+                and (symint_dim_val := get_val(symint_dim.node, expected_type=str))
+            )
+            and (isinstance(output_dim, SymInt) and symint_dim_val != str(output_dim))
+        ):
+            return False
+
+    return True

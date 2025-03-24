@@ -135,7 +135,9 @@ class ParallelizeLinear(GraphOptimizationPass):
                     parallelized_weight = GetAttr.create(
                         graph,
                         self.get_name_of_attr(tensor.target),
-                        parallelize_2d_tensor(
+                        tensor.tensor
+                        if len(tensor.tensor.shape) == 1 or tensor.tensor.numel() == 1
+                        else parallelize_2d_tensor(
                             tensor.tensor,
                             tp_size=self.mapping.tp_size,
                             tp_rank=self.mapping.tp_rank,
@@ -245,7 +247,9 @@ class ParallelizeLinear(GraphOptimizationPass):
                     parallelized_weight = GetAttr.create(
                         graph,
                         self.get_name_of_attr(tensor.target),
-                        parallelize_2d_tensor(
+                        tensor.tensor
+                        if len(tensor.tensor.shape) == 1 or tensor.tensor.numel() == 1
+                        else parallelize_2d_tensor(
                             tensor.tensor,
                             tp_size=self.mapping.tp_size,
                             tp_rank=self.mapping.tp_rank,
