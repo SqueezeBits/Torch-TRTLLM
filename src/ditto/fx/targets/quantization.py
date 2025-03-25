@@ -17,10 +17,9 @@ import torch
 from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode
 from ...types import StrictlyTyped
 from .fake_tensor_mode import is_in_fake_tensor_mode
-from .plugin import Plugin
 
 
-class Quantize(Plugin):
+class Quantizer(StrictlyTyped):
     """Quantization target."""
 
     @property
@@ -30,7 +29,26 @@ class Quantize(Plugin):
         Returns:
             str: Name of the class
         """
-        return "quantize"
+        return "quantizer"
+
+    def __hash__(self) -> int:
+        """Get the hash of the class.
+
+        Returns:
+            int: Hash of the class
+        """
+        return hash(f"{self.__name__}_{id(self)}")
+
+    def __eq__(self, other: object) -> bool:
+        """Check if the class is equal to another object.
+
+        Args:
+            other (object): Another object
+
+        Returns:
+            bool: True if the class is equal to another object, False otherwise
+        """
+        return isinstance(other, Quantizer) and self is other
 
     def __call__(
         self,
@@ -53,7 +71,7 @@ class Quantize(Plugin):
         return out.to(output_dtype)
 
 
-class Dequantize(StrictlyTyped):
+class Dequantizer(StrictlyTyped):
     """Fake dequantization target.
 
     This target wraps the subgraph that holds the quantization information of the linear layer
@@ -84,7 +102,7 @@ class Dequantize(StrictlyTyped):
         Returns:
             str: Name of the class
         """
-        return "dequantize"
+        return "dequantizer"
 
     def __hash__(self) -> int:
         """Get the hash of the class.
@@ -103,7 +121,7 @@ class Dequantize(StrictlyTyped):
         Returns:
             bool: True if the class is equal to another object, False otherwise
         """
-        return isinstance(other, Dequantize) and self is other
+        return isinstance(other, Dequantizer) and self is other
 
     def __call__(
         self,

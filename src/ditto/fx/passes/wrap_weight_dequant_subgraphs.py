@@ -22,7 +22,7 @@ from typing_extensions import Self
 from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode
 from ...types import StrictlyTyped
 from ..nodes import MM, GetAttr, MulTensorTensor, Permute
-from ..targets import Dequantize
+from ..targets import Dequantizer
 from ..utils import find_nearest_node, get_val
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
@@ -80,7 +80,7 @@ class WrapWeightDequantSubgraphs(NodewiseOptimizationPass):
                 else None
             )
 
-        dequantize = Dequantize(
+        dequantize = Dequantizer(
             dtype=self.dtype,
             global_quant_config=self.global_quant_config,
             output_shape=dequantize_path.org_weight_shape,
@@ -108,7 +108,7 @@ class TrailingDequantizePath(StrictlyTyped):
         bits (int): The number of bits used to quantize the weight
         org_weight_shape (torch.Size): The shape of the original weight
         qweight (GetAttr): The get_attr node for the quantized weight
-        scale (GetAttr | None): The get_attr node for the scale. Defaults to None.
+        scale (GetAttr): The get_attr node for the scale
         zero (GetAttr | None): The get_attr node for the zero point. Defaults to None.
         group_size (int | None): The group size for the quantized weight. Defaults to None.
     """
@@ -116,7 +116,7 @@ class TrailingDequantizePath(StrictlyTyped):
     bits: int
     org_weight_shape: torch.Size
     qweight: GetAttr
-    scale: GetAttr = None
+    scale: GetAttr
     zero: GetAttr | None = None
     group_size: int | None = None
     has_permuted_weight: bool = False
@@ -135,7 +135,7 @@ class TrailingDequantizePath(StrictlyTyped):
             Self | None: The trailing dequantize path or None if no such path is found
         """
         if not (
-            (org_weight_tensor := get_val(node)) is not None
+            isinstance(org_weight_tensor := get_val(node), torch.Tensor)
             and (ancestors_with_maxdepth := get_ancestors_with_maxdepth_to_root(node))
             and (mul_node := find_nearest_node(node, lambda n: MulTensorTensor.specialize_from(n) is not None))
             and (mul := MulTensorTensor.specialize_from(mul_node))
@@ -278,7 +278,8 @@ def find_qweight_and_zero_node(
         assert group_size is not None, "Group size is required for GPTQ and AWQ."
         expected_equal_dim = 1 if quant_method == QuantizationMethod.GPTQ else 0
         for node in nodes:
-            shape = get_val(node).shape
+            assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
+            shape = node_val.shape
             if shape[expected_equal_dim] == org_weight_shape[expected_equal_dim] and (
                 qweight := GetAttr.specialize_from(node)
             ):
@@ -289,7 +290,8 @@ def find_qweight_and_zero_node(
         nodes.remove(qweight.node)
 
         for node in nodes:
-            shape = get_val(node).shape
+            assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
+            shape = node_val.shape
             if (
                 shape[0] * group_size == org_weight_shape[0]
                 and shape[1] * packed_ratio == org_weight_shape[1]
@@ -303,7 +305,8 @@ def find_qweight_and_zero_node(
 
     if quant_method == QuantizationMethod.COMPRESSED_TENSORS:
         for node in nodes:
-            shape = get_val(node).shape
+            assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
+            shape = node_val.shape
             if (
                 len(shape) == 2
                 and shape[1] == org_weight_shape[0]

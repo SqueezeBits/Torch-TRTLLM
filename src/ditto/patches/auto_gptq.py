@@ -23,7 +23,7 @@ from auto_gptq.utils import import_utils  # noqa: E402
 
 @custom_patch(
     name="auto_gptq.utils.import_utils.dynamically_import_QuantLinear",
-    reason=(),
+    reason="",
     required=True,
     env_var_to_disable="DISABLE_AUTO_GPTQ_QUANTLINEAR_IMPORT_PATCH",
 )

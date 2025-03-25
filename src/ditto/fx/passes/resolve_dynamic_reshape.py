@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from torch import SymInt, Tensor
+from torch import Size, SymInt, Tensor
 from torch.fx import Node
 
+from ...types import ShapeArg
 from ..nodes import Expand, Reshape, SymSizeInt
 from ..utils import get_val
 from .infra import ModifiedInsideThePass, NodewiseOptimizationPass, NodewisePassResult
@@ -45,7 +46,7 @@ class ResolveDynamicReshape(NodewiseOptimizationPass):
             if (
                 num_auto_infer_values == 1
                 and (output_val := get_val(node, expected_type=Tensor)) is not None
-                and is_possible_to_resolve_automatic_inference_value(reshape.shape, list(output_val.shape))
+                and is_resolvable(reshape.shape, output_val.shape)
             ):
                 for i, output_dim in enumerate(output_val.shape):
                     if isinstance(preprocessed_shape[i], int) and preprocessed_shape[i] == -1:
@@ -60,28 +61,24 @@ class ResolveDynamicReshape(NodewiseOptimizationPass):
         return {}
 
 
-def is_possible_to_resolve_automatic_inference_value(shape: list[Node | int], output_shape: list[int]) -> bool:
+def is_resolvable(shape_arg: ShapeArg, output_shape: Size) -> bool:
     """Check if the shape can be resolved to the output shape.
 
     Args:
-        shape (list[Node | int]): The shape to check.
-        output_shape (list[int]): The output shape to check against.
+        shape_arg (ShapeArg): The shape argument provided to reshape node.
+        output_shape (Size): The output shape to check against.
     """
-    if len(shape) != len(output_shape):
+    if len(shape_arg) != len(output_shape):
         return False
 
-    for dim, output_dim in zip(shape, output_shape):
+    for dim, output_dim in zip(shape_arg, output_shape):
         if isinstance(dim, int) and dim == -1:
             continue
 
         # pylint: disable-next=too-many-boolean-expressions
         if (isinstance(dim, int) and isinstance(output_dim, int) and dim != output_dim) or (
-            (
-                isinstance(dim, Node)
-                and (symint_dim := SymSizeInt.specialize_from(dim))
-                and (symint_dim_val := get_val(symint_dim.node, expected_type=str))
-            )
-            and (isinstance(output_dim, SymInt) and symint_dim_val != str(output_dim))
+            (isinstance(dim, Node) and (symint_dim_val := get_val(dim)) and isinstance(symint_dim_val, SymInt))
+            and (isinstance(output_dim, SymInt) and symint_dim_val != output_dim)
         ):
             return False
 

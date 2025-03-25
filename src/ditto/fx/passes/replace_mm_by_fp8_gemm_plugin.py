@@ -22,7 +22,7 @@ from ...quantization import QuantizeMode
 from ...types import DataType
 from ..nodes import Dequantize, GetAttr, Permute
 from ..subgraphs import Linear
-from ..targets import GemmPlugin, Quantize
+from ..targets import GemmPlugin, Quantizer
 from ..utils import get_tensor_metadata
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
@@ -62,7 +62,7 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
         with node.graph.inserting_before(node):
             act_scale_attr = GetAttr.create(node.graph, next(name_gen), act_scale_tensor)
             quantize = node.graph.call_function(
-                Quantize(),
+                Quantizer(),
                 (
                     linear.input_node,
                     act_scale_attr.node,

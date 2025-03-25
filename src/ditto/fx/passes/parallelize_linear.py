@@ -20,7 +20,7 @@ from torch.fx import Graph, GraphModule, Node
 
 from ...configs import TRTLLMMapping
 from ...types import DataType
-from ..nodes import Dequantize, Embedding, Expand, GetAttr, Permute, Reshape, Slice
+from ..nodes import Embedding, Expand, GetAttr, Permute, Reshape, Slice
 from ..subgraphs import FusedLinear, Linear
 from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs
 from ..utils import forget_all_descendant_fake_tensors, get_val
@@ -51,16 +51,22 @@ class ParallelizeLinear(GraphOptimizationPass):
         graph = graph_module.graph
         lm_head = Linear.find_last(graph)
         for node in graph.nodes:
-            if not ((fused_linear := FusedLinear.configure_from(node)) or (linear := Linear.configure_from(node))):
+            if not (
+                (
+                    (fused_linear := FusedLinear.configure_from(node))
+                    or (linear := fused_linear.linear if fused_linear else Linear.configure_from(node))
+                )
+                and linear is not None
+            ):
                 continue
 
-            linear = fused_linear.linear if fused_linear else linear
             tp_type = node.meta.get("tp_type", TensorParallelType.NONE)
             if tp_type == TensorParallelType.COLUMN:
                 slice_dim: list[int] | None = None
                 if fused_linear:
                     slice_dim = [0]
                     for slice_node in fused_linear.slices:
+                        assert isinstance(slice_node.end, int)
                         slice_dim.append(slice_node.end)
                         self.parallelize_slice(slice_node)
 
@@ -86,7 +92,8 @@ class ParallelizeLinear(GraphOptimizationPass):
                     shard_dim_idx = get_shard_dim_idx(reshape)
 
                     new_shape = list(reshape.shape)
-                    new_shape[shard_dim_idx] = new_shape[shard_dim_idx] // self.mapping.tp_size
+                    assert isinstance(shard_dim := new_shape[shard_dim_idx], int)
+                    new_shape[shard_dim_idx] = shard_dim // self.mapping.tp_size
                     args, kwargs = reshape.args_kwargs(shape=new_shape)
                     reshape.node.args = args
                     reshape.node.kwargs = kwargs
@@ -125,7 +132,7 @@ class ParallelizeLinear(GraphOptimizationPass):
         """
         graph = linear.mm.node.graph
 
-        if linear.dequantize_node is not None and (dequantize := Dequantize.specialize_from(linear.dequantize_node)):
+        if (dequantize := linear.weight_dequantize_node) is not None:
             input_nodes: list[Node] = []
             for dequant_input_node in linear.mm.other.all_input_nodes:
                 assert (
@@ -237,7 +244,7 @@ class ParallelizeLinear(GraphOptimizationPass):
             eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
         """
         graph = linear.mm.node.graph
-        if linear.dequantize_node is not None and (dequantize := Dequantize.specialize_from(linear.dequantize_node)):
+        if (dequantize := linear.weight_dequantize_node) is not None:
             input_nodes: list[Node] = []
             for dequant_input_node in linear.mm.other.all_input_nodes:
                 assert (
@@ -306,6 +313,7 @@ class ParallelizeLinear(GraphOptimizationPass):
         Args:
             slice_node (Slice): The slice node to be parallelized
         """
+        assert isinstance(slice_node.start, int) and isinstance(slice_node.end, int)
         new_start = slice_node.start // self.mapping.tp_size
         new_end = slice_node.end // self.mapping.tp_size
         args, kwargs = slice_node.args_kwargs(start=new_start, end=new_end)
@@ -372,7 +380,7 @@ def insert_allgather_plugin(graph: Graph, to: Node, group: list[int], gather_dim
         gather_dim (int, optional): The dimension to gather. Defaults to 0.
     """
     group_size = len(group)
-    input_tensor = get_val(to, torch.Tensor)
+    assert isinstance(input_tensor := get_val(to), torch.Tensor), "not found tensor value from the node"
     # if gather_dim < 0:
     #     assert gather_dim == -1, "gather_dim must be -1 when gather_dim is lower than 0"
     #     gather_dim = input_tensor.ndim - 1

@@ -82,29 +82,31 @@ from .passes.infra import GraphOptimizationPass, PassManager
 
 def get_preoptimization_transform(
     argument_hint: TRTLLMArgumentHint,
-    global_quant_config: GlobalQuantConfig,
+    global_quant_config: GlobalQuantConfig | None,
     dtype: torch.dtype,
 ) -> Callable[[GraphModule], GraphModule]:
     """Get the pre-optimization transform.
 
     Args:
         argument_hint (TRTLLMArgumentHint): the type hints for TRTLLM inputs
-        global_quant_config (GlobalQuantConfig): the global quantization configuration
+        global_quant_config (GlobalQuantConfig | None): the global quantization configuration
         dtype (torch.dtype): the data type for the plugins
 
     Returns:
         Callable[[GraphModule], GraphModule]: the pre-optimization transform
     """
-    return compose(
-        WrapWeightDequantSubgraphs(global_quant_config=global_quant_config, dtype=dtype).as_transform(),
-        StashActQuantSubgraphs(global_quant_config=global_quant_config).as_transform(),
-        StashLoraSubgraphs().as_transform(),
-        ConstantFolding().as_transform(),
-        AddTRTLLMInputs(argument_hint=argument_hint).as_transform(),
-        ResolveDynamicReshape().as_transform(),
-        EliminateCommonExpressions().as_transform(),
-        PropagateTensorParallelism(mapping=argument_hint.mapping).as_transform(),
-        ParallelizeLinear(mapping=argument_hint.mapping).as_transform(),
+    return get_transform(
+        WrapWeightDequantSubgraphs(global_quant_config=global_quant_config, dtype=dtype),
+        StashActQuantSubgraphs(global_quant_config=global_quant_config),
+        StashLoraSubgraphs(),
+        ConstantFolding(),
+        AddTRTLLMInputs(argument_hint=argument_hint),
+        ResolveDynamicReshape(),
+        EliminateCommonExpressions(),
+        PropagateTensorParallelism(mapping=argument_hint.mapping),
+        ParallelizeLinear(mapping=argument_hint.mapping),
+        steps=1,
+        warn_on_partial_convergence=False,
     )
 
 

@@ -49,10 +49,11 @@ class FuseDequantizes(NodewiseOptimizationPass):
             )
             and len(dequantizes) == len(dequantize_nodes)
             and are_fusible(dequantizes)
+            and (graph_module := node.graph.owning_module) is not None
         ):
             return {}
 
-        name_gen = name_generator(node.graph.owning_module)
+        name_gen = name_generator(graph_module)
         input_nodes: list[Node | None] = []
 
         fused_qweight_tensor = fuse_weights(
@@ -83,9 +84,9 @@ class FuseDequantizes(NodewiseOptimizationPass):
         else:
             input_nodes.append(None)
 
-        dequantize = dequantizes[0].target.model_copy(update={"output_shape": fused_qweight_tensor.shape})
+        new_dequantize = dequantizes[0].target.model_copy(update={"output_shape": fused_qweight_tensor.shape})
         with node.graph.inserting_before(node):
-            fused_dequantize_node = node.graph.call_function(dequantize, args=tuple(input_nodes))
+            fused_dequantize_node = node.graph.call_function(new_dequantize, args=tuple(input_nodes))
         nodes_to_replace = [node] + list(dequantize_nodes)
         propagate_metadata_from(*nodes_to_replace, to=fused_dequantize_node)
 

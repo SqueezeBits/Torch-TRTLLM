@@ -23,8 +23,16 @@ from typing_extensions import Self
 from ...literals import LoraPluginInputPrefix
 from ...types import verify
 from ..metadata_keys import ACTIVATION_QUANT_SCALE, FREE_LORA_PROTO, LAYER_INDEX, LORA_PREFIX, LORA_PROTOS
-from ..nodes import MM, AddTensorTensor, Gemm, Reshape, WeightOnlyGroupwiseQuantMatmul, WeightOnlyQuantMatmul
-from ..targets import Dequantize, LoraProto
+from ..nodes import (
+    MM,
+    AddTensorTensor,
+    Dequantize,
+    Gemm,
+    Reshape,
+    WeightOnlyGroupwiseQuantMatmul,
+    WeightOnlyQuantMatmul,
+)
+from ..targets import LoraProto
 from ..utils import get_val
 from .subgraph import Subgraph
 
@@ -217,11 +225,9 @@ class Linear(Subgraph):
         return verify(self.mm.meta.get(LORA_PREFIX), as_type=LoraPluginInputPrefix)
 
     @property
-    def dequantize_node(self) -> Node | None:
-        """The dequantization node associated with this linear layer."""
-        if isinstance(self.mm.other.target, Dequantize):
-            return self.mm.other
-        return None
+    def weight_dequantize_node(self) -> Dequantize | None:
+        """The weight dequantization node associated with this linear layer."""
+        return Dequantize.specialize_from(self.mm.other)
 
     @property
     def activation_quant_scale(self) -> torch.Tensor | None:

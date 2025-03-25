@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from enum import Enum, auto
-from typing import Any
 
 import torch
 from auto_gptq.nn_modules.qlinear import qlinear_cuda_old
@@ -22,7 +21,7 @@ from compressed_tensors.quantization import QuantizationScheme, QuantizationStra
 from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
 from torch._ops import OpOverload
-from transformers import PretrainedConfig, PreTrainedModel
+from transformers import PretrainedConfig
 from transformers.utils.quantization_config import (
     AwqConfig,
     CompressedTensorsConfig,
@@ -140,18 +139,17 @@ class GlobalQuantConfig(StrictlyTyped):
     quant_configs: list[TargetQuantConfig] = []
 
     @classmethod
-    def create_from(cls, pretrained_config: Any) -> Self | None:
+    def create_from(cls, pretrained_config: PretrainedConfig) -> Self | None:
         """Create a GlobalQuantConfig from a pretrained config.
 
         Args:
-            pretrained_config (Any): The pretrained config
+            pretrained_config (PretrainedConfig): The pretrained config
 
         Returns:
             Self | None: The created GlobalQuantConfig or None if no quantization config is found
         """
         if not (
-            isinstance(pretrained_config, PretrainedConfig)
-            and (quantization_config := getattr(pretrained_config, "quantization_config", None)) is not None
+            (quantization_config := getattr(pretrained_config, "quantization_config", None)) is not None
             and isinstance(quantization_config, QuantizationConfigMixin)
         ):
             return None
@@ -205,21 +203,23 @@ class GlobalQuantConfig(StrictlyTyped):
                 QuantizationScheme,
             )
         ):
-            assert (
-                len(config.targets) == 1 and config.targets[0] == "Linear"
-            ), f"Unsupported targets: {config.targets=}. Only Linear is supported currently."
+            assert config.targets == [
+                "Linear"
+            ], f'Unsupported targets: {config.targets=}. Currently, only a single "Linear" target is supported.'
             assert quantization_config.quantization_config.format in (
                 CompressionFormat.float_quantized.value,
                 CompressionFormat.naive_quantized.value,
-            ), f"Unsupported compressed tensors format currently: {quantization_config.quantization_config.format}"
+            ), f"Unsupported compressed tensors format: {quantization_config.quantization_config.format}"
             assert (
-                config.input_activations.strategy is not None
+                config.input_activations is not None
+                and config.input_activations.strategy is not None
                 and config.input_activations.strategy == QuantizationStrategy.TENSOR
                 and config.input_activations.num_bits == 8
+                and config.weights is not None
                 and config.weights.strategy is not None
                 and config.weights.strategy == QuantizationStrategy.TENSOR
                 and config.weights.num_bits == 8
-            ), "Only per-tensor quantization and 8-bit quantization is supported currently"
+            ), "Currently, only per-tensor 8-bit quantization is supported"
             return cls(
                 hf_quant_method=quantization_config.quantization_config.quant_method,
                 trtllm_quant_algo=QuantAlgo.FP8,
@@ -271,11 +271,11 @@ def inference_trtllm_quant_algo(
     return QuantAlgo[quant_algo]
 
 
-def resolve_qlinear_device_map(model: PreTrainedModel) -> None:
+def resolve_qlinear_device_map(model: torch.nn.Module) -> None:
     """Resolve the device map for the QuantLinear module.
 
     Args:
-        model (PreTrainedModel): The model to resolve the device map for
+        model (torch.nn.Module): The model to resolve the device map for
     """
     # Note: This is a temporary solution to resolve PendingUnbackedSymbolNotFound error during the fake propagation.
     for _, module in model.named_modules():

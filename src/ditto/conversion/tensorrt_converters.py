@@ -25,12 +25,12 @@ from torch_tensorrt.dynamo.conversion._ConversionContext import ConversionContex
 from torch_tensorrt.dynamo.conversion._ConverterRegistry import dynamo_tensorrt_converter
 from torch_tensorrt.fx.converters.converter_utils import set_layer_name
 
-from ..fx.targets import Quantize
+from ..fx.targets import Quantizer
 from ..types import DataType, verify
 
 
 @dynamo_tensorrt_converter(
-    Quantize,
+    Quantizer,
     supports_dynamic_shapes=True,
 )
 def convert_quantize(
@@ -52,15 +52,19 @@ def convert_quantize(
     Returns:
         trt.ITensor | Sequence[trt.ITensor]: The indexed tensor from the input sequence
     """
+
+    def get_argument(idx: int, name: str) -> Argument:
+        return args[idx] if idx < len(args) else kwargs.get(name, None)
+
     assert (
-        isinstance(target, Quantize)
+        isinstance(target, Quantizer)
         and len(args) == 3
-        and (input_tensor := verify(args[0], as_type=trt.ITensor)) is not None
-        and (scale_tensor := verify(args[1], as_type=trt.ITensor)) is not None
-        and (output_dtype := verify(args[2], as_type=torch.dtype)) is not None
+        and (input_tensor := verify(get_argument(0, "x"), as_type=trt.ITensor)) is not None
+        and (scale_tensor := verify(get_argument(1, "scale"), as_type=trt.ITensor)) is not None
+        and (output_dtype := verify(get_argument(2, "output_dtype"), as_type=torch.dtype)) is not None
     )
 
     quantize_layer = ctx.net.add_quantize(input_tensor, scale_tensor, DataType(output_dtype).to(trt.DataType))
-    set_layer_name(quantize_layer, target, name + "_quantize", SourceIR.ATEN)
+    set_layer_name(quantize_layer, target, name + "_quantizer", SourceIR.ATEN)
 
     return quantize_layer.get_output(0)

@@ -21,7 +21,7 @@ from .patch import custom_patch
 
 @custom_patch(
     name="awq.modules.linear.gemm.WQLinearMMFunction.forward",
-    reason=(),
+    reason="",
     required=True,
     env_var_to_disable="DISABLE_AUTO_AWQ_WQLINEARMMFUNCTION_PATCH",
 )

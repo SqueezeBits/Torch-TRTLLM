@@ -22,7 +22,7 @@ from transformers.utils.quantization_config import QuantizationMethod
 
 from ...quantization import inference_trtllm_quant_algo
 from ...types import DataType
-from ..nodes import Dequantize, GetAttr
+from ..nodes import GetAttr
 from ..subgraphs import Linear
 from ..targets import WeightOnlyGroupwiseQuantMatmulPlugin, WeightOnlyQuantMatmulPlugin
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
@@ -41,8 +41,7 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
         if not (
             (linear := Linear.configure_from(node))
             and linear.activation_quant_scale is None
-            and linear.dequantize_node is not None
-            and (dequantize := Dequantize.specialize_from(linear.dequantize_node))
+            and (dequantize := linear.weight_dequantize_node) is not None
             and (unpacked_weight := GetAttr.specialize_from(dequantize.qweight))
             and (scale := GetAttr.specialize_from(dequantize.scale))
             and (
@@ -93,6 +92,7 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
                 plugin_inputs.append(postprocessed_zeros.node)
 
         with node.graph.inserting_before(node):
+            plugin: WeightOnlyQuantMatmulPlugin | WeightOnlyGroupwiseQuantMatmulPlugin
             if dequantize.target.group_size is not None:
                 plugin = WeightOnlyGroupwiseQuantMatmulPlugin(
                     type_id=DataType(dequantize.target.dtype).to(trt.DataType),

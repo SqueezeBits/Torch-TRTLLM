@@ -38,10 +38,9 @@ class GatedMLP(Subgraph):
 
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
-        if gelu := Gelu.specialize_from(node):
+        if (gelu := Gelu.specialize_from(node)) and (proj := Linear.find_nearest(gelu.node)):
             # It assumes that up_proj and gate_proj are already fused.
-            up_proj = gate_proj = Linear.find_nearest(gelu.node)
-            return cls(up_proj=up_proj, gate_proj=gate_proj, mul=None)
+            return cls(up_proj=proj, gate_proj=proj, mul=None)
 
         if not (mul := MulTensorTensor.specialize_from(node)):
             return None

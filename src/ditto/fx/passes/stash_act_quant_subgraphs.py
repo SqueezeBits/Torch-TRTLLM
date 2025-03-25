@@ -52,7 +52,7 @@ class StashActQuantSubgraphs(NodewiseOptimizationPass):
         ):
             return {}
 
-        assert mul_scale.tensor.ndim in (0, 1), "Only per-tensor quantization is supported currently"
+        assert mul_scale.tensor.ndim in (0, 1), "per-token activation quantization is not supported yet"
         if input_quant_scheme.mode == QuantizeMode.UNKNOWN:
             input_quant_scheme.mode = QuantizeMode.PER_TENSOR
         linear.activation_quant_scale = mul_scale.tensor

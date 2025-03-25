@@ -18,7 +18,7 @@ from typing import Any
 import torch
 from torch.fx import Node
 
-from ..targets import Dequantize as DequantizeTarget
+from ..targets import Dequantizer
 from .call_function import FinalCallFunction
 from .get_attr import GetAttr
 
@@ -37,8 +37,8 @@ class Dequantize(FinalCallFunction):
     zeros: Node | None
 
     @property
-    def target(self) -> DequantizeTarget:
-        assert isinstance(t := super().target, DequantizeTarget)
+    def target(self) -> Dequantizer:
+        assert isinstance(t := super().target, Dequantizer)
         return t
 
     @property
@@ -80,4 +80,4 @@ class Dequantize(FinalCallFunction):
 
     @classmethod
     def validate_node(cls, node: Node) -> bool:
-        return isinstance(node.target, DequantizeTarget)
+        return isinstance(node.target, Dequantizer)

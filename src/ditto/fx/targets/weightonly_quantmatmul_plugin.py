@@ -25,11 +25,11 @@ class WeightOnlyQuantMatmulPlugin(Plugin):
     """TensorRT plugin for matrix multiplication with weight-only quantization.
 
     Attributes:
-        weight_type_id (int): Type ID for weight tensor.
+        weight_type_id (trt.DataType): Type ID for weight tensor.
         type_id (trt.DataType): Data type for computation.
     """
 
-    weight_type_id: int
+    weight_type_id: trt.DataType
     type_id: trt.DataType
 
     def __call__(

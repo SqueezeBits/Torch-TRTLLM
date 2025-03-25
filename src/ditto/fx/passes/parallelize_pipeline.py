@@ -14,7 +14,6 @@
 
 import tensorrt as trt
 import torch
-from torch._subclasses import FakeTensor
 from torch.fx import Graph, GraphModule, Node
 
 from ...arguments import TRTLLMArgumentHint
@@ -50,13 +49,16 @@ class ParallelizePipeline(GraphOptimizationPass):
         mapping = self.argument_hint.mapping
         assert (
             num_attn_layers := self.argument_hint.num_attn_layers
-        ) % mapping.pp_size == 0, (
+        ) is not None and num_attn_layers % mapping.pp_size == 0, (
             f"Number of attention layers ({num_attn_layers}) must be divisible by pipeline stages ({mapping.pp_size})"
         )
         layers_to_be_parallelized = mapping.get_pp_layers(num_attn_layers)
         gpt_attn_plugin_nodes = [node for node in graph.nodes if isinstance(node.target, GPTAttentionPlugin)]
         for idx, node in enumerate(gpt_attn_plugin_nodes):
-            if not (gpt_attn_plugin := node.target) and gpt_attn_plugin.layer_idx in layers_to_be_parallelized:
+            if (
+                isinstance(gpt_attn_plugin := node.target, GPTAttentionPlugin)
+                and gpt_attn_plugin.layer_idx in layers_to_be_parallelized
+            ):
                 continue
 
             if (
@@ -133,7 +135,8 @@ def find_input_node_of_pipeline(node: Node) -> Node | None:
     if not (
         expected_output_node := find_nearest_node(
             node,
-            lambda n: (add := AddTensorTensor.specialize_from(n)) and add.this.op == add.other.op == "call_function",
+            lambda n: (add := AddTensorTensor.specialize_from(n)) is not None
+            and add.this.op == add.other.op == "call_function",
             follow_parents=False,
         )
     ):
@@ -233,8 +236,10 @@ def resolve_unmatched_input_shapes(binary: BinaryElementwise) -> None:
         return False
 
     if (
-        (lhs_val := get_val(binary.this, FakeTensor)) is not None
-        and (rhs_val := get_val(binary.other, FakeTensor)) is not None
+        isinstance(binary.this, Node)
+        and isinstance(lhs_val := get_val(binary.this), torch.Tensor)
+        and isinstance(binary.other, Node)
+        and isinstance(rhs_val := get_val(binary.other), torch.Tensor)
         and (
             need_to_unsqueeze(lhs_val.shape, rhs_val.shape)
             if len(lhs_val.shape) < len(rhs_val.shape)
