@@ -38,7 +38,6 @@ from .configs import (
 from .constants import INPUT_IDS
 from .convert import convert
 from .debug import get_memory_footprint, save_for_debug
-from .debug.mla import save_mla_weights_for_debug
 from .export import export
 from .fx import generate_trtllm_engine_config
 from .fx.utils import find_output_node
@@ -123,7 +122,6 @@ def trtllm_build(
     )
 
     graph_module = trtllm_export(model, argument_hint)
-    save_mla_weights_for_debug(graph_module)
 
     for rank, transformed_graph_module in transform(
         graph_module,
