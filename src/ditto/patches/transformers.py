@@ -17,6 +17,7 @@ import transformers
 from transformers.modeling_attn_mask_utils import AttentionMaskConverter
 
 from .patch import custom_patch
+from .remote_transformers import apply_remote_transformers_patches
 
 
 @custom_patch(
@@ -66,3 +67,20 @@ def patch_attention_mask_converter_make_causal_mask() -> None:
         return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len + past_key_values_length)
 
     AttentionMaskConverter._make_causal_mask = patched_attention_mask_converter_make_causal_mask
+
+
+@custom_patch(
+    name="transformers.dynamic_module_utils.get_class_from_dynamic_module",
+    reason="applying custom patch for remote transformers modules which are loaded with --trust-remote-code",
+    required=True,
+    env_var_to_disable="DISABLE_TRANSFORMERS_GET_CLASS_FROM_DYNAMIC_MODULE_PATCH",
+)
+def patch_get_class_from_dynamic_module() -> None:
+    org_get_class_from_dynamic_module = transformers.dynamic_module_utils.get_class_from_dynamic_module
+
+    def patched_get_class_from_dynamic_module(*args, **kwargs):
+        model_class = org_get_class_from_dynamic_module(*args, **kwargs)
+        apply_remote_transformers_patches(model_class)
+        return model_class
+
+    transformers.dynamic_module_utils.get_class_from_dynamic_module = patched_get_class_from_dynamic_module

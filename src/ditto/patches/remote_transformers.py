@@ -26,9 +26,9 @@ PATCH_TARGETS = [
 ]
 
 
-def apply_model_specific_patch(model: PreTrainedModel) -> None:
-    model_name = model.__class__.__name__
-    module_path = type(model).__module__
+def apply_remote_transformers_patches(model_class: type[PreTrainedModel]) -> None:
+    model_name = model_class.__name__
+    module_path = model_class.__module__
     if model_name not in PATCH_TARGETS:
         return
     global modeling_deepseek
@@ -57,7 +57,7 @@ def apply_model_specific_patch(model: PreTrainedModel) -> None:
         )
         def patch_deepseek_v2_attention_forward() -> None:
             # NOTE: This is a temporary patch until the PR(https://github.com/pytorch/TensorRT/pull/3420) is merged.
-            # Once the PR is merged, we should remove this patch.
+            # Once the PR is merged and used in ditto, we should remove this patch.
             modeling_deepseek.DeepseekV2Attention.forward = patched_deepseek_v2_attention_forward
 
     if model_name == "DeepseekForCausalLM":

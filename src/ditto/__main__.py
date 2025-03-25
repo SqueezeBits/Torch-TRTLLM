@@ -34,7 +34,6 @@ from .api import trtllm_build
 from .constants import DEFAULT_DEVICE
 from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
 from .literals import DTypeLiteral
-from .patches import apply_model_specific_patch
 from .peft import load_peft_adapters
 from .types import trt_to_torch_dtype_mapping
 
@@ -67,8 +66,6 @@ def generate(
         device_map=device,
         trust_remote_code=trust_remote_code,
     )
-    apply_model_specific_patch(model)
-
     logger.info(f"device: {device} | dtype: {model.config.torch_dtype}")
     if dtype == "auto" and model.config.torch_dtype == torch.float32:
         logger.warning(
@@ -205,8 +202,6 @@ def build(
             device_map="auto",
             trust_remote_code=trust_remote_code,
         )
-        apply_model_specific_patch(model)
-
         if peft_ids:
             model = load_peft_adapters(model, peft_ids)
     logger.info(f"device: {model.device} | dtype: {model.config.torch_dtype}")
