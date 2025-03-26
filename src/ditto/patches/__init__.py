@@ -11,10 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# ruff: noqa
 
-from .auto_awq import patch_wqlinear_mm_func_forward
-from .auto_gptq import patch_dynamically_import_quantlinear
+# The order of the patches matters.
 from .torch import patch_modulelist_getitem
 from .transformers import patch_attention_mask_converter_make_causal_mask
+from .auto_awq import patch_wqlinear_mm_func_forward
+from .auto_gptq import patch_dynamically_import_quantlinear
 
 # Do NOT import from .trtllm! We don't want to apply the trtllm patches here.
