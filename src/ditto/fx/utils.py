@@ -296,7 +296,7 @@ def find_nearest_node(
     *,
     follow_parents: bool = True,
     follow_first_only: bool = False,
-    num_limits: int = 10,
+    max_depth: int = 10,
 ) -> Node | None:
     """Find the nearest node in the graph that matches the criterion.
 
@@ -306,7 +306,7 @@ def find_nearest_node(
         follow_parents (bool, optional): Whether to follow parent nodes. Defaults to True
         follow_first_only (bool, optional): Whether to follow only the first node in the parent or child list.
             Defaults to False
-        num_limits (int, optional): The maximum number of nodes to search. Defaults to 10
+        max_depth (int, optional): The maximum depth to search. Defaults to 10
 
     Returns:
         Node | None: The nearest node that matches the criterion or None if no such node is found
@@ -314,7 +314,9 @@ def find_nearest_node(
     seen_nodes: set[Node] = set()
     queue: list[Node] = [node]
 
-    while queue and len(seen_nodes) < num_limits:
+    for _ in range(max_depth):
+        if not queue:
+            break
         n = queue.pop(0)
         if n in seen_nodes:
             continue
