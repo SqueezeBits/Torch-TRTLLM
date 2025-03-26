@@ -305,6 +305,7 @@ def find_nearest(
     follow_first_only: bool = True,
     break_if: NodeCriterion | None = None,
     continue_if: NodeCriterion | None = None,
+    max_depth: int = 10,
 ) -> SubgraphType | None:
     ...
 
@@ -318,6 +319,7 @@ def find_nearest(
     follow_first_only: bool = True,
     break_if: NodeCriterion | None = None,
     continue_if: NodeCriterion | None = None,
+    max_depth: int = 10,
 ) -> NodeType | None:
     ...
 
@@ -330,6 +332,7 @@ def find_nearest(
     follow_first_only: bool = True,
     break_if: NodeCriterion | None = None,
     continue_if: NodeCriterion | None = None,
+    max_depth: int = 10,
 ) -> NodeType | SubgraphType | None:
     """Find the nearest node that can be specialized to this type using breadth-first search.
 
@@ -344,6 +347,7 @@ def find_nearest(
             at a node. Defaults to None.
         continue_if (NodeCriterion | None, optional): Function that returns True to skip a node
             but continue searching its neighbors. Defaults to None.
+        max_depth (int): Maximum depth to traverse in the search. Defaults to 10.
 
     Returns:
         NodeType | None: The nearest specialized node if found, otherwise None
@@ -352,19 +356,22 @@ def find_nearest(
         specialize_func = node_type.specialize_from
     else:
         specialize_func = node_type.configure_from
-    queue = [from_node]
+
+    queue = [(from_node, 0)]
     while queue:
-        node = queue.pop(0)
+        node, depth = queue.pop(0)
         if target_node := specialize_func(node):
             return target_node
         if break_if is not None and break_if(node):
             break
         if continue_if is not None and continue_if(node):
             continue
+        if depth > max_depth:
+            continue
         if not (next_nodes := list(node.all_input_nodes if follow_parent else node.users)):
             continue
         if follow_first_only:
-            queue.append(next_nodes[0])
+            queue.append((next_nodes[0], depth + 1))
         else:
-            queue.extend(next_nodes)
+            queue.extend((next_node, depth + 1) for next_node in next_nodes)
     return None
