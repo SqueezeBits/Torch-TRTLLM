@@ -403,22 +403,24 @@ class ROPEConfig(StrictlyTyped):
         self.long_rope_rotary_inv_freq = long_rope_rotary_inv_freq
         self.long_rope_rotary_cos_sin = long_rope_embed_positions_for_gpt_attention
 
+    def save_debug_artifacts(self) -> None:
+        """Save debug artifacts for RoPE configuration and inputs."""
         with open_debug_artifact("rope_inputs.pt", "wb") as f:
             if f:
                 rope_inputs = {
-                    "rotary_cos_sin": torch.from_numpy(embed_positions_for_gpt_attention),
+                    "rotary_cos_sin": self.rotary_cos_sin,
                 }
-                if rotary_inv_freq is not None:
+                if self.rotary_inv_freq is not None:
                     rope_inputs.update(
                         {
-                            "rotary_inv_freq": torch.from_numpy(rotary_inv_freq),
+                            "rotary_inv_freq": self.rotary_inv_freq,
                         }
                     )
-                if long_rope_rotary_inv_freq is not None:
+                if self.long_rope_rotary_inv_freq is not None and self.long_rope_rotary_cos_sin is not None:
                     rope_inputs.update(
                         {
-                            "long_rope_rotary_inv_freq": torch.from_numpy(long_rope_rotary_inv_freq),
-                            "long_rope_rotary_cos_sin": torch.from_numpy(long_rope_embed_positions_for_gpt_attention),
+                            "long_rope_rotary_inv_freq": self.long_rope_rotary_inv_freq,
+                            "long_rope_rotary_cos_sin": self.long_rope_rotary_cos_sin,
                         }
                     )
                 torch.save(

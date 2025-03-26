@@ -92,6 +92,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
             logger.debug(f"Replacing SDPA at layer {layer_idx} with {attn = }")
             if global_rope_config is None:
                 global_rope_config = attn.rope_config
+                global_rope_config.save_debug_artifacts()
             elif global_rope_config != attn.rope_config:
                 logger.warning(
                     f"Local RoPE config mismatched with the global one at layer {layer_idx}:\n"
