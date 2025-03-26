@@ -44,6 +44,18 @@ main() {
         # "CohereForAI/aya-expanse-8b --model-type commandr --pp-size 2" # unsupported in TensorRT-LLM
         # MoE
         "Qwen/Qwen1.5-MoE-A2.7B-Chat"
+        # W4A16 weight-only quantization (auto-gptq, autoawq)
+        "saul95/Llama-3.2-1B-GPTQ --skip-native --print-output"
+        "ciCic/llama-3.2-1B-Instruct-AWQ --skip-native --print-output"
+        # W8A16 weight-only quantization (auto-gptq, autoawq)
+        "fbaldassarri/TinyLlama_TinyLlama_v1.1-autogptq-int8-gs128-sym --skip-native --dtype float16 --print-output"
+        "fbaldassarri/TinyLlama_TinyLlama_v1.1-autogptq-int8-gs128-asym --skip-native --dtype float16 --print-output"
+        # FP8 per-tensor quantization (compressed-tensor)
+        "neuralmagic/Llama-3.2-1B-Instruct-FP8 --skip-native --print-output"
+        "neuralmagic/gemma-2-2b-it-FP8 --skip-native --print-output"
+        "neuralmagic/starcoder2-3b-FP8 --skip-native --print-output"
+        "nm-testing/TinyLlama-1.1B-Chat-v1.0-FP8-e2e --skip-native --print-output"
+        "nm-testing/Phi-3-mini-128k-instruct-FP8 --skip-native --print-output"
     )
 
     for MODEL_SPECIFIC_ARG in "${MODEL_SPECIFIC_ARGS[@]}"; do

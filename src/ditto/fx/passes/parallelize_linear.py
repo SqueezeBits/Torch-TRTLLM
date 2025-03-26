@@ -32,8 +32,6 @@ from .infra import (
 from .propagate_tensor_parallelism import TensorParallelType
 
 
-# TODO: Change ParallelizeLinear to inherit from NodewiseOptimization instead of GraphOptimizationPass
-# This will allow processing nodes individually rather than the whole graph at once
 class ParallelizeLinear(GraphOptimizationPass):
     """Parallelize linear nodes in the graph (Tensor Parallelism).
 
@@ -53,16 +51,22 @@ class ParallelizeLinear(GraphOptimizationPass):
         graph = graph_module.graph
         lm_head = Linear.find_last(graph)
         for node in graph.nodes:
-            if not ((fused_linear := FusedLinear.configure_from(node)) or (linear := Linear.configure_from(node))):
+            if not (
+                linear := (
+                    fused_linear.linear
+                    if (fused_linear := FusedLinear.configure_from(node))
+                    else Linear.configure_from(node)
+                )
+            ):
                 continue
 
-            linear = fused_linear.linear if fused_linear else linear
             tp_type = node.meta.get("tp_type", TensorParallelType.NONE)
             if tp_type == TensorParallelType.COLUMN:
                 slice_dim: list[int] | None = None
                 if fused_linear:
                     slice_dim = [0]
                     for slice_node in fused_linear.slices:
+                        assert isinstance(slice_node.end, int)
                         slice_dim.append(slice_node.end)
                         self.parallelize_slice(slice_node)
 
@@ -88,7 +92,8 @@ class ParallelizeLinear(GraphOptimizationPass):
                     shard_dim_idx = get_shard_dim_idx(reshape)
 
                     new_shape = list(reshape.shape)
-                    new_shape[shard_dim_idx] = new_shape[shard_dim_idx] // self.mapping.tp_size
+                    assert isinstance(shard_dim := new_shape[shard_dim_idx], int)
+                    new_shape[shard_dim_idx] = shard_dim // self.mapping.tp_size
                     args, kwargs = reshape.args_kwargs(shape=new_shape)
                     reshape.node.args = args
                     reshape.node.kwargs = kwargs
@@ -125,49 +130,65 @@ class ParallelizeLinear(GraphOptimizationPass):
             slice_dim (list[int], optional): The dimension to slice. Defaults to None.
             gather_output (bool, optional): Whether to gather the output. Defaults to True.
         """
-        if not (weight := GetAttr.specialize_from(linear.weight_node)):
-            return
-        weight_tensor = weight.tensor
-        local_out_features = linear.out_features // self.mapping.tp_size
-        if linear.has_transposed_weight:
-            weight_tensor = weight_tensor.T
+        graph = linear.mm.node.graph
 
-        if slice_dim:
-            parallelized_weight_tensor = torch.concat(
-                [
-                    weight_tensor[
-                        :,
-                        slice_dim[i]
-                        + (slice_dim[i + 1] - slice_dim[i])
-                        // self.mapping.tp_size
-                        * self.mapping.tp_rank : slice_dim[i]
-                        + (slice_dim[i + 1] - slice_dim[i]) // self.mapping.tp_size * (self.mapping.tp_rank + 1),
-                    ]
-                    for i in range(len(slice_dim) - 1)
-                ],
-                dim=1,
+        if (dequantize := linear.weight_dequantize_node) is not None:
+            input_nodes: list[Node] = []
+            for dequant_input_node in linear.mm.other.all_input_nodes:
+                assert (
+                    tensor := GetAttr.specialize_from(dequant_input_node)
+                ), "dequantize's input node is not specialized to GetAttr"
+                with graph.inserting_before(tensor.node):
+                    parallelized_weight = GetAttr.create(
+                        graph,
+                        self.get_name_of_attr(tensor.target),
+                        tensor.tensor
+                        if len(tensor.tensor.shape) == 1 or tensor.tensor.numel() == 1
+                        else parallelize_2d_tensor(
+                            tensor.tensor,
+                            tp_size=self.mapping.tp_size,
+                            tp_rank=self.mapping.tp_rank,
+                            is_column=True,
+                            is_transposed=False,
+                        ),
+                    )
+                    propagate_metadata_from(tensor, to=parallelized_weight)
+                dequant_input_node.replace_all_uses_with(parallelized_weight.node)
+                input_nodes.append(parallelized_weight.node)
+            parallelized_dequantize = dequantize.target.model_copy(
+                update={
+                    "output_shape": torch.Size(
+                        [dequantize.target.output_shape[0], dequantize.target.output_shape[1] // self.mapping.tp_size]
+                    )
+                }
             )
+            with graph.inserting_before(linear.mm.other):
+                parallelized_dequantize_node = graph.call_function(parallelized_dequantize, tuple(input_nodes))
+                propagate_metadata_from(linear.mm.other, to=parallelized_dequantize_node)
+            linear.mm.other.replace_all_uses_with(parallelized_dequantize_node)
         else:
-            parallelized_weight_tensor = weight_tensor[
-                :, local_out_features * self.mapping.tp_rank : local_out_features * (self.mapping.tp_rank + 1)
-            ]
+            assert (
+                weight := GetAttr.specialize_from(linear.weight_node)
+            ) is not None, "weight node is not specialized to GetAttr"
+            weight_tensor = weight.tensor
+            if linear.has_transposed_weight:
+                weight_tensor = weight_tensor.T
 
-        assert parallelized_weight_tensor.shape == (
-            linear.in_features,
-            local_out_features,
-        ), "unexpected shape of parallelized weight"
-
-        if linear.has_transposed_weight:
-            parallelized_weight_tensor = parallelized_weight_tensor.T
-
-        graph = weight.node.graph
-        with graph.inserting_before(weight.node):
-            parallelized_weight = GetAttr.create(
-                graph, self.get_name_of_attr(weight.target), parallelized_weight_tensor
-            )
-            propagate_metadata_from(weight, to=parallelized_weight)
-        weight.node.replace_all_uses_with(parallelized_weight.node)
-        linear.mm.other = parallelized_weight.node
+            with linear.mm.node.graph.inserting_before(weight.node):
+                parallelized_weight = GetAttr.create(
+                    linear.mm.node.graph,
+                    self.get_name_of_attr(weight.target),
+                    parallelize_2d_tensor(
+                        weight_tensor,
+                        tp_size=self.mapping.tp_size,
+                        tp_rank=self.mapping.tp_rank,
+                        is_column=True,
+                        is_transposed=linear.has_transposed_weight,
+                        slice_dim=slice_dim,
+                    ),
+                )
+                propagate_metadata_from(weight, to=parallelized_weight)
+            weight.node.replace_all_uses_with(parallelized_weight.node)
 
         if (
             linear.bias_node is not None
@@ -189,6 +210,7 @@ class ParallelizeLinear(GraphOptimizationPass):
                     dim=0,
                 )
             else:
+                local_out_features = linear.out_features // self.mapping.tp_size
                 parallelized_bias_tensor = bias.tensor[
                     local_out_features * self.mapping.tp_rank : local_out_features * (self.mapping.tp_rank + 1)
                 ]
@@ -197,7 +219,6 @@ class ParallelizeLinear(GraphOptimizationPass):
                 parallelized_bias = GetAttr.create(graph, self.get_name_of_attr(bias.target), parallelized_bias_tensor)
                 propagate_metadata_from(bias, to=parallelized_bias)
             bias.node.replace_all_uses_with(parallelized_bias.node)
-            linear.add.other = parallelized_bias.node
 
         if gather_output:
             insert_allgather_plugin(graph, linear.output_node, self.mapping.tp_group)
@@ -222,39 +243,59 @@ class ParallelizeLinear(GraphOptimizationPass):
                 Defaults to AllReduceFusionOp.NONE.
             eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
         """
-        if not (weight := GetAttr.specialize_from(linear.weight_node)):
-            return
-        local_in_features = linear.in_features // self.mapping.tp_size
-        if linear.has_transposed_weight:
-            parallelized_weight_tensor = weight.tensor[
-                :, local_in_features * self.mapping.tp_rank : local_in_features * (self.mapping.tp_rank + 1)
-            ]
+        graph = linear.mm.node.graph
+        if (dequantize := linear.weight_dequantize_node) is not None:
+            input_nodes: list[Node] = []
+            for dequant_input_node in linear.mm.other.all_input_nodes:
+                assert (
+                    tensor := GetAttr.specialize_from(dequant_input_node)
+                ), "dequantize's input node is not specialized to GetAttr"
+                with graph.inserting_before(tensor.node):
+                    parallelized_weight = GetAttr.create(
+                        graph,
+                        self.get_name_of_attr(tensor.target),
+                        tensor.tensor
+                        if len(tensor.tensor.shape) == 1 or tensor.tensor.numel() == 1
+                        else parallelize_2d_tensor(
+                            tensor.tensor,
+                            tp_size=self.mapping.tp_size,
+                            tp_rank=self.mapping.tp_rank,
+                            is_column=False,
+                            is_transposed=False,
+                        ),
+                    )
+                    propagate_metadata_from(tensor, to=parallelized_weight)
+                dequant_input_node.replace_all_uses_with(parallelized_weight.node)
+                input_nodes.append(parallelized_weight.node)
+            parallelized_dequantize = dequantize.target.model_copy(
+                update={
+                    "output_shape": torch.Size(
+                        [dequantize.target.output_shape[0] // self.mapping.tp_size, dequantize.target.output_shape[1]]
+                    )
+                }
+            )
+            with graph.inserting_before(linear.mm.other):
+                parallelized_dequantize_node = graph.call_function(parallelized_dequantize, tuple(input_nodes))
+                propagate_metadata_from(linear.mm.other, to=parallelized_dequantize_node)
+            linear.mm.other.replace_all_uses_with(parallelized_dequantize_node)
         else:
-            parallelized_weight_tensor = weight.tensor[
-                local_in_features * self.mapping.tp_rank : local_in_features * (self.mapping.tp_rank + 1), :
-            ]
-
-        assert (
-            parallelized_weight_tensor.shape
-            == (
-                linear.out_features,
-                local_in_features,
-            )
-            if linear.has_transposed_weight
-            else (
-                local_in_features,
-                linear.out_features,
-            )
-        ), "unexpected shape of parallelized weight"
-
-        graph = weight.node.graph
-        with graph.inserting_before(weight.node):
-            parallelized_weight = GetAttr.create(
-                graph, self.get_name_of_attr(weight.target), parallelized_weight_tensor
-            )
-            propagate_metadata_from(weight, to=parallelized_weight)
-        weight.node.replace_all_uses_with(parallelized_weight.node)
-        linear.mm.other = parallelized_weight.node
+            assert (
+                weight := GetAttr.specialize_from(linear.weight_node)
+            ) is not None, "weight node is not specialized to GetAttr"
+            with graph.inserting_before(weight.node):
+                parallelized_weight = GetAttr.create(
+                    graph,
+                    self.get_name_of_attr(weight.target),
+                    parallelize_2d_tensor(
+                        weight.tensor,
+                        tp_size=self.mapping.tp_size,
+                        tp_rank=self.mapping.tp_rank,
+                        is_column=False,
+                        is_transposed=linear.has_transposed_weight,
+                    ),
+                )
+                propagate_metadata_from(weight, to=parallelized_weight)
+            weight.node.replace_all_uses_with(parallelized_weight.node)
 
         insert_allreduce_plugin(
             graph,
@@ -272,11 +313,59 @@ class ParallelizeLinear(GraphOptimizationPass):
         Args:
             slice_node (Slice): The slice node to be parallelized
         """
+        assert isinstance(slice_node.start, int) and isinstance(slice_node.end, int)
         new_start = slice_node.start // self.mapping.tp_size
         new_end = slice_node.end // self.mapping.tp_size
         args, kwargs = slice_node.args_kwargs(start=new_start, end=new_end)
         slice_node.node.args = args
         slice_node.node.kwargs = kwargs
+
+
+def parallelize_2d_tensor(
+    tensor: torch.Tensor,
+    tp_size: int,
+    tp_rank: int,
+    *,
+    is_column: bool,
+    is_transposed: bool = False,
+    slice_dim: list[int] | None = None,
+) -> torch.Tensor:
+    """Parallelize the 2D tensor in the column or row direction.
+
+    Args:
+        tensor (torch.Tensor): The tensor to be parallelized
+        tp_size (int): The size of the tensor parallel
+        tp_rank (int): The rank of the tensor parallel
+        is_column (bool): Whether the tensor is parallelized in the column direction.
+        is_transposed (bool, optional): Whether the tensor is transposed. Defaults to False.
+        slice_dim (list[int], optional): The dimension to slice. Defaults to None.
+    """
+    if not is_column ^ is_transposed:
+        tensor = tensor.T
+    local_features = tensor.shape[1] // tp_size
+
+    if slice_dim:
+        parallelized_tensor = torch.concat(
+            [
+                tensor[
+                    :,
+                    slice_dim[i]
+                    + (slice_dim[i + 1] - slice_dim[i]) // tp_size * tp_rank : slice_dim[i]
+                    + (slice_dim[i + 1] - slice_dim[i]) // tp_size * (tp_rank + 1),
+                ]
+                for i in range(len(slice_dim) - 1)
+            ],
+            dim=1,
+        )
+    else:
+        parallelized_tensor = tensor[:, local_features * tp_rank : local_features * (tp_rank + 1)]
+
+    assert parallelized_tensor.shape == (
+        tensor.shape[0],
+        local_features,
+    ), "unexpected shape of parallelized tensor"
+
+    return parallelized_tensor if is_column ^ is_transposed else parallelized_tensor.T
 
 
 # [TODO] This function is only supported for 2D tensor, it should be extended to support arbitrary dimensions
@@ -291,7 +380,7 @@ def insert_allgather_plugin(graph: Graph, to: Node, group: list[int], gather_dim
         gather_dim (int, optional): The dimension to gather. Defaults to 0.
     """
     group_size = len(group)
-    input_tensor = get_val(to, torch.Tensor)
+    assert isinstance(input_tensor := get_val(to), torch.Tensor), "not found tensor value from the node"
     # if gather_dim < 0:
     #     assert gather_dim == -1, "gather_dim must be -1 when gather_dim is lower than 0"
     #     gather_dim = input_tensor.ndim - 1

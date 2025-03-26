@@ -43,6 +43,7 @@ from .fx import generate_trtllm_engine_config
 from .fx.utils import find_output_node
 from .inline import inline
 from .literals import DTypeLiteral
+from .quantization import GlobalQuantConfig, resolve_qlinear_device_map
 from .transform import transform
 from .types import BuiltInConstant, verify
 
@@ -121,6 +122,8 @@ def trtllm_build(
         mapping=mapping,
     )
 
+    resolve_qlinear_device_map(model)
+    global_quant_config = GlobalQuantConfig.create_from(model.config)
     graph_module = trtllm_export(model, argument_hint)
 
     for rank, transformed_graph_module in transform(
@@ -128,6 +131,7 @@ def trtllm_build(
         argument_hint=argument_hint,
         model_config=model_config,
         dtype=model.config.torch_dtype,
+        global_quant_config=global_quant_config,
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         run_routers_in_model_dtype=run_routers_in_model_dtype,
@@ -138,6 +142,7 @@ def trtllm_build(
             transformed_graph_module,
             argument_hint,
             build_config=TRTLLMBuildConfig.merge(profile_config, model_config),
+            global_quant_config=global_quant_config,
             trt_config=trt_config,
             engine_cache=engine_cache,
             network_name=get_network_name(model),
@@ -200,6 +205,7 @@ def build_trtllm_engine_components(
     argument_hint: TRTLLMArgumentHint,
     *,
     build_config: TRTLLMBuildConfig,
+    global_quant_config: GlobalQuantConfig | None = None,
     trt_config: TensorRTConfig | None = None,
     engine_cache: BaseEngineCache | None = None,
     network_name: str | None = None,
@@ -212,6 +218,7 @@ def build_trtllm_engine_components(
         graph_module (GraphModule): The graph module to convert to TensorRT engines
         argument_hint (TRTLLMArgumentHint): Configuration for input arguments
         build_config (TRTLLMBuildConfig): Configuration for building TensorRT-LLM engines
+        global_quant_config (GlobalQuantConfig | None, optional): Global quantization configuration. Defaults to None.
         trt_config (TensorRTConfig | None, optional): TensorRT builder configuration. Defaults to None.
         engine_cache (BaseEngineCache | None, optional): Cache for storing/loading built engines. Defaults to None.
         network_name (str | None, optional): Name of the network. Defaults to None.
@@ -230,6 +237,7 @@ def build_trtllm_engine_components(
                 graph_module,
                 build_config,
                 argument_hint.mapping,
+                global_quant_config=global_quant_config,
                 architecture=network_name,
             ),
         )

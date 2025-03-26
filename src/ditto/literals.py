@@ -83,6 +83,7 @@ PassName = Literal[
     "FuseConsecutiveSliceConcat",
     "FuseConsecutiveSplitConcat",
     "FuseConsecutiveToCopys",
+    "FuseDequantizes",
     "FuseGatedMLPProjections",
     "FuseQKVProjections",
     "FuseReciprocalMul",
@@ -94,7 +95,9 @@ PassName = Literal[
     "PopLoraPlugins",
     "PropagateTensorParallelism",
     "ReplaceMoEByMoEPlugin",
+    "ReplaceMMByFp8GemmPlugin",
     "ReplaceMMByGemmPlugin",
+    "ReplaceMMByWoQGemmPlugin",
     "ReplaceSDPAByGPTAttentionPlugin",
     "ReplaceViewByReshape",
     "ResetCodeGen",
@@ -102,29 +105,15 @@ PassName = Literal[
     "RewriteFloatingPointLiteralsAsNodes",
     "RewriteReshapeAsUnsqueeze",
     "RewriteSplitAsSlices",
+    "StashActQuantSubgraphs",
     "StashLoraSubgraphs",
+    "WrapWeightDequantSubgraphs",
     "WrapRoPESubgraphs",
     "WrapSDPASubgraphs",
 ]
 """The possible names of FX optimization passes"""
 
 PluginFlag = Literal["auto", "float16", "bfloat16", "fp8", None]
-
-QuantAlgoLiteral = Literal[
-    "W8A16",
-    "W4A16",
-    "W4A16_AWQ",
-    "W4A8_AWQ",
-    "W4A16_GPTQ",
-    "W8A8_SQ_PER_CHANNEL",
-    "W8A8_SQ_PER_TENSOR_PLUGIN",
-    "W8A8_SQ_PER_CHANNEL_PER_TOKEN_PLUGIN",
-    "W8A8_SQ_PER_CHANNEL_PER_TENSOR_PLUGIN",
-    "W8A8_SQ_PER_TENSOR_PER_TOKEN_PLUGIN",
-    "FP8",
-    "FP8_PER_CHANNEL_PER_TOKEN",
-    "INT8",
-]
 
 LogLevelLiteral = Literal[
     "CRITICAL",

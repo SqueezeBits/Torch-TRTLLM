@@ -8,6 +8,7 @@ declare SKIP_DITTO_BUILD=false
 declare SKIP_DITTO_RUN=false
 declare SKIP_NATIVE_BUILD=false
 declare SKIP_NATIVE_RUN=false
+declare PRINT_OUTPUT=false
 declare DEBUG_MODE=false
 declare VERBOSE_MODE=false
 declare PROMPT="Hey, are you conscious?"
@@ -93,6 +94,7 @@ print_help() {
     echo "  --skip-native          Equivalent to --skip-native-build --skip-native-run"
     echo "  --skip-native-build    Skip building native TensorRT-LLM engine"
     echo "  --skip-native-run      Skip running native TensorRT-LLM engine"
+    echo "  --print-output         Print output of Ditto and TensorRT-LLM engines"
     echo
     echo "  --redo                 Equivalent to --rebuild --rerun"
     echo "  --rebuild              Equivalent to --rebuild-ditto --rebuild-native"
@@ -185,6 +187,10 @@ parse_args() {
                 ;;
             --skip-native-run)
                 SKIP_NATIVE_RUN=true
+                shift
+                ;;
+            --print-output)
+                PRINT_OUTPUT=true
                 shift
                 ;;
             -d|--debug)
@@ -470,6 +476,10 @@ run_engine() {
     if [ "$rerun" = true ] || [ ! -f "$OUTPUT_FILE" ] || [ ! -s "$OUTPUT_FILE" ]; then
         rich_execute "$base_cmd" "$RUN_FILE" "run $engine_type engine"
         extract_output "$RUN_FILE" "$OUTPUT_FILE"
+        if [ "$PRINT_OUTPUT" = true ]; then
+            echo "Output of $engine_type engine:"
+            cat "$OUTPUT_FILE"
+        fi
     else
         echo "Skip running $engine_type engine as output file already exists at $OUTPUT_FILE"
     fi
@@ -485,6 +495,10 @@ run_engine() {
         if [ "$rerun" = true ] || [ ! -f "$OUTPUT_FILE" ] || [ ! -s "$OUTPUT_FILE" ]; then
             rich_execute "$cmd" "$RUN_FILE" "run $engine_type engine with task_uid $task_uid"
             extract_output "$RUN_FILE" "$OUTPUT_FILE"
+            if [ "$PRINT_OUTPUT" = true ]; then
+                echo "Output of $engine_type engine with task_uid $task_uid:"
+                cat "$OUTPUT_FILE"
+            fi
         else
             echo "Skip running $engine_type engine with task_uid $task_uid as output file already exists at $OUTPUT_FILE"
         fi

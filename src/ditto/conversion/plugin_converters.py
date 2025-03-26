@@ -35,6 +35,8 @@ from ..fx.targets import (
     Plugin,
     RecvPlugin,
     SendPlugin,
+    WeightOnlyGroupwiseQuantMatmulPlugin,
+    WeightOnlyQuantMatmulPlugin,
 )
 
 
@@ -246,6 +248,62 @@ def convert_send_plugin(
     """
     assert isinstance(target, SendPlugin)
     return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="send")
+
+
+@dynamo_tensorrt_converter(
+    WeightOnlyGroupwiseQuantMatmulPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_weight_only_groupwise_quant_matmul_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a WeightOnlyGroupwiseQuantMatmulPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The WeightOnlyGroupwiseQuantMatmulPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, WeightOnlyGroupwiseQuantMatmulPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="weight_only_groupwise_quant_matmul")
+
+
+@dynamo_tensorrt_converter(
+    WeightOnlyQuantMatmulPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_weight_only_quant_matmul_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a WeightOnlyQuantMatmulPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The WeightOnlyQuantMatmulPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, WeightOnlyQuantMatmulPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="weight_only_quant_matmul")
 
 
 @dynamo_tensorrt_converter(

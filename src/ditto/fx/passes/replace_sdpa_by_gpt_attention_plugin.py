@@ -28,7 +28,7 @@ from .infra import GraphOptimizationPass, PassResult
 
 
 class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
-    """Replace F.scaled_dot_product_attention by FakeGPTAttentionPlugin (required for trtllm).
+    """Replace F.scaled_dot_product_attention by GPTAttentionPlugin (required for trtllm).
 
     Attributes:
         dtype (torch.dtype): The data type of the input tensor
