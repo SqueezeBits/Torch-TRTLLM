@@ -89,7 +89,7 @@ from .softmax import SafeSoftmax, Softmax, SoftmaxDefault
 from .split import Split, SplitDefault, SplitSizes, SplitTensor, SplitWithSizes
 from .sym_size import SymSizeInt
 from .topk import TopK
-from .unary import Unary
+from .unary import AMax, AMin, AMinMax, Unary
 from .unary_elementwise import (
     Neg,
     Sqrt,
