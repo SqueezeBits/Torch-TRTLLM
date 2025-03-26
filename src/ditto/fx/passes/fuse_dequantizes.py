@@ -12,13 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Generator
-
 import torch
-from torch.fx import GraphModule, Node
+from torch.fx import Node
 
 from ...quantization import QuantizeMode
 from ..nodes import Cat, Dequantize, GetAttr
+from ..utils import name_generator
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
@@ -26,17 +25,6 @@ class FuseDequantizes(NodewiseOptimizationPass):
     """Fuse consecutive dequantize nodes with cat node."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
-        def name_generator(graph_module: GraphModule) -> Generator[str, None, None]:
-            name = "dequantize_fused_constant"
-            if not hasattr(graph_module, name):
-                yield name
-
-            idx = 1
-            while True:
-                if not hasattr(graph_module, f"{name}_{idx}"):
-                    yield f"{name}_{idx}"
-                idx += 1
-
         if not (
             (cat := Cat.specialize_from(node))
             and len(dequantize_nodes := cat.tensors) > 1
@@ -53,7 +41,7 @@ class FuseDequantizes(NodewiseOptimizationPass):
         ):
             return {}
 
-        name_gen = name_generator(graph_module)
+        name_gen = name_generator(graph_module, "dequantize_fused_constant")
         input_nodes: list[Node | None] = []
 
         fused_qweight_tensor = fuse_weights(

@@ -12,18 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Generator
-
 import tensorrt as trt
 import torch
-from torch.fx import GraphModule, Node
+from torch.fx import Node
 
 from ...quantization import QuantizeMode
 from ...types import DataType
 from ..nodes import Dequantize, GetAttr, Permute
 from ..subgraphs import Linear
 from ..targets import GemmPlugin, Quantizer
-from ..utils import get_tensor_metadata
+from ..utils import get_tensor_metadata, name_generator
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
@@ -31,17 +29,6 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
     """Replace torch.ops.aten.mm.default by GemmPlugin for FP8 precision (required for trtllm)."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
-        def name_generator(graph_module: GraphModule) -> Generator[str, None, None]:
-            name = "act_scale"
-            if not hasattr(graph_module, name):
-                yield name
-
-            idx = 1
-            while True:
-                if not hasattr(graph_module, f"{name}_{idx}"):
-                    yield f"{name}_{idx}"
-                idx += 1
-
         if not (
             (linear := Linear.configure_from(node))
             and (this := get_tensor_metadata(linear.mm.this))
@@ -55,10 +42,11 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
             and dequantize.qweight_tensor.dtype == torch.float8_e4m3fn
             and dequantize.scale_tensor is not None
             and dequantize.target.mode in (QuantizeMode.PER_TENSOR, QuantizeMode.PER_CHANNEL)
+            and (graph_module := node.graph.owning_module) is not None
         ):
             return {}
 
-        name_gen = name_generator(node.graph.owning_module)
+        name_gen = name_generator(graph_module, "activation_quant_scale")
 
         with node.graph.inserting_before(node):
             act_scale_attr = GetAttr.create(node.graph, next(name_gen), activation_quantization.scale)

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Iterable
+from collections.abc import Generator, Iterable
 from typing import TYPE_CHECKING, TypeVar, cast, overload
 from weakref import WeakKeyDictionary
 
@@ -167,18 +167,15 @@ T = TypeVar("T", torch.Tensor, FakeTensor, torch.SymInt)
 
 
 @overload
-def get_val(node: Node, expected_type: type[torch.SymInt]) -> torch.SymInt | None:
-    ...
+def get_val(node: Node, expected_type: type[torch.SymInt]) -> torch.SymInt | None: ...
 
 
 @overload
-def get_val(node: Node, expected_type: type[torch.Tensor]) -> FakeTensor | None:
-    ...
+def get_val(node: Node, expected_type: type[torch.Tensor]) -> FakeTensor | None: ...
 
 
 @overload
-def get_val(node: Node) -> torch.Tensor | torch.SymInt | None:
-    ...
+def get_val(node: Node) -> torch.Tensor | torch.SymInt | None: ...
 
 
 def get_val(node: Node, expected_type: type[T] | None = None) -> T | None:
@@ -310,8 +307,7 @@ def find_nearest(
     break_if: NodeCriterion | None = None,
     continue_if: NodeCriterion | None = None,
     max_depth: int = 15,
-) -> SubgraphType | None:
-    ...
+) -> SubgraphType | None: ...
 
 
 @overload
@@ -324,8 +320,7 @@ def find_nearest(
     break_if: NodeCriterion | None = None,
     continue_if: NodeCriterion | None = None,
     max_depth: int = 15,
-) -> NodeType | None:
-    ...
+) -> NodeType | None: ...
 
 
 # pylint: disable-next=too-many-positional-arguments
@@ -382,3 +377,20 @@ def find_nearest(
         else:
             queue.extend((next_node, depth + 1) for next_node in next_nodes)
     return None
+
+
+def name_generator(graph_module: GraphModule, basename: str) -> Generator[str, None, None]:
+    """Generate unique names for nodes in a graph module.
+
+    Args:
+        graph_module (GraphModule): The graph module to generate names for
+        basename (str): The base name for the generated names
+    """
+    if not hasattr(graph_module, basename):
+        yield basename
+
+    idx = 1
+    while True:
+        if not hasattr(graph_module, f"{basename}_{idx}"):
+            yield f"{basename}_{idx}"
+        idx += 1
