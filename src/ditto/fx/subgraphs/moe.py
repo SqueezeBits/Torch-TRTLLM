@@ -211,7 +211,8 @@ class MoESubgraph(Subgraph):
             expert_hidden_states = gate.mm
 
         shared_experts: list[tuple[Linear, Linear, Linear]] = []
-        assert len(TrailingReformatPath.get_parents(expert_hidden_states.this)) == 1
+        if len(TrailingReformatPath.get_parents(expert_hidden_states.this)) != 1:
+            raise NotImplementedError(f"Unsupported shared expert graph found from: {expert_hidden_states.this}")
         common_hidden_states = TrailingReformatPath.get_parents(expert_hidden_states.this)[0]
         for user in TrailingReformatPath.get_users(common_hidden_states):
             if user == gate.mm.node or len(user.all_input_nodes[0].users) == len(experts):

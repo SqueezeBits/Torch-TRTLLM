@@ -173,7 +173,8 @@ class ROPEConfig(StrictlyTyped):
         """Set the inverse frequency tensor for rotary embeddings.
 
         Args:
-            value (np.ndarray): Numpy array containing inverse frequencies.
+            value (np.ndarray | None): Numpy array containing inverse frequencies,
+                or None to disable.
         """
         self._rotary_inv_freq = value
 
