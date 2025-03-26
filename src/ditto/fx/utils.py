@@ -17,6 +17,7 @@ from typing import TypeVar, cast, overload
 from weakref import WeakKeyDictionary
 
 import torch
+from loguru import logger
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
@@ -332,7 +333,7 @@ def find_nearest(
     follow_first_only: bool = True,
     break_if: NodeCriterion | None = None,
     continue_if: NodeCriterion | None = None,
-    max_depth: int = 10,
+    max_depth: int = 15,
 ) -> NodeType | SubgraphType | None:
     """Find the nearest node that can be specialized to this type using breadth-first search.
 
@@ -367,6 +368,7 @@ def find_nearest(
         if continue_if is not None and continue_if(node):
             continue
         if depth > max_depth:
+            logger.warning(f"Failed to find nearest {node_type} from {from_node} within max depth {max_depth}")
             continue
         if not (next_nodes := list(node.all_input_nodes if follow_parent else node.users)):
             continue
