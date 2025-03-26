@@ -22,7 +22,14 @@ from typing_extensions import Self
 
 from ...literals import ExpertTypeLiteral, LoraPluginInputPrefix
 from ...types import verify
-from ..metadata_keys import ACTIVATION_QUANT_SCALE, EXPERT_TYPE, FREE_LORA_PROTO, LAYER_INDEX, LORA_PREFIX, LORA_PROTOS
+from ..metadata_keys import (
+    ACTIVATION_QUANTIZATION,
+    EXPERT_TYPE,
+    FREE_LORA_PROTO,
+    LAYER_INDEX,
+    LORA_PREFIX,
+    LORA_PROTOS,
+)
 from ..nodes import (
     MM,
     AddTensorTensor,
@@ -32,7 +39,7 @@ from ..nodes import (
     WeightOnlyGroupwiseQuantMatmul,
     WeightOnlyQuantMatmul,
 )
-from ..targets import LoraProto
+from ..targets import ActivationQuantization, LoraProto
 from ..utils import get_val
 from .subgraph import Subgraph
 
@@ -232,15 +239,15 @@ class Linear(Subgraph):
         return Dequantize.specialize_from(self.mm.other)
 
     @property
-    def activation_quant_scale(self) -> torch.Tensor | None:
-        """The activation quantization scale."""
-        return verify(self.mm.meta.get(ACTIVATION_QUANT_SCALE, None), as_type=torch.Tensor)
+    def activation_quantization(self) -> ActivationQuantization | None:
+        """The activation quantization associated with this linear layer."""
+        return verify(self.mm.meta.get(ACTIVATION_QUANTIZATION, None), as_type=ActivationQuantization)
 
-    @activation_quant_scale.setter
-    def activation_quant_scale(self, scale: torch.Tensor) -> None:
-        """Set the activation quantization scale."""
-        assert ACTIVATION_QUANT_SCALE not in self.mm.meta, f"Activation quant scale already set for {self.mm}"
-        self.mm.meta[ACTIVATION_QUANT_SCALE] = scale
+    @activation_quantization.setter
+    def activation_quantization(self, value: ActivationQuantization) -> None:
+        """Set the activation quantization for this linear layer."""
+        assert ACTIVATION_QUANTIZATION not in self.mm.meta, f"Activation quantization already set for {self.mm}"
+        self.mm.meta[ACTIVATION_QUANTIZATION] = value
 
     def mark_expert_type_as(self, expert_type: ExpertTypeLiteral) -> None:
         """Mark the expert type of this linear layer if it is a part of a MoE layer."""

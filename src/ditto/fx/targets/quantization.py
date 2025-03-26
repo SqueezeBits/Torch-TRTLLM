@@ -13,8 +13,9 @@
 # limitations under the License.
 
 import torch
+from pydantic import Field
 
-from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode
+from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode, QuantizeType
 from ...types import StrictlyTyped
 from .fake_tensor_mode import is_in_fake_tensor_mode
 
@@ -23,8 +24,10 @@ class ActivationQuantization(StrictlyTyped):
     """Activation quantization."""
 
     quant_mode: QuantizeMode
-    scale: torch.Tensor | None = None
-    zero_point: torch.Tensor | None = None
+    bits: int
+    type: QuantizeType
+    scale: torch.Tensor | None = Field(default=None, exclude=True)
+    zero_point: torch.Tensor | None = Field(default=None, exclude=True)
     dynamic: bool = False
 
 

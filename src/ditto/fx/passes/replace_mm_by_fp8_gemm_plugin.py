@@ -48,7 +48,8 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
             and len(this.shape) == 2
             and (other := get_tensor_metadata(linear.mm.other))
             and len(other.shape) == 2
-            and (act_scale_tensor := linear.activation_quant_scale) is not None
+            and (activation_quantization := linear.activation_quantization) is not None
+            and (activation_quantization.scale is not None)
             and (dequantize := Dequantize.specialize_from(linear.mm.other)) is not None
             and dequantize.qweight_tensor is not None
             and dequantize.qweight_tensor.dtype == torch.float8_e4m3fn
@@ -60,7 +61,7 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
         name_gen = name_generator(node.graph.owning_module)
 
         with node.graph.inserting_before(node):
-            act_scale_attr = GetAttr.create(node.graph, next(name_gen), act_scale_tensor)
+            act_scale_attr = GetAttr.create(node.graph, next(name_gen), activation_quantization.scale)
             quantize = node.graph.call_function(
                 Quantizer(),
                 (
@@ -74,7 +75,7 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
             transb=1,
             type_id=DataType(dequantize.target.dtype).to(trt.DataType),
             use_fp8=1,
-            alpha=(act_scale_tensor * dequantize.scale_tensor).item(),
+            alpha=(activation_quantization.scale * dequantize.scale_tensor).item(),
         )
         with node.graph.inserting_before(node):
             permute = Permute.create(node.graph, dequantize.qweight, (1, 0))

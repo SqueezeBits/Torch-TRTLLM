@@ -17,7 +17,7 @@ from enum import Enum, auto
 import torch
 from auto_gptq.nn_modules.qlinear import qlinear_cuda_old
 from compressed_tensors.config import CompressionFormat
-from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy
+from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy, QuantizationType
 from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
 from torch._ops import OpOverload
@@ -32,6 +32,35 @@ from transformers.utils.quantization_config import (
 from typing_extensions import Self
 
 from .types import StrictlyTyped
+
+
+class QuantizeType(Enum):
+    """Quantization type.
+
+    Attributes:
+        FLOAT (auto): float quantization.
+        INT (auto): int quantization.
+    """
+
+    FLOAT = auto()
+    INT = auto()
+
+    @classmethod
+    def from_quant_type(cls, quant_type: QuantizationType) -> "QuantizeType":
+        """Convert quantization type to Ditto quantization type.
+
+        Args:
+            quant_type (QuantizationType): The quantization type
+
+        Returns:
+            QuantizeType: The Ditto quantization type
+        """
+        if quant_type == QuantizationType.FLOAT:
+            return cls.FLOAT
+        if quant_type == QuantizationType.INT:
+            return cls.INT
+
+        raise NotImplementedError(f"Unsupported quantization type: {quant_type}")
 
 
 class QuantizeMode(Enum):
@@ -119,7 +148,7 @@ class QuantScheme(StrictlyTyped):
     Attributes:
         bits (int): The number of bits used for quantization.
         mode (QuantizeMode): The quantization mode.
-        type (str | None): The type of the quantization.
+        type (QuantizeType | None): The type of the quantization.
         group_size (int | None): The size of the quantization group.
         has_zero_point (bool): Whether the quantization uses a zero point.
         dynamic (bool): Whether the quantization is dynamic.
@@ -127,7 +156,7 @@ class QuantScheme(StrictlyTyped):
 
     bits: int
     mode: QuantizeMode
-    type: str | None = None
+    type: QuantizeType | None = None
     group_size: int | None = None
     has_zero_point: bool = False
     dynamic: bool = False
@@ -193,6 +222,7 @@ class GlobalQuantConfig(StrictlyTyped):
                         weight_quant_scheme=QuantScheme(
                             bits=quantization_config.bits,
                             mode=QuantizeMode.PER_GROUP,
+                            type=QuantizeType.INT,
                             group_size=quantization_config.group_size,
                         ),
                     ),
@@ -212,6 +242,7 @@ class GlobalQuantConfig(StrictlyTyped):
                         weight_quant_scheme=QuantScheme(
                             bits=quantization_config.bits,
                             mode=QuantizeMode.PER_GROUP,
+                            type=QuantizeType.INT,
                             group_size=quantization_config.group_size,
                             has_zero_point=quantization_config.zero_point,
                         ),
@@ -257,14 +288,14 @@ class GlobalQuantConfig(StrictlyTyped):
                         input_quant_scheme=QuantScheme(
                             bits=config.input_activations.num_bits,
                             mode=QuantizeMode.from_quant_strategy(config.input_activations.strategy),
+                            type=QuantizeType.from_quant_type(config.input_activations.type),
                             dynamic=config.input_activations.dynamic,
-                            type=config.input_activations.type,
                         ),
                         weight_quant_scheme=QuantScheme(
                             bits=config.weights.num_bits,
                             mode=QuantizeMode.from_quant_strategy(config.weights.strategy),
+                            type=QuantizeType.from_quant_type(config.weights.type),
                             dynamic=config.weights.dynamic,
-                            type=config.weights.type,
                         ),
                     ),
                 ],
