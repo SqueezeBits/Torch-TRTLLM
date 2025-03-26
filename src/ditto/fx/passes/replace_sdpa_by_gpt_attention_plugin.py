@@ -135,6 +135,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
             with graph.inserting_before(node):
                 plugin_inputs = global_plugin_inputs.model_dump()
                 if not is_mla_enabled:
+                    assert isinstance(attn, MHA)
                     qkv = attn.qkv
                 else:
                     assert isinstance(attn, MLA)
@@ -319,7 +320,7 @@ class MHA(StrictlyTyped):
 
 
 # pylint: disable=too-many-locals
-class MLA(MHA):
+class MLA(StrictlyTyped):
     """Multi-head Latent Attention configuration for GPTAttentionPlugin.
 
     This class represents a multi-head latent attention mechanism that is introduced in DeepseekV2.
@@ -342,21 +343,11 @@ class MLA(MHA):
         v_head_dim (int): Head dimension for values
     """
 
-    # qkv: Node
-    # rope_config: ROPEConfig
-    # num_attn_groups: int
-    # num_heads: int
-    # embed_dim: int
-    # num_kv_heads: int
-    # output_shape: SymbolicShape
-
     rope_config: ROPEConfig
     num_heads: int
-    num_attn_groups: int
     embed_dim: int
     num_kv_heads: int
     output_shape: SymbolicShape
-    qkv: Node
     hidden_states: Node
     compressed_kv: Node
     k_pe: Node
@@ -458,9 +449,7 @@ class MLA(MHA):
         v_head_dim = kv_b_split_outputs[1].meta["val"].shape[-1]
 
         return cls(
-            qkv=q_proj.output_node,
             rope_config=rope_config,
-            num_attn_groups=1,
             num_heads=query.shape[-3],
             embed_dim=kv_a_proj_meta.shape[1],
             num_kv_heads=num_kv_heads,
