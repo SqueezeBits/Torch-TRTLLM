@@ -52,11 +52,11 @@ class ParallelizeLinear(GraphOptimizationPass):
         lm_head = Linear.find_last(graph)
         for node in graph.nodes:
             if not (
-                (
-                    (fused_linear := FusedLinear.configure_from(node))
-                    or (linear := fused_linear.linear if fused_linear else Linear.configure_from(node))
+                linear := (
+                    fused_linear.linear
+                    if (fused_linear := FusedLinear.configure_from(node))
+                    else Linear.configure_from(node)
                 )
-                and linear is not None
             ):
                 continue
 

@@ -77,7 +77,7 @@ def is_resolvable(shape_arg: ShapeArg, output_shape: Size) -> bool:
 
         # pylint: disable-next=too-many-boolean-expressions
         if (isinstance(dim, int) and isinstance(output_dim, int) and dim != output_dim) or (
-            (isinstance(dim, Node) and (symint_dim_val := get_val(dim)) and isinstance(symint_dim_val, SymInt))
+            (isinstance(dim, Node) and isinstance(symint_dim_val := get_val(dim), SymInt))
             and (isinstance(output_dim, SymInt) and symint_dim_val != output_dim)
         ):
             return False
