@@ -36,13 +36,13 @@ DeviceLikeType = str | torch.device | int
 NodeCriterion = Callable[[Node], bool]
 Number = int | float | bool
 SymbolicInteger = torch.SymInt | int
-SymbolicShape = tuple[SymbolicInteger, ...]  # type: ignore[valid-type]
+SymbolicShape = tuple[SymbolicInteger, ...]
 ShapeArg = list[int | Node]
 
 T = TypeVar("T")
 
 
-def verify(value: Any, *, as_type: type[T], coerce: bool = False, **config: Unpack[ConfigDict]) -> T | None:
+def verify(value: Any, *, as_type: Any, coerce: bool = False, **config: Unpack[ConfigDict]) -> Any:
     """Verify that the value is of the specified type.
 
     Args:
@@ -128,7 +128,7 @@ class DataType:
         """
         if data_type is TensorProto.DataType:  # TensorProto.DataType is not actually a type
             if isinstance(self.dtype, int):
-                return cast(TensorProto.DataType, self.dtype)
+                return cast(TensorProto.DataType, self.dtype)  # type: ignore[return-value]
         elif verified_dtype := verify(self.dtype, as_type=data_type):
             return verified_dtype
         actual_type: type[int] | type[torch.dtype] | type[trt.DataType] | type[str] = (

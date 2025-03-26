@@ -23,9 +23,12 @@ from ..configs import (
     TRTLLMMapping,
     TRTLLMMoEConfig,
     TRTLLMPretrainedConfig,
+    TRTLLMQuantConfig,
 )
 from ..literals import DTypeLiteral
+from ..quantization import GlobalQuantConfig
 from ..types import verify
+from .metadata_keys import EXPERT_TYPE
 from .subgraphs import Linear, TokenEmbedding
 from .targets import GPTAttentionPlugin
 
@@ -39,6 +42,7 @@ def generate_trtllm_engine_config(
     build_config: TRTLLMBuildConfig,
     mapping: TRTLLMMapping,
     *,
+    global_quant_config: GlobalQuantConfig | None = None,
     architecture: str | None = None,
 ) -> TRTLLMEngineConfig:
     """Generate TRTLLM engine configuration.
@@ -47,7 +51,8 @@ def generate_trtllm_engine_config(
         graph_module (GraphModule): The graph module to process.
         build_config (TRTLLMBuildConfig): The build configuration.
         mapping (TRTLLMMapping): The mapping configuration.
-        architecture (str | None): The architecture name, optional.
+        global_quant_config (GlobalQuantConfig | None): The global quantization configuration. Defaults to None.
+        architecture (str | None): The architecture name, optional. Defaults to None.
 
     Returns:
         TRTLLMEngineConfig: The generated engine configuration.
@@ -61,6 +66,7 @@ def generate_trtllm_engine_config(
         pretrained_config=generate_trtllm_pretrained_config(
             graph_module,
             mapping,
+            global_quant_config=global_quant_config,
             architecture=architecture,
         ),
         build_config=build_config,
@@ -71,6 +77,7 @@ def generate_trtllm_pretrained_config(
     graph_module: GraphModule,
     mapping: TRTLLMMapping,
     *,
+    global_quant_config: GlobalQuantConfig | None = None,
     architecture: str | None = None,
 ) -> TRTLLMPretrainedConfig:
     """Generate TRTLLMPretrainedConfig from graph module.
@@ -78,6 +85,7 @@ def generate_trtllm_pretrained_config(
     Args:
         graph_module (GraphModule): The graph module to generate the pretrained config from.
         mapping (TRTLLMMapping): The tensor parallel mapping to use for the pretrained config.
+        global_quant_config (GlobalQuantConfig | None): The global quantization configuration. Defaults to None.
         architecture (str | None, optional): The architecture to use for the pretrained config. Defaults to None.
 
     Returns:
@@ -92,6 +100,7 @@ def generate_trtllm_pretrained_config(
         intermediate_size=get_intermediate_size(graph_module),
         mapping=mapping,
     )
+    pretrained_config.quantization = TRTLLMQuantConfig.create_from(global_quant_config) if global_quant_config else None
     if "qwen" in pretrained_config.architecture.lower() and isinstance(
         hf_config := graph_module.meta.get("pretrained_config"), PretrainedConfig
     ):
@@ -153,7 +162,7 @@ def get_intermediate_size(graph_module: GraphModule) -> int:
     for node in graph_module.graph.nodes:
         if (linear := Linear.configure_from(node)) and linear.lora_prefix == "mlp_4h_to_h":
             # TODO: get intermediate size properly for MoE models without shared experts
-            if linear.mm.meta.get("is_shared_expert", False):
+            if linear.mm.meta.get(EXPERT_TYPE) == "shared_expert":
                 values_with_shared_expert.add(linear.in_features)
             else:
                 values.add(linear.in_features)

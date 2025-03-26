@@ -28,22 +28,18 @@ from .configs import TRTLLMModelConfig
 from .contexts import ignore_symbolic_shapes_warning
 from .debug import get_memory_footprint, save_for_debug
 from .fx import (
-    AddTRTLLMInputs,
-    ConstantFolding,
     ForgetSubmodules,
-    ParallelizeLinear,
     ParallelizePipeline,
     Plugin,
-    PropagateTensorParallelism,
     ResetCodeGen,
-    ResolveDynamicReshape,
-    StashLoraSubgraphs,
     fake_tensor_prop_on_node_creation,
     get_level1_transform,
     get_optimization_transform,
+    get_preoptimization_transform,
     update_argument_hint,
 )
 from .literals import PassName
+from .quantization import GlobalQuantConfig
 
 
 # pylint: disable=duplicate-code
@@ -53,6 +49,7 @@ def transform(
     model_config: TRTLLMModelConfig,
     dtype: torch.dtype,
     *,
+    global_quant_config: GlobalQuantConfig | None = None,
     skipped_optimizers: list[PassName] | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
@@ -61,17 +58,12 @@ def transform(
 ) -> Generator[tuple[int, GraphModule], None, None]:
     """Transform a PyTorch GraphModule by applying a series of optimization passes.
 
-    This function performs the following steps:
-    1. Runs the post-inlining passes
-    2. Runs the pre-custom passes for each rank
-    3. Runs the custom passes for each rank
-    4. Runs the post-custom passes for each rank
-
     Args:
         graph_module (GraphModule): The input PyTorch GraphModule to transform
         argument_hint (TRTLLMArgumentHint): Hints about the arguments for optimization
         model_config (TRTLLMModelConfig): Model configurations
         dtype (torch.dtype): The target data type for the transformed model
+        global_quant_config (GlobalQuantConfig | None, optional): Global quantization config. Defaults to None.
         skipped_optimizers (list[PassName] | None, optional): List of optimizer passes to skip. Defaults to None.
         run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
         run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
@@ -111,17 +103,14 @@ def transform(
         copied_graph_module = copy_graph_module(graph_module)
         pre_custom_pass_manager = DynamoPassManager.build_from_passlist(
             [
-                StashLoraSubgraphs().as_transform(),
-                ConstantFolding().as_transform(),
-                AddTRTLLMInputs(argument_hint=argument_hint).as_transform(),
-                ResolveDynamicReshape().as_transform(),
-                PropagateTensorParallelism(mapping=argument_hint.mapping).as_transform(),
-                ParallelizeLinear(mapping=argument_hint.mapping).as_transform(),
+                get_preoptimization_transform(argument_hint, global_quant_config, dtype),
             ]
         )
         logger.debug(f"Running pre-custom passes for rank {rank}")
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
             copied_graph_module = pre_custom_pass_manager(copied_graph_module)
+
+        save_for_debug(f"preopt_graph_module_rank{rank}", copied_graph_module)
 
         custom_pass_manager = DynamoPassManager.build_from_passlist(
             [

@@ -22,7 +22,9 @@ from ..arguments import TRTLLMArgumentHint
 from ..configs import TRTLLMModelConfig
 from ..constants import FX_TRANSFORM_MAXIMUM_ITERATION
 from ..literals import PassName
+from ..quantization import GlobalQuantConfig
 from .passes import (
+    AddTRTLLMInputs,
     BindUnmatchedLoraProtos,
     CanonicalizeCopy,
     CastMMToFP32,
@@ -46,14 +48,19 @@ from .passes import (
     FuseConsecutiveSliceConcat,
     FuseConsecutiveSplitConcat,
     FuseConsecutiveToCopys,
+    FuseDequantizes,
     FuseGatedMLPProjections,
     FuseQKVProjections,
     FuseReciprocalMul,
     HerdConstantsToTheRight,
     IndexLayers,
     InsertGatherLastTokenIds,
+    ParallelizeLinear,
     PopLoraPlugins,
+    PropagateTensorParallelism,
+    ReplaceMMByFp8GemmPlugin,
     ReplaceMMByGemmPlugin,
+    ReplaceMMByWoQGemmPlugin,
     ReplaceMoEByMoEPlugin,
     ReplaceSDPAByGPTAttentionPlugin,
     ReplaceViewByReshape,
@@ -63,11 +70,44 @@ from .passes import (
     RewritePowAsMul,
     RewriteReshapeAsUnsqueeze,
     RewriteSplitAsSlices,
+    StashActQuantSubgraphs,
+    StashLoraSubgraphs,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
+    WrapWeightDequantSubgraphs,
 )
 from .passes.defer_unsqueeze import SwapUnsqueezeWithSymSizeInt
 from .passes.infra import GraphOptimizationPass, PassManager
+
+
+def get_preoptimization_transform(
+    argument_hint: TRTLLMArgumentHint,
+    global_quant_config: GlobalQuantConfig | None,
+    dtype: torch.dtype,
+) -> Callable[[GraphModule], GraphModule]:
+    """Get the pre-optimization transform.
+
+    Args:
+        argument_hint (TRTLLMArgumentHint): the type hints for TRTLLM inputs
+        global_quant_config (GlobalQuantConfig | None): the global quantization configuration
+        dtype (torch.dtype): the data type for the plugins
+
+    Returns:
+        Callable[[GraphModule], GraphModule]: the pre-optimization transform
+    """
+    return get_transform(
+        WrapWeightDequantSubgraphs(global_quant_config=global_quant_config, dtype=dtype),
+        StashActQuantSubgraphs(global_quant_config=global_quant_config),
+        StashLoraSubgraphs(),
+        ConstantFolding(),
+        AddTRTLLMInputs(argument_hint=argument_hint),
+        ResolveDynamicReshape(),
+        EliminateCommonExpressions(),
+        PropagateTensorParallelism(mapping=argument_hint.mapping),
+        ParallelizeLinear(mapping=argument_hint.mapping),
+        steps=1,
+        warn_on_partial_convergence=False,
+    )
 
 
 # pylint: disable=duplicate-code
@@ -215,6 +255,7 @@ def get_trtllm_conversion_transform(
         ReplaceMoEByMoEPlugin(dtype=dtype),
         FuseQKVProjections,
         FuseGatedMLPProjections,
+        FuseDequantizes,
         WrapRoPESubgraphs,
         RewriteIndexAsSingleSlice,
         ReplaceSDPAByGPTAttentionPlugin(
@@ -225,6 +266,8 @@ def get_trtllm_conversion_transform(
         IndexLayers,
         BindUnmatchedLoraProtos,
         PopLoraPlugins(argument_hint=argument_hint),
+        ReplaceMMByWoQGemmPlugin(model_dtype=dtype),
+        ReplaceMMByFp8GemmPlugin,
         ReplaceMMByGemmPlugin,
         CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]

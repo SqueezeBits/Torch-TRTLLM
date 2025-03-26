@@ -27,6 +27,7 @@ from ..nodes import (
     Cat,
     GetAttr,
     GetItem,
+    NodeSpecialization,
     Permute,
     Reshape,
     Rope,
@@ -42,7 +43,7 @@ from .infra import GraphOptimizationPass, PassResult
 
 
 class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
-    """Replace F.scaled_dot_product_attention by FakeGPTAttentionPlugin (required for trtllm).
+    """Replace F.scaled_dot_product_attention by GPTAttentionPlugin (required for trtllm).
 
     Attributes:
         dtype (torch.dtype): The data type of the input tensor
@@ -72,11 +73,19 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
             is_mla_enabled = isinstance(attn, MLA)
             if not sdpa.is_eligible_for_gpt_attention_plugin(is_mla_enabled):
                 continue
-            q_lora_rank = attn.q_lora_rank if is_mla_enabled else 0
-            kv_lora_rank = attn.kv_lora_rank if is_mla_enabled else 0
-            qk_nope_head_dim = attn.qk_nope_head_dim if is_mla_enabled else 0
-            qk_rope_head_dim = attn.qk_rope_head_dim if is_mla_enabled else 0
-            v_head_dim = attn.v_head_dim if is_mla_enabled else 0
+            if is_mla_enabled:
+                assert isinstance(attn, MLA)
+                q_lora_rank = attn.q_lora_rank
+                kv_lora_rank = attn.kv_lora_rank
+                qk_nope_head_dim = attn.qk_nope_head_dim
+                qk_rope_head_dim = attn.qk_rope_head_dim
+                v_head_dim = attn.v_head_dim
+            else:
+                q_lora_rank = 0
+                kv_lora_rank = 0
+                qk_nope_head_dim = 0
+                qk_rope_head_dim = 0
+                v_head_dim = 0
             attn.rope_config.compute_rope_constants(qk_rope_head_dim)
 
             layer_idx += 1
@@ -128,6 +137,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 if not is_mla_enabled:
                     qkv = attn.qkv
                 else:
+                    assert isinstance(attn, MLA)
                     hidden_states = SqueezeDim.create(graph, attn.hidden_states, 0)
                     compressed_kv = SqueezeDim.create(graph, attn.compressed_kv, 0)
                     k_pe = SqueezeDim.create(graph, attn.k_pe, 0)
@@ -309,7 +319,7 @@ class MHA(StrictlyTyped):
 
 
 # pylint: disable=too-many-locals
-class MLA(StrictlyTyped):
+class MLA(MHA):
     """Multi-head Latent Attention configuration for GPTAttentionPlugin.
 
     This class represents a multi-head latent attention mechanism that is introduced in DeepseekV2.
@@ -332,11 +342,21 @@ class MLA(StrictlyTyped):
         v_head_dim (int): Head dimension for values
     """
 
+    # qkv: Node
+    # rope_config: ROPEConfig
+    # num_attn_groups: int
+    # num_heads: int
+    # embed_dim: int
+    # num_kv_heads: int
+    # output_shape: SymbolicShape
+
     rope_config: ROPEConfig
     num_heads: int
+    num_attn_groups: int
     embed_dim: int
     num_kv_heads: int
     output_shape: SymbolicShape
+    qkv: Node
     hidden_states: Node
     compressed_kv: Node
     k_pe: Node
@@ -438,7 +458,9 @@ class MLA(StrictlyTyped):
         v_head_dim = kv_b_split_outputs[1].meta["val"].shape[-1]
 
         return cls(
+            qkv=q_proj.output_node,
             rope_config=rope_config,
+            num_attn_groups=1,
             num_heads=query.shape[-3],
             embed_dim=kv_a_proj_meta.shape[1],
             num_kv_heads=num_kv_heads,
@@ -470,8 +492,8 @@ class MLA(StrictlyTyped):
                 - Query projection weight node
                 - Concatenated key-value projection weight node
         """
-        q_b_proj_weight = self.q_proj.weight_node
-        kv_b_proj_weight = self.kv_b_proj.weight_node
+        q_b_proj_weight: Node | NodeSpecialization = self.q_proj.weight_node
+        kv_b_proj_weight: Node | NodeSpecialization = self.kv_b_proj.weight_node
 
         q_b_proj_weight_permute = Permute.create(graph, q_b_proj_weight, (1, 0))
         q_b_proj_weight = Reshape.create(
@@ -496,7 +518,7 @@ class MLA(StrictlyTyped):
             graph, kv_b_proj_weight, (self.num_kv_heads, (self.qk_nope_head_dim + self.v_head_dim), self.kv_lora_rank)
         )
         kv_b_proj_weight = SplitWithSizes.create(graph, kv_b_proj_weight, [self.qk_nope_head_dim, self.v_head_dim], 1)
-        k_nope_weight = graph.call_function(
+        k_nope_weight: Node | NodeSpecialization = graph.call_function(
             operator.getitem,
             (kv_b_proj_weight.node, 0),
         )
@@ -512,7 +534,7 @@ class MLA(StrictlyTyped):
         kv_b_proj_weight = Cat.create(graph, [k_nope_weight_reshaped, v_weight_reshaped], 0)
 
         k_nope_weight = Permute.create(graph, k_nope_weight, (0, 2, 1))
-        fused_q_weight = BMM.create(graph, k_nope_weight, q_nope_weight)
+        fused_q_weight: Node | NodeSpecialization = BMM.create(graph, k_nope_weight, q_nope_weight)
         fused_q_weight = Cat.create(graph, [fused_q_weight, q_pe_weight], 1)
         fused_q_weight = Reshape.create(
             graph, fused_q_weight, (self.num_kv_heads * (self.kv_lora_rank + self.qk_rope_head_dim), self.q_lora_rank)

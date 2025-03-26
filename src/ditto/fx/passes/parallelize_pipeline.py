@@ -14,7 +14,6 @@
 
 import tensorrt as trt
 import torch
-from torch._subclasses import FakeTensor
 from torch.fx import Graph, GraphModule, Node
 
 from ...arguments import TRTLLMArgumentHint
@@ -22,7 +21,7 @@ from ...constants import INPUT_IDS
 from ...types import DataType
 from ..nodes import AddTensorTensor, BinaryElementwise, SymSizeInt, Unsqueeze
 from ..targets import GPTAttentionPlugin, RecvPlugin, SendPlugin
-from ..utils import find_closest_common_descendant, get_val
+from ..utils import find_closest_common_descendant, find_nearest, get_val
 from .infra import (
     GraphOptimizationPass,
     PassResult,
@@ -50,13 +49,16 @@ class ParallelizePipeline(GraphOptimizationPass):
         mapping = self.argument_hint.mapping
         assert (
             num_attn_layers := self.argument_hint.num_attn_layers
-        ) % mapping.pp_size == 0, (
+        ) is not None and num_attn_layers % mapping.pp_size == 0, (
             f"Number of attention layers ({num_attn_layers}) must be divisible by pipeline stages ({mapping.pp_size})"
         )
         layers_to_be_parallelized = mapping.get_pp_layers(num_attn_layers)
         gpt_attn_plugin_nodes = [node for node in graph.nodes if isinstance(node.target, GPTAttentionPlugin)]
         for idx, node in enumerate(gpt_attn_plugin_nodes):
-            if not (gpt_attn_plugin := node.target) and gpt_attn_plugin.layer_idx in layers_to_be_parallelized:
+            if not (
+                isinstance(gpt_attn_plugin := node.target, GPTAttentionPlugin)
+                and gpt_attn_plugin.layer_idx in layers_to_be_parallelized
+            ):
                 continue
 
             if (
@@ -130,28 +132,7 @@ def find_input_node_of_pipeline(node: Node) -> Node | None:
     Returns:
         Node | None: The input node in the pipeline or None if no such node is found
     """
-
-    def find_nearest_add_node() -> Node | None:
-        """Find the nearest succeeding add node in the graph.
-
-        Returns:
-            Node | None: The nearest add node in the graph or None if no such node is found
-        """
-        visited: set[Node] = set()
-        queue: list[Node] = [node]
-        while queue:
-            current = queue.pop(0)
-            if current in visited:
-                continue
-            visited.add(current)
-            if (add := AddTensorTensor.specialize_from(current)) and add.this.op == add.other.op == "call_function":
-                return current
-            if current.users:
-                queue.extend(current.users)
-
-        return None
-
-    if not (expected_output_node := find_nearest_add_node()):
+    if not (add := find_nearest(AddTensorTensor, node, follow_parent=False)):
         return None
     visited: set[Node] = set()
     queue: list[Node] = [node]
@@ -160,7 +141,7 @@ def find_input_node_of_pipeline(node: Node) -> Node | None:
         if current in visited:
             continue
         visited.add(current)
-        if len(current.users) == 2 and expected_output_node in current.users:
+        if len(current.users) == 2 and add.node in current.users:
             return current
         for input_node in current.all_input_nodes:
             queue.append(input_node)
@@ -248,8 +229,10 @@ def resolve_unmatched_input_shapes(binary: BinaryElementwise) -> None:
         return False
 
     if (
-        (lhs_val := get_val(binary.this, FakeTensor)) is not None
-        and (rhs_val := get_val(binary.other, FakeTensor)) is not None
+        isinstance(binary.this, Node)
+        and isinstance(lhs_val := get_val(binary.this), torch.Tensor)
+        and isinstance(binary.other, Node)
+        and isinstance(rhs_val := get_val(binary.other), torch.Tensor)
         and (
             need_to_unsqueeze(lhs_val.shape, rhs_val.shape)
             if len(lhs_val.shape) < len(rhs_val.shape)

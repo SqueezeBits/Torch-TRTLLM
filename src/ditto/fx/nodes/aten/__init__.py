@@ -65,6 +65,7 @@ from .binary_elementwise import (
     SubTensorScalar,
     SubTensorTensor,
 )
+from .clamp import ClampScalar, ClampTensor
 from .combine import Cat, Combine, Stack
 from .copy_like import Clone, ToCopy
 from .embedding import Embedding
