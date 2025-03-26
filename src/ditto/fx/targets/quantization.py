@@ -19,6 +19,15 @@ from ...types import StrictlyTyped
 from .fake_tensor_mode import is_in_fake_tensor_mode
 
 
+class ActivationQuantization(StrictlyTyped):
+    """Activation quantization."""
+
+    quant_mode: QuantizeMode
+    scale: torch.Tensor | None = None
+    zero_point: torch.Tensor | None = None
+    dynamic: bool = False
+
+
 class Quantizer(StrictlyTyped):
     """Quantization target."""
 

@@ -38,18 +38,43 @@ class QuantizeMode(Enum):
     """Quantization mode.
 
     Attributes:
-        PER_TENSOR (auto): Quantization mode for the quantized tensor.
-        PER_GROUP (auto): Quantization mode for the quantized tensor.
-        PER_CHANNEL (auto): Quantization mode for the quantized tensor.
-        PER_TOKEN (auto): Quantization mode for the quantized tensor.
-        UNKNOWN (auto): Quantization mode for the quantized tensor.
+        PER_TENSOR (auto): per-tensor quantization.
+        PER_GROUP (auto): per-group quantization.
+        PER_CHANNEL (auto): per-channel quantization.
+        PER_BLOCK (auto): per-block quantization.
+        PER_TOKEN (auto): per-token quantization.
+        UNKNOWN (auto): unknown quantization mode.
     """
 
     PER_TENSOR = auto()
     PER_GROUP = auto()
     PER_CHANNEL = auto()
+    PER_BLOCK = auto()
     PER_TOKEN = auto()
     UNKNOWN = auto()
+
+    @classmethod
+    def from_quant_strategy(cls, quant_strategy: QuantizationStrategy) -> "QuantizeMode":
+        """Convert quantization strategy to Ditto quantization mode.
+
+        Args:
+            quant_strategy (QuantizationStrategy): The quantization strategy
+
+        Returns:
+            QuantizeMode: The Ditto quantization mode
+        """
+        if quant_strategy == QuantizationStrategy.TENSOR:
+            return cls.PER_TENSOR
+        if quant_strategy == QuantizationStrategy.CHANNEL:
+            return cls.PER_CHANNEL
+        if quant_strategy == QuantizationStrategy.GROUP:
+            return cls.PER_GROUP
+        if quant_strategy == QuantizationStrategy.BLOCK:
+            return cls.PER_BLOCK
+        if quant_strategy == QuantizationStrategy.TOKEN:
+            return cls.PER_TOKEN
+
+        raise NotImplementedError(f"Unsupported quantization strategy: {quant_strategy}")
 
 
 class QuantizeAlgorithm(Enum):
@@ -213,13 +238,16 @@ class GlobalQuantConfig(StrictlyTyped):
             assert (
                 config.input_activations is not None
                 and config.input_activations.strategy is not None
-                and config.input_activations.strategy == QuantizationStrategy.TENSOR
                 and config.input_activations.num_bits == 8
                 and config.weights is not None
                 and config.weights.strategy is not None
-                and config.weights.strategy == QuantizationStrategy.TENSOR
                 and config.weights.num_bits == 8
-            ), "Currently, only per-tensor 8-bit quantization is supported"
+                and (config.input_activations.strategy, config.weights.strategy)
+                in (
+                    (QuantizationStrategy.TENSOR, QuantizationStrategy.TENSOR),
+                    (QuantizationStrategy.TOKEN, QuantizationStrategy.CHANNEL),
+                )
+            ), "Currently, 8-bit per-tensor quantization or dynamic quantization is supported"
             return cls(
                 hf_quant_method=quantization_config.quantization_config.quant_method,
                 trtllm_quant_algo=QuantAlgo.FP8,
@@ -228,13 +256,13 @@ class GlobalQuantConfig(StrictlyTyped):
                         target=torch.ops.aten.mm.default,
                         input_quant_scheme=QuantScheme(
                             bits=config.input_activations.num_bits,
-                            mode=QuantizeMode.UNKNOWN,
+                            mode=QuantizeMode.from_quant_strategy(config.input_activations.strategy),
                             dynamic=config.input_activations.dynamic,
                             type=config.input_activations.type,
                         ),
                         weight_quant_scheme=QuantScheme(
                             bits=config.weights.num_bits,
-                            mode=QuantizeMode.UNKNOWN,
+                            mode=QuantizeMode.from_quant_strategy(config.weights.strategy),
                             dynamic=config.weights.dynamic,
                             type=config.weights.type,
                         ),
