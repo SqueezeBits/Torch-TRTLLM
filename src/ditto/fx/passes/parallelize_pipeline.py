@@ -55,7 +55,7 @@ class ParallelizePipeline(GraphOptimizationPass):
         layers_to_be_parallelized = mapping.get_pp_layers(num_attn_layers)
         gpt_attn_plugin_nodes = [node for node in graph.nodes if isinstance(node.target, GPTAttentionPlugin)]
         for idx, node in enumerate(gpt_attn_plugin_nodes):
-            if (
+            if not (
                 isinstance(gpt_attn_plugin := node.target, GPTAttentionPlugin)
                 and gpt_attn_plugin.layer_idx in layers_to_be_parallelized
             ):
