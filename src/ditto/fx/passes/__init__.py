@@ -55,6 +55,7 @@ from .replace_mm_by_fp8_gemm_plugin import ReplaceMMByFp8GemmPlugin
 from .replace_mm_by_gemm_plugin import ReplaceMMByGemmPlugin
 from .replace_mm_by_woq_gemm_plugin import ReplaceMMByWoQGemmPlugin
 from .replace_moe_by_mixture_of_experts_plugin import ReplaceMoEByMoEPlugin
+from .replace_rmsnorm_by_fp8_rmsnorm_plugin import ReplaceRmsNormByFp8RmsNormPlugin
 from .replace_sdpa_by_gpt_attention_plugin import ReplaceSDPAByGPTAttentionPlugin
 from .replace_view_by_reshape import ReplaceViewByReshape
 from .reset_code_gen import ResetCodeGen

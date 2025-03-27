@@ -103,6 +103,7 @@ PassName = Literal[
     "ReplaceMMByFp8GemmPlugin",
     "ReplaceMMByGemmPlugin",
     "ReplaceMMByWoQGemmPlugin",
+    "ReplaceRmsNormByFp8RmsNormPlugin",
     "ReplaceSDPAByGPTAttentionPlugin",
     "ReplaceViewByReshape",
     "ResetCodeGen",

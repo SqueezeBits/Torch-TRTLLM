@@ -34,6 +34,7 @@ from ..fx.targets import (
     MixtureOfExpertsPlugin,
     Plugin,
     RecvPlugin,
+    RmsnormQuantizationPlugin,
     SendPlugin,
     WeightOnlyGroupwiseQuantMatmulPlugin,
     WeightOnlyQuantMatmulPlugin,
@@ -220,6 +221,34 @@ def convert_recv_plugin(
     """
     assert isinstance(target, RecvPlugin)
     return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="recv")
+
+
+@dynamo_tensorrt_converter(
+    RmsnormQuantizationPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_rmsnorm_quantization_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a RmsnormQuantizationPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The RmsnormQuantizationPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, RmsnormQuantizationPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="rmsnorm_quantized")
 
 
 @dynamo_tensorrt_converter(

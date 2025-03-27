@@ -19,6 +19,7 @@ from .linear import Linear
 from .lora import Lora, LoraProto, MultiLora
 from .moe import MoESubgraph
 from .path import TrailingReformatPath
+from .rmsnorm import RmsNormSubgraph
 from .rope import RoPESubgraph
 from .sdpa import ScaledDotProductAttentionSubgraph
 from .subgraph import Subgraph
