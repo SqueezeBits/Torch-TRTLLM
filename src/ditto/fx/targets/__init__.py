@@ -14,6 +14,7 @@
 
 from .allgather_plugin import AllGatherPlugin
 from .allreduce_plugin import AllReducePlugin, AllReducePluginInputs
+from .fake_quantizer import ActivationQuantization, Dequantizer, Quantizer
 from .gemm_plugin import (
     GemmPlugin,
 )
@@ -36,7 +37,6 @@ from .mixture_of_experts_plugin import (
     get_moe_normalization_mode,
 )
 from .plugin import Plugin
-from .quantization import ActivationQuantization, Dequantizer, Quantizer
 from .recv_plugin import RecvPlugin
 from .rmsnorm_quantization_plugin import RmsnormQuantizationPlugin
 from .rope import FAKE_ROPE_TARGETS
