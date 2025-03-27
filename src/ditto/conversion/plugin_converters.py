@@ -33,6 +33,7 @@ from ..fx.targets import (
     LoraPlugin,
     MixtureOfExpertsPlugin,
     Plugin,
+    QuantizePerTokenPlugin,
     RecvPlugin,
     RmsnormQuantizationPlugin,
     SendPlugin,
@@ -193,6 +194,34 @@ def convert_lora_plugin(
     """
     assert isinstance(target, LoraPlugin)
     return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="lora")
+
+
+@dynamo_tensorrt_converter(
+    QuantizePerTokenPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_quantize_per_token_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a QuantizePerTokenPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The QuantizePerTokenPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, QuantizePerTokenPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="quantize_per_token")
 
 
 @dynamo_tensorrt_converter(

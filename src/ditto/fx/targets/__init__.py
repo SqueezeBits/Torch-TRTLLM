@@ -37,6 +37,7 @@ from .mixture_of_experts_plugin import (
     get_moe_normalization_mode,
 )
 from .plugin import Plugin
+from .quantize_per_token import QuantizePerTokenPlugin
 from .recv_plugin import RecvPlugin
 from .rmsnorm_quantization_plugin import RmsnormQuantizationPlugin
 from .rope import FAKE_ROPE_TARGETS
