@@ -93,22 +93,30 @@ def are_fusible(dequantizes: list[Dequantize]) -> bool:
     if not (
         all(dequantizes[0].target.bits == dequantize.target.bits for dequantize in dequantizes[1:])
         and all(dequantizes[0].target.mode == dequantize.target.mode for dequantize in dequantizes[1:])
+        and dequantizes[0].target.mode in (QuantizeMode.PER_TENSOR, QuantizeMode.PER_GROUP, QuantizeMode.PER_CHANNEL)
         and all(dequantizes[0].target.algorithm == dequantize.target.algorithm for dequantize in dequantizes[1:])
         and (qweight_nodes := [dequantize.qweight for dequantize in dequantizes])
         and (scale_nodes := [dequantize.scale for dequantize in dequantizes])
     ):
         return False
 
-    for nodes in (qweight_nodes, scale_nodes):
-        if not (
-            (attrs := [attr for node in nodes if (attr := GetAttr.specialize_from(node)) is not None])
-            and len(attrs) == len(nodes)
-            and all(
-                attrs[0].tensor.shape[0] == attr.tensor.shape[0] and attrs[0].tensor.dtype == attr.tensor.dtype
-                for attr in attrs[1:]
-            )
-        ):
-            return False
+    if not (
+        (attrs := [attr for node in qweight_nodes if (attr := GetAttr.specialize_from(node)) is not None])
+        and len(attrs) == len(qweight_nodes)
+        and all(
+            attrs[0].tensor.shape[0] == attr.tensor.shape[0] and attrs[0].tensor.dtype == attr.tensor.dtype
+            for attr in attrs[1:]
+        )
+        and (attrs := [attr for node in scale_nodes if (attr := GetAttr.specialize_from(node)) is not None])
+        and len(attrs) == len(scale_nodes)
+        and all(
+            attrs[0].tensor.shape[1 if dequantizes[0].target.mode == QuantizeMode.PER_CHANNEL else 0]
+            == attr.tensor.shape[1 if dequantizes[0].target.mode == QuantizeMode.PER_CHANNEL else 0]
+            and attrs[0].tensor.dtype == attr.tensor.dtype
+            for attr in attrs[1:]
+        )
+    ):
+        return False
 
     return True
 
@@ -147,5 +155,7 @@ def fuse_scales(scales: list[torch.Tensor], *, quant_mode: QuantizeMode) -> torc
     assert len(scales) > 1
     if quant_mode == QuantizeMode.PER_TENSOR:
         return torch.stack(scales).max(dim=0).values
+    if quant_mode == QuantizeMode.PER_CHANNEL:
+        return torch.cat(scales, dim=0)
 
     return torch.cat(scales, dim=1)
