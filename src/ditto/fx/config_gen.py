@@ -28,7 +28,7 @@ from ..configs import (
 from ..literals import DTypeLiteral
 from ..quantization import GlobalQuantConfig
 from ..types import verify
-from .metadata_keys import EXPERT_TYPE
+from .metadata_keys import EXPERT_TYPE, MOE_CONFIG
 from .subgraphs import Linear, TokenEmbedding
 from .targets import GPTAttentionPlugin
 
@@ -60,7 +60,7 @@ def generate_trtllm_engine_config(
     if (lora_config := graph_module.meta.pop("lora_config", None)) is not None:
         build_config.lora_config = TRTLLMLoraConfig.model_validate(lora_config)
         build_config.plugin_config.lora_plugin = "auto"
-    if graph_module.meta.get("moe_config", None) is not None:
+    if graph_module.meta.get(MOE_CONFIG, None) is not None:
         build_config.plugin_config.moe_plugin = "auto"
     return TRTLLMEngineConfig(
         pretrained_config=generate_trtllm_pretrained_config(
@@ -106,7 +106,7 @@ def generate_trtllm_pretrained_config(
     ):
         # pylint: disable-next=unsupported-assignment-operation
         pretrained_config.extra_fields["qwen_type"] = hf_config.model_type
-    if (moe_config := graph_module.meta.pop("moe_config", None)) is not None:
+    if (moe_config := graph_module.meta.pop(MOE_CONFIG, None)) is not None:
         pretrained_config.moe = TRTLLMMoEConfig.model_validate(moe_config)
     return pretrained_config
 
@@ -272,7 +272,7 @@ def infer_pretrained_config(
     if plugin_idx != plugin.layer_idx:
         raise PretrainedConfigGenerationError(f"Expected layer_idx={plugin_idx} but got {plugin.layer_idx=}")
 
-    if (dtype := verify(trt_dtype_to_str(plugin.type_id), as_type=DTypeLiteral)) is None:
+    if (dtype := verify(trt_dtype_to_str(plugin.type_id), as_type=DTypeLiteral)) is None:  # type: ignore[arg-type]
         raise PretrainedConfigGenerationError(f"Found GPT attention plugin with invalid type_id={plugin.type_id}.")
 
     return TRTLLMPretrainedConfig(

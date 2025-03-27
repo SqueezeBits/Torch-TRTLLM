@@ -35,9 +35,18 @@ def save_mla_weights_for_debug(graph_module: GraphModule) -> None:
     for node in graph_module.graph.nodes:
         if isinstance(node.target, GPTAttentionPlugin) and node.target.is_mla_enabled:
             gpt_attention_idx += 1
-            fused_q_proj = GetAttr.specialize_from(node.all_input_nodes[-3])
-            q_b_proj = GetAttr.specialize_from(node.all_input_nodes[-2])
-            kv_b_proj = GetAttr.specialize_from(node.all_input_nodes[-1])
+            if (
+                len(
+                    weights := [
+                        get_attr
+                        for n in node.all_input_nodes[-3:]
+                        if (get_attr := GetAttr.specialize_from(n)) is not None
+                    ]
+                )
+                != 3
+            ):
+                continue
+            fused_q_proj, q_b_proj, kv_b_proj = weights
             with open_debug_artifact(f"mla_weights_{gpt_attention_idx}.pt", "wb") as f:
                 if f:
                     mla_weights = {

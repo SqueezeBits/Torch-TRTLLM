@@ -70,11 +70,9 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
             ):
                 continue
 
-            is_mla_enabled = isinstance(attn, MLA)
-            if not sdpa.is_eligible_for_gpt_attention_plugin(is_mla_enabled):
+            if not sdpa.is_eligible_for_gpt_attention_plugin(is_mla_enabled=isinstance(attn, MLA)):
                 continue
-            if is_mla_enabled:
-                assert isinstance(attn, MLA)
+            if isinstance(attn, MLA):
                 q_lora_rank = attn.q_lora_rank
                 kv_lora_rank = attn.kv_lora_rank
                 qk_nope_head_dim = attn.qk_nope_head_dim
@@ -106,10 +104,10 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 with graph.inserting_after(last_placeholder):
                     self.create_rope_input_nodes(
                         graph,
-                        global_rope_config.rotary_inv_freq,
-                        global_rope_config.rotary_cos_sin,
-                        global_rope_config.long_rope_rotary_inv_freq,
-                        global_rope_config.long_rope_rotary_cos_sin,
+                        rotary_inv_freq=global_rope_config.rotary_inv_freq,
+                        rotary_cos_sin=global_rope_config.rotary_cos_sin,
+                        long_rope_rotary_inv_freq=global_rope_config.long_rope_rotary_inv_freq,
+                        long_rope_rotary_cos_sin=global_rope_config.long_rope_rotary_cos_sin,
                     )
                 global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph, global_rope_config.is_rope)
                 logger.debug(f"Found GPTAttentionPluginInputs for layer {layer_idx}")
@@ -124,7 +122,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 tp_rank=self.tp_rank,
                 type_id=DataType(self.dtype).to(trt.DataType),
                 q_scaling=sdpa.default_scale / sdpa.scale,
-                is_mla_enabled=is_mla_enabled,
+                is_mla_enabled=isinstance(attn, MLA),
                 q_lora_rank=q_lora_rank,
                 kv_lora_rank=kv_lora_rank,
                 qk_nope_head_dim=qk_nope_head_dim,
@@ -135,11 +133,9 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
 
             with graph.inserting_before(node):
                 plugin_inputs = global_plugin_inputs.model_dump()
-                if not is_mla_enabled:
-                    assert isinstance(attn, MHA)
+                if isinstance(attn, MHA):
                     qkv = attn.qkv
                 else:
-                    assert isinstance(attn, MLA)
                     hidden_states = SqueezeDim.create(graph, attn.hidden_states, 0)
                     compressed_kv = SqueezeDim.create(graph, attn.compressed_kv, 0)
                     k_pe = SqueezeDim.create(graph, attn.k_pe, 0)
@@ -173,10 +169,10 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
             modified = True
         return PassResult(graph_module=graph_module, modified=modified)
 
-    # pylint: disable-next=too-many-positional-arguments
     def create_rope_input_nodes(
         self,
         graph: Graph,
+        *,
         rotary_inv_freq: torch.nn.Parameter | None,
         rotary_cos_sin: torch.nn.Parameter | None,
         long_rope_rotary_inv_freq: torch.nn.Parameter | None,

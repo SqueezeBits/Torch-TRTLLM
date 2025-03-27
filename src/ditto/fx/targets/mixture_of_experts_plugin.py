@@ -195,8 +195,6 @@ def get_moe_normalization_mode(pretrained_config: PretrainedConfig | None) -> in
     model_type = pretrained_config.model_type if pretrained_config else None
     # Following the rules defined in tensorrt_llm/models/{model_type}.
     # Default is RENORMALIZE.
-    if model_type is None:
-        return TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
     match model_type:
         case "qwen2_moe":
             return TRTLLMMoeConfig.ExpertScaleNormalizationMode.NONE

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from collections.abc import Iterable
-from typing import TypeVar, cast, overload
+from typing import TYPE_CHECKING, TypeVar, cast, overload
 from weakref import WeakKeyDictionary
 
 import torch
@@ -24,6 +24,10 @@ from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
 
 from ..contexts import detailed_sym_node_str
 from ..types import NodeCriterion
+
+if TYPE_CHECKING:
+    from .nodes import NodeSpecialization
+    from .subgraphs import Subgraph
 
 
 def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
@@ -292,9 +296,9 @@ def find_output_node(graph_or_graph_module: Graph | GraphModule) -> Node:
 
 
 # pylint: disable-next=invalid-name
-NodeType = TypeVar("NodeType", bound="NodeSpecialization")  # type: ignore # noqa: F821
+NodeType = TypeVar("NodeType", bound="NodeSpecialization")
 # pylint: disable-next=invalid-name
-SubgraphType = TypeVar("SubgraphType", bound="Subgraph")  # type: ignore # noqa: F821
+SubgraphType = TypeVar("SubgraphType", bound="Subgraph")
 
 
 @overload
@@ -353,16 +357,22 @@ def find_nearest(
     Returns:
         NodeType | None: The nearest specialized node if found, otherwise None
     """
-    if hasattr(node_type, "specialize_from"):
+    # pylint: disable=import-outside-toplevel
+    from .nodes import NodeSpecialization
+    from .subgraphs import Subgraph
+
+    if issubclass(node_type, NodeSpecialization):
         specialize_func = node_type.specialize_from
-    else:
+    elif issubclass(node_type, Subgraph):
         specialize_func = node_type.configure_from
+    else:
+        raise TypeError(f"Invalid specialization type: {node_type}")
 
     queue = [(from_node, 0)]
     while queue:
         node, depth = queue.pop(0)
         if target_node := specialize_func(node):
-            return target_node
+            return target_node  # type: ignore[return-value]
         if break_if is not None and break_if(node):
             break
         if continue_if is not None and continue_if(node):

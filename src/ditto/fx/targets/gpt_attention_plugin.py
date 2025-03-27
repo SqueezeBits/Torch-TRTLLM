@@ -282,7 +282,7 @@ class ROPEConfig(StrictlyTyped):
         model_type = lookup_attributes(
             pretrained_config,
             "model_type",
-            default="llama",
+            default="unknown",
         )
         rope_config.rotary_embedding_base = lookup_attributes(
             pretrained_config,

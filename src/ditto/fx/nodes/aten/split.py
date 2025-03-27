@@ -86,10 +86,10 @@ class SplitWithSizes(Split, FinalATenOp):
 
     Attributes:
         this (Node): The input tensor node to split
-        split_size (list[int | torch.SymInt]): List of sizes for each split chunk
+        split_size (list[SymbolicInteger]): List of sizes for each split chunk
         dim (int): Dimension along which to split the tensor, defaults to 0
     """
 
     this: Node
-    split_size: list[int | torch.SymInt]
+    split_size: list[SymbolicInteger]
     dim: int = 0
