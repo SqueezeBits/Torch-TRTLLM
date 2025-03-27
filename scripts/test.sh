@@ -46,6 +46,7 @@ main() {
         "Qwen/Qwen1.5-MoE-A2.7B-Chat"
         "deepseek-ai/deepseek-moe-16b-chat --trust-remote-code --dtype bfloat16 --model-type deepseek_v1"
         "deepseek-ai/DeepSeek-V2-Lite-Chat  --trust-remote-code --dtype bfloat16"
+        "mistralai/Mistral-7B-Instruct-v0.3 --model-type llama --tp-size 4"
         # W4A16 weight-only quantization (auto-gptq, autoawq)
         "saul95/Llama-3.2-1B-GPTQ --skip-native --print-output"
         "ciCic/llama-3.2-1B-Instruct-AWQ --skip-native --print-output"
