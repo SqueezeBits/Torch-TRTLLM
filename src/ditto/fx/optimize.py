@@ -62,6 +62,7 @@ from .passes import (
     PopLoraPlugins,
     PropagateTensorParallelism,
     ReplaceMMByFp8GemmPlugin,
+    ReplaceMMByFp8RowwiseGemmPlugin,
     ReplaceMMByGemmPlugin,
     ReplaceMMByWoQGemmPlugin,
     ReplaceMoEByMoEPlugin,
@@ -285,6 +286,7 @@ def get_trtllm_conversion_transform(
         ReplaceRmsNormByFp8RmsNormPlugin(model_dtype=dtype, global_quant_config=global_quant_config),
         ReplaceMMByWoQGemmPlugin(model_dtype=dtype),
         ReplaceMMByFp8GemmPlugin,
+        ReplaceMMByFp8RowwiseGemmPlugin(model_dtype=dtype),
         ReplaceMMByGemmPlugin,
         CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]
