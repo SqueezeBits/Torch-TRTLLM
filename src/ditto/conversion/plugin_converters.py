@@ -28,6 +28,7 @@ from ..debug import enable_plugin_debug_info_hook
 from ..fx.targets import (
     AllGatherPlugin,
     AllReducePlugin,
+    Fp8RowwiseGemmPlugin,
     GemmPlugin,
     GPTAttentionPlugin,
     LoraPlugin,
@@ -96,6 +97,34 @@ def convert_allreduce_plugin(
     """
     assert isinstance(target, AllReducePlugin)
     return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="allreduce")
+
+
+@dynamo_tensorrt_converter(
+    Fp8RowwiseGemmPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_fp8_rowwise_gemm_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a Fp8RowwiseGemmPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The Fp8RowwiseGemmPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, Fp8RowwiseGemmPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="fp8_rowwise_gemm")
 
 
 @dynamo_tensorrt_converter(

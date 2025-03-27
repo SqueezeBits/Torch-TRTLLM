@@ -27,9 +27,14 @@ from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class ReplaceRmsNormByFp8RmsNormPlugin(NodewiseOptimizationPass):
-    """Replace normalization layers by RmsnormQuantization for FP8 precision (required for trtllm)."""
+    """Replace normalization layers by RmsnormQuantization for FP8 precision (required for trtllm).
 
-    model_dtype: torch.dtype = torch.float16
+    Attributes:
+        model_dtype (torch.dtype): Data type of the model
+        global_quant_config (GlobalQuantConfig | None): Global quantization configuration
+    """
+
+    model_dtype: torch.dtype
     global_quant_config: GlobalQuantConfig | None
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
