@@ -234,6 +234,21 @@ class NodeSpecialization(StrictlyTyped, ABC):
             spec,
         )
 
+    @classmethod
+    def find_in(cls, graph: Graph) -> Self | None:
+        """Find the first node in the given graph that matches this specialization.
+
+        Args:
+            graph (Graph): The FX graph to check
+
+        Returns:
+            Self | None: the first node that matches this specialization, or `None` if no such node is found.
+        """
+        for node in graph.nodes:
+            if node := cls.specialize_from(node):
+                return node
+        return None
+
     def __str__(self) -> str:
         return self.node.format_node()
 
