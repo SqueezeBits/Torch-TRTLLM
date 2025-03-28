@@ -22,7 +22,10 @@ declare REBUILD_NATIVE=false
 declare RERUN_NATIVE=false
 declare TP_SIZE=1
 declare PP_SIZE=1
-declare CLEANUP=false
+declare CKPT_ARGS=""
+declare BUILD_ARGS=""
+declare CLEANUP_CKPT=false
+declare CLEANUP_ENGINE=false
 
 # Global variables for engine and artifact directories
 declare DITTO_ENGINE_DIR=""
@@ -73,8 +76,8 @@ print_help() {
     echo "  [PEFT_ID1 PEFT_ID2 ...]  Optional PEFT model identifiers to apply"
     echo
     echo "Options:"
-    echo "  -h, --help              Show this help message and exit"
-    echo "  -v, --verbose           Show all terminal outputs"
+    echo "  -h, --help             Show this help message and exit"
+    echo "  -v, --verbose          Show all terminal outputs"
     echo "  -d, --debug            Enable debug mode"
     echo "  --prompt TEXT          Input prompt (default: \"Hey, are you conscious?\")"
     echo "  --trtllm-repo PATH     Path to TensorRT-LLM repository"
@@ -106,7 +109,12 @@ print_help() {
     echo "  --rebuild-native       Rebuild native TensorRT-LLM engine even if it already exists"
     echo "  --rerun-native         Run native TensorRT-LLM engine even if output files exist"
     echo
-    echo "  --cleanup              Cleanup all engines and artifacts after comparison"
+    echo "  --ckpt-args            Additional arguments to pass to the checkpoint conversion script"
+    echo "  --build-args           Additional arguments to pass to the engine build script"
+    echo
+    echo "  --cleanup              Equivalent to --cleanup-ckpt --cleanup-engine"
+    echo "  --cleanup-ckpt         Cleanup checkpoint directory after comparison"
+    echo "  --cleanup-engine       Cleanup engine directory after comparison"
     echo
     echo "[Example: Simply run meta-llama/Llama-2-7b-chat-hf]"
     echo "  $0 meta-llama/Llama-2-7b-chat-hf"
@@ -280,8 +288,25 @@ parse_args() {
                 fi
                 shift 2
                 ;;
+            --ckpt-args)
+                CKPT_ARGS="$2"
+                shift 2
+                ;;
+            --build-args)
+                BUILD_ARGS="$2"
+                shift 2
+                ;;
             --cleanup)
-                CLEANUP=true
+                CLEANUP_CKPT=true
+                CLEANUP_ENGINE=true
+                shift
+                ;;
+            --cleanup-ckpt)
+                CLEANUP_CKPT=true
+                shift
+                ;;
+            --cleanup-engine)
+                CLEANUP_ENGINE=true
                 shift
                 ;;
             -*)
@@ -565,14 +590,16 @@ native_build() {
                 --model-dir $BASE_MODEL_DIR \
                 --output-model-dir $TRTLLM_CKPT_DIR \
                 --dtype $DTYPE \
-                --world-size $TP_SIZE"
+                --world-size $TP_SIZE \
+                $CKPT_ARGS"
         else
             local convert_cmd="python $convert_script \
                 --model_dir $BASE_MODEL_DIR \
                 --output_dir $TRTLLM_CKPT_DIR \
                 --dtype $DTYPE \
                 --tp_size $TP_SIZE \
-                --pp_size $PP_SIZE"
+                --pp_size $PP_SIZE \
+                $CKPT_ARGS"
         fi
 
         rich_execute "$convert_cmd" "$TRTLLM_CKPT_DIR/convert.log" "convert checkpoint"
@@ -582,7 +609,7 @@ native_build() {
 
     TRTLLM_BUILD_ARGS="--checkpoint_dir $TRTLLM_CKPT_DIR \
         --output_dir $TRTLLM_ENGINE_DIR \
-        --gemm_plugin auto"
+        $BUILD_ARGS"
 
     if [ "$DEBUG_MODE" = true ]; then
         TRTLLM_BUILD_ARGS="$TRTLLM_BUILD_ARGS \
@@ -606,7 +633,7 @@ native_build() {
     local build_cmd="$TRTLLM_BUILD_SCRIPT $TRTLLM_BUILD_ARGS"
 
     DEBUG_ARTIFACTS_DIR=$TRTLLM_ARTIFACTS_DIR rich_execute "$build_cmd" "$TRTLLM_ENGINE_DIR/build.log" "build native TensorRT-LLM engine"
-    if [ "$CLEANUP" = true ]; then
+    if [ "$CLEANUP_CKPT" = true ]; then
         rm -r $TRTLLM_CKPT_DIR
     fi
 }
@@ -680,7 +707,7 @@ compare_outputs() {
         fi
     done
 
-    if [ "$CLEANUP" = true ]; then
+    if [ "$CLEANUP_ENGINE" = true ]; then
         rm -r $TRTLLM_ENGINE_DIR -r $DITTO_ENGINE_DIR
     fi
 
