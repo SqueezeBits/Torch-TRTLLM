@@ -17,8 +17,43 @@ from typing import Any
 
 from torch.fx.node import Node
 
-from ..targets import GemmPlugin, GPTAttentionPlugin, WeightOnlyGroupwiseQuantMatmulPlugin, WeightOnlyQuantMatmulPlugin
+from ..targets import (
+    Fp8RowwiseGemmPlugin,
+    GemmPlugin,
+    GPTAttentionPlugin,
+    WeightOnlyGroupwiseQuantMatmulPlugin,
+    WeightOnlyQuantMatmulPlugin,
+)
 from .call_function import CallFunction
+
+
+class Fp8RowwiseGemm(CallFunction):
+    """A plugin specialization representing a gemm plugin node.
+
+    Attributes:
+        this (Node): The first input node
+        other (Node): The second input node (expected to be a weight tensor)
+        token_scaling (Node): The token scaling node
+        channel_scaling (Node): The channel scaling node
+    """
+
+    this: Node
+    other: Node
+    token_scaling: Node
+    channel_scaling: Node
+
+    @property
+    def target(self) -> Fp8RowwiseGemmPlugin:
+        assert isinstance(t := super().target, Fp8RowwiseGemmPlugin)
+        return t
+
+    @classmethod
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
+        return ()
+
+    @classmethod
+    def validate_node(cls, node: Node) -> bool:
+        return isinstance(node.target, Fp8RowwiseGemmPlugin)
 
 
 class Gemm(CallFunction):

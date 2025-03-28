@@ -34,6 +34,7 @@ from ..nodes import (
     MM,
     AddTensorTensor,
     Dequantize,
+    Fp8RowwiseGemm,
     Gemm,
     Reshape,
     WeightOnlyGroupwiseQuantMatmul,
@@ -43,7 +44,7 @@ from ..targets import ActivationQuantization, LoraProto
 from ..utils import get_val
 from .subgraph import Subgraph
 
-MMType = MM | Gemm | WeightOnlyGroupwiseQuantMatmul | WeightOnlyQuantMatmul
+MMType = MM | Fp8RowwiseGemm | Gemm | WeightOnlyGroupwiseQuantMatmul | WeightOnlyQuantMatmul
 
 
 # pylint: disable-next=too-many-public-methods
@@ -80,7 +81,7 @@ class Linear(Subgraph):
         """Whether the weight is transposed."""
         if isinstance(self.mm, Gemm):
             return self.mm.target.transb == 1
-        return False
+        return isinstance(self.mm, Fp8RowwiseGemm)
 
     @property
     def weight_in_features_dim(self) -> Literal[0, 1]:
@@ -158,6 +159,7 @@ class Linear(Subgraph):
         if not (
             (
                 mm := MM.specialize_from(node)
+                or Fp8RowwiseGemm.specialize_from(node)
                 or Gemm.specialize_from(node)
                 or WeightOnlyGroupwiseQuantMatmul.specialize_from(node)
                 or WeightOnlyQuantMatmul.specialize_from(node)
