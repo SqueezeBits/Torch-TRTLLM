@@ -184,12 +184,14 @@ class GlobalQuantConfig(StrictlyTyped):
         trtllm_quant_algo (QuantAlgo): The quantization algorithm used by TRT-LLM
         trtllm_kv_cache_quant_algo (QuantAlgo | None): The quantization algorithm used by TRT-LLM for the KV cache.
             Defaults to None.
+        clamp_val (list[float] | None): The clamp values for the quantization. Defaults to None.
         quant_configs (list[TargetQuantConfig]): The quantization schemes for the target operators.
     """
 
     hf_quant_method: QuantizationMethod
     trtllm_quant_algo: QuantAlgo
     trtllm_kv_cache_quant_algo: QuantAlgo | None = None
+    clamp_val: list[float] | None = None
     quant_configs: list[TargetQuantConfig] = []
 
     @classmethod
@@ -279,9 +281,16 @@ class GlobalQuantConfig(StrictlyTyped):
                     (QuantizationStrategy.TOKEN, QuantizationStrategy.CHANNEL),
                 )
             ), "Currently, 8-bit per-tensor quantization or dynamic quantization is supported"
+            trtllm_quant_algo = (
+                QuantAlgo.FP8
+                if (config.input_activations.strategy, config.weights.strategy)
+                == (QuantizationStrategy.TENSOR, QuantizationStrategy.TENSOR)
+                else QuantAlgo.FP8_PER_CHANNEL_PER_TOKEN
+            )
             return cls(
                 hf_quant_method=quantization_config.quantization_config.quant_method,
-                trtllm_quant_algo=QuantAlgo.FP8,
+                trtllm_quant_algo=trtllm_quant_algo,
+                clamp_val=[-1200.0, 1200.0] if trtllm_quant_algo == QuantAlgo.FP8_PER_CHANNEL_PER_TOKEN else None,
                 quant_configs=[
                     TargetQuantConfig(
                         target=torch.ops.aten.mm.default,
