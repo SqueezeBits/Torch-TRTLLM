@@ -23,6 +23,7 @@ DTypeLiteral = Literal[
     "bfloat16",
     "float32",
     "int8",
+    "uint8",
     "int32",
     "int64",
     "bool",
