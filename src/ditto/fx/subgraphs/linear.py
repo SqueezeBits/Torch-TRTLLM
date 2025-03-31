@@ -20,9 +20,9 @@ from torch._subclasses import FakeTensor
 from torch.fx import Node
 from typing_extensions import Self
 
-from ...literals import LoraPluginInputPrefix
+from ...literals import ExpertTypeLiteral, LoraPluginInputPrefix
 from ...types import verify
-from ..metadata_keys import ACTIVATION_QUANT_SCALE, FREE_LORA_PROTO, LAYER_INDEX, LORA_PREFIX, LORA_PROTOS
+from ..metadata_keys import ACTIVATION_QUANT_SCALE, EXPERT_TYPE, FREE_LORA_PROTO, LAYER_INDEX, LORA_PREFIX, LORA_PROTOS
 from ..nodes import (
     MM,
     AddTensorTensor,
@@ -35,6 +35,8 @@ from ..nodes import (
 from ..targets import LoraProto
 from ..utils import get_val
 from .subgraph import Subgraph
+
+MMType = MM | Gemm | WeightOnlyGroupwiseQuantMatmul | WeightOnlyQuantMatmul
 
 
 # pylint: disable-next=too-many-public-methods
@@ -52,7 +54,7 @@ class Linear(Subgraph):
         add (AddTensor | None): The bias addition operation node, if present
     """
 
-    mm: MM | Gemm | WeightOnlyGroupwiseQuantMatmul | WeightOnlyQuantMatmul
+    mm: MMType
     add: AddTensorTensor | None
 
     @property
@@ -239,3 +241,7 @@ class Linear(Subgraph):
         """Set the activation quantization scale."""
         assert ACTIVATION_QUANT_SCALE not in self.mm.meta, f"Activation quant scale already set for {self.mm}"
         self.mm.meta[ACTIVATION_QUANT_SCALE] = scale
+
+    def mark_expert_type_as(self, expert_type: ExpertTypeLiteral) -> None:
+        """Mark the expert type of this linear layer if it is a part of a MoE layer."""
+        self.mm.meta[EXPERT_TYPE] = expert_type

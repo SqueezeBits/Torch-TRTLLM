@@ -21,7 +21,7 @@ from ...constants import INPUT_IDS
 from ...types import DataType
 from ..nodes import AddTensorTensor, BinaryElementwise, SymSizeInt, Unsqueeze
 from ..targets import GPTAttentionPlugin, RecvPlugin, SendPlugin
-from ..utils import find_closest_common_descendant, find_nearest_node, get_val
+from ..utils import find_closest_common_descendant, find_nearest, get_val
 from .infra import (
     GraphOptimizationPass,
     PassResult,
@@ -132,14 +132,7 @@ def find_input_node_of_pipeline(node: Node) -> Node | None:
     Returns:
         Node | None: The input node in the pipeline or None if no such node is found
     """
-    if not (
-        expected_output_node := find_nearest_node(
-            node,
-            lambda n: (add := AddTensorTensor.specialize_from(n)) is not None
-            and add.this.op == add.other.op == "call_function",
-            follow_parents=False,
-        )
-    ):
+    if not (add := find_nearest(AddTensorTensor, node, follow_parent=False)):
         return None
     visited: set[Node] = set()
     queue: list[Node] = [node]
@@ -148,7 +141,7 @@ def find_input_node_of_pipeline(node: Node) -> Node | None:
         if current in visited:
             continue
         visited.add(current)
-        if len(current.users) == 2 and expected_output_node in current.users:
+        if len(current.users) == 2 and add.node in current.users:
             return current
         for input_node in current.all_input_nodes:
             queue.append(input_node)

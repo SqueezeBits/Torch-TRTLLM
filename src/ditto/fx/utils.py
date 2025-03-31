@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from collections.abc import Iterable
-from typing import TypeVar, cast, overload
+from typing import TYPE_CHECKING, TypeVar, cast, overload
 from weakref import WeakKeyDictionary
 
 import torch
@@ -23,6 +23,10 @@ from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
 
 from ..contexts import detailed_sym_node_str
 from ..types import NodeCriterion
+
+if TYPE_CHECKING:
+    from .nodes import NodeSpecialization
+    from .subgraphs import Subgraph
 
 
 def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
@@ -290,44 +294,91 @@ def find_output_node(graph_or_graph_module: Graph | GraphModule) -> Node:
     return output_node
 
 
-def find_nearest_node(
-    node: Node,
-    criterion: NodeCriterion,
-    *,
-    follow_parents: bool = True,
-    follow_first_only: bool = False,
-    max_depth: int = 10,
-) -> Node | None:
-    """Find the nearest node in the graph that matches the criterion.
+# pylint: disable-next=invalid-name
+NodeType = TypeVar("NodeType", bound="NodeSpecialization")
+# pylint: disable-next=invalid-name
+SubgraphType = TypeVar("SubgraphType", bound="Subgraph")
+
+
+@overload
+# pylint: disable-next=too-many-positional-arguments
+def find_nearest(
+    node_type: type[SubgraphType],
+    from_node: Node,
+    follow_parent: bool = True,
+    follow_first_only: bool = True,
+    break_if: NodeCriterion | None = None,
+    continue_if: NodeCriterion | None = None,
+    max_depth: int = 15,
+) -> SubgraphType | None:
+    ...
+
+
+@overload
+# pylint: disable-next=too-many-positional-arguments
+def find_nearest(
+    node_type: type[NodeType],
+    from_node: Node,
+    follow_parent: bool = True,
+    follow_first_only: bool = True,
+    break_if: NodeCriterion | None = None,
+    continue_if: NodeCriterion | None = None,
+    max_depth: int = 15,
+) -> NodeType | None:
+    ...
+
+
+# pylint: disable-next=too-many-positional-arguments
+def find_nearest(
+    node_type: type[NodeType] | type[SubgraphType],
+    from_node: Node,
+    follow_parent: bool = True,
+    follow_first_only: bool = True,
+    break_if: NodeCriterion = lambda _: False,
+    continue_if: NodeCriterion = lambda _: False,
+    max_depth: int = 15,
+) -> NodeType | SubgraphType | None:
+    """Find the nearest node that can be specialized to this type using breadth-first search.
 
     Args:
-        node (Node): The starting node to search from
-        criterion (NodeCriterion): The criterion to match
-        follow_parents (bool, optional): Whether to follow parent nodes. Defaults to True
-        follow_first_only (bool, optional): Whether to follow only the first node in the parent or child list.
-            Defaults to False
-        max_depth (int, optional): The maximum depth to search. Defaults to 10
+        node_type (type[NodeType]): The node specialization type to search for
+        from_node (Node): Starting node to search from
+        follow_parent (bool, optional): Whether to follow parent nodes (True) or child nodes
+            (False). Defaults to True.
+        follow_first_only (bool, optional): Whether to only follow the first connected node.
+            Defaults to True.
+        break_if (NodeCriterion | None, optional): Function that returns True to break search
+            at a node. Defaults to None.
+        continue_if (NodeCriterion | None, optional): Function that returns True to skip a node
+            but continue searching its neighbors. Defaults to None.
+        max_depth (int): Maximum depth to traverse in the search. Defaults to 10.
 
     Returns:
-        Node | None: The nearest node that matches the criterion or None if no such node is found
+        NodeType | None: The nearest specialized node if found, otherwise None
     """
-    seen_nodes: set[Node] = set()
-    queue: list[Node] = [node]
+    # pylint: disable=import-outside-toplevel
+    from .nodes import NodeSpecialization
 
-    for _ in range(max_depth):
-        if not queue:
+    if issubclass(node_type, NodeSpecialization):
+        specialize_func = node_type.specialize_from
+    else:
+        specialize_func = node_type.configure_from  # type: ignore[assignment]
+
+    queue = [(from_node, 0)]
+    while queue:
+        node, depth = queue.pop(0)
+        if target_node := specialize_func(node):
+            return target_node  # type: ignore[return-value]
+        if break_if(node):
             break
-        n = queue.pop(0)
-        if n in seen_nodes:
+        if continue_if(node):
             continue
-        seen_nodes.add(n)
-        if criterion(n):
-            return n
-        if not (next_nodes := list(n.all_input_nodes if follow_parents else n.users)):
+        if depth > max_depth:
+            continue
+        if not (next_nodes := list(node.all_input_nodes if follow_parent else node.users)):
             continue
         if follow_first_only:
-            queue.append(next_nodes[0])
+            queue.append((next_nodes[0], depth + 1))
         else:
-            queue.extend(next_nodes)
-
+            queue.extend((next_node, depth + 1) for next_node in next_nodes)
     return None

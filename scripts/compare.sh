@@ -540,10 +540,11 @@ native_build() {
             AVAILABLE_MODEL_TYPES=$(find "${TRTLLM_REPO}/examples" -type f -name convert_checkpoint.py | xargs -n1 dirname | xargs -n1 basename)
 
             # Convert model_id to lowercase for case-insensitive matching
-            model_id_lower=$(echo "$model_id" | tr '[:upper:]' '[:lower:]')
+            model_id_lower=$(echo "$model_id" | tr '[:upper:]' '[:lower:]' | tr '-' '_')
 
             # Try to match each available model type
             for type in $AVAILABLE_MODEL_TYPES; do
+                type=$(echo "$type" | tr '-' '_')
                 if [[ $model_id_lower == *"$type"* ]]; then
                     MODEL_TYPE=$type
                     break

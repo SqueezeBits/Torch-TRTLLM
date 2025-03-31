@@ -13,10 +13,12 @@
 # limitations under the License.
 
 ACTIVATION_QUANT_SCALE = "activation_quant_scale"
+EXPERT_TYPE = "expert_type"
 FREE_LORA_PROTO = "free_lora_proto"
 LORA_PREFIX = "lora_prefix"
 LAYER_INDEX = "layer_index"
 LORA_PROTOS = "lora_protos"
+MOE_CONFIG = "moe_config"
 ORIGINAL_TARGET = "original_target"
 STACK_TRACE = "stack_trace"
 TENSOR_META = "tensor_meta"

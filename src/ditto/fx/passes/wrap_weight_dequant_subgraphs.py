@@ -23,7 +23,7 @@ from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode
 from ...types import StrictlyTyped
 from ..nodes import MM, GetAttr, MulTensorTensor, Permute
 from ..targets import Dequantizer
-from ..utils import find_nearest_node, get_val
+from ..utils import find_nearest, get_val
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
@@ -137,15 +137,13 @@ class TrailingDequantizePath(StrictlyTyped):
         if not (
             isinstance(org_weight_tensor := get_val(node), torch.Tensor)
             and (ancestors_with_maxdepth := get_ancestors_with_maxdepth_to_root(node))
-            and (mul_node := find_nearest_node(node, lambda n: MulTensorTensor.specialize_from(n) is not None))
-            and (mul := MulTensorTensor.specialize_from(mul_node))
+            and (mul := find_nearest(MulTensorTensor, node))
             and (
-                scale_node := find_nearest_node(
+                scale := find_nearest(
+                    GetAttr,
                     mul.this if ancestors_with_maxdepth[mul.this] < ancestors_with_maxdepth[mul.other] else mul.other,
-                    lambda n: GetAttr.specialize_from(n) is not None,
                 )
             )
-            and (scale := GetAttr.specialize_from(scale_node))
         ):
             return None
 
@@ -156,7 +154,7 @@ class TrailingDequantizePath(StrictlyTyped):
             else QuantizeMode.PER_GROUP
         )
         qweight, zero = find_qweight_and_zero_node(
-            [n for n in ancestors_with_maxdepth if n is not scale_node and GetAttr.specialize_from(n)],
+            [n for n in ancestors_with_maxdepth if n is not scale.node and GetAttr.specialize_from(n)],
             org_weight_tensor.shape,
             quant_method,
             group_size=group_size,

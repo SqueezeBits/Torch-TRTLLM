@@ -17,15 +17,17 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import tensorrt as trt
 import torch
+from loguru import logger
 from pydantic import PrivateAttr
 from tensorrt_llm.functional import QuantMode, SideStreamIDType
 from tensorrt_llm.layers.moe import MoeConfig as TRTLLMMoeConfig
 from tensorrt_llm.layers.moe import activation_str_to_int_map
 from torch.fx import Graph, Node
+from transformers import PretrainedConfig
 from typing_extensions import Self
 
 from ...types import StrictlyTyped
-from ..nodes import Cat, Permute, Stack
+from ..nodes import Cat, Permute, Stack, ToCopy
 from .fake_tensor_mode import is_in_fake_tensor_mode
 from .plugin import Plugin
 
@@ -142,8 +144,11 @@ class MixtureOfExpertsPluginInputs(StrictlyTyped):
     def create_from(cls, moe: "MoESubgraph", graph: Graph) -> Self:
         """Create plugin inputs from MoE subgraph.
 
-        For the MoE plugin, the weight tensors of all experts should be stacked together to be fed into
+        For the MoE plugin,
+        1. the weight tensors of all experts should be stacked together to be fed into
         the plugin, and up-projection weights and gate-projection weights should be concatenated together.
+        2. The router logits should be cast to float32.
+
 
         Args:
             moe (MoESubgraph): MoE subgraph to extract inputs from
@@ -159,23 +164,52 @@ class MixtureOfExpertsPluginInputs(StrictlyTyped):
         assert expert_weights_1.ndim == 3
         expert_weights_1 = Permute.create(graph, expert_weights_1, [0, 2, 1])
         expert_weights_2 = Permute.create(graph, down_weights, [0, 2, 1])
+
+        if moe.router_logits_dtype == torch.bfloat16:
+            router_logits = ToCopy.create(graph, moe.router_logits, dtype=torch.float32).node
+        elif moe.router_logits_dtype == torch.float32:
+            router_logits = moe.router_logits
+        else:
+            logger.warning(
+                f"Router logits with dtype {moe.router_logits_dtype} might not be supported by the MoE plugin. "
+                "Add casting to float32 if it's not supported."
+            )
+            router_logits = moe.router_logits
+
         return cls(
             hidden_states=moe.hidden_states,
-            routing=moe.router_logits,
+            routing=router_logits,
             expert_weights_1=expert_weights_1.node,
             expert_weights_2=expert_weights_2.node,
         )
 
 
-def get_moe_normalization_mode() -> int:
+# mypy: disable-error-code="union-attr"
+# pylint: disable=too-many-return-statements
+def get_moe_normalization_mode(pretrained_config: PretrainedConfig | None) -> int:
     """Get the normalization mode for MoE plugin.
 
     Returns:
         int: The normalization mode enum value
     """
-    # TODO: Set normalization mode for each model.
-    # For Qwen MoE models, it is hard-coded to ExpertScaleNormalizationMode.NONE.
-    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.NONE
+    model_type = pretrained_config.model_type if pretrained_config else None
+    # Following the rules defined in tensorrt_llm/models/{model_type}.
+    # Default is RENORMALIZE.
+    match model_type:
+        case "qwen2_moe":
+            return TRTLLMMoeConfig.ExpertScaleNormalizationMode.NONE
+        case "deepseek_v2":
+            if pretrained_config.topk_method == "group_limited_greedy":
+                if pretrained_config.num_experts_per_tok > 1 and pretrained_config.norm_topk_prob:
+                    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.DEVICE_LIMITED_RENORM
+                return TRTLLMMoeConfig.ExpertScaleNormalizationMode.DEVICE_LIMITED
+            if pretrained_config.topk_method == "greedy":
+                if pretrained_config.num_experts_per_tok > 1 and pretrained_config.norm_topk_prob:
+                    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
+                return TRTLLMMoeConfig.ExpertScaleNormalizationMode.NONE
+        case _:
+            return TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
+    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
 
 
 def get_moe_activation_type() -> int:

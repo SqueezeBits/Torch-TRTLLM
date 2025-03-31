@@ -17,6 +17,7 @@ import torch
 from torch.fx import Graph, GraphModule, Node
 
 from ...types import DataType
+from ..metadata_keys import MOE_CONFIG
 from ..subgraphs import MoESubgraph
 from ..targets import (
     MixtureOfExpertsPlugin,
@@ -24,7 +25,7 @@ from ..targets import (
     get_moe_activation_type,
     get_moe_normalization_mode,
 )
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, get_pretrained_config
 
 
 class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
@@ -50,13 +51,14 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
             return {}
 
         graph = node.graph
+        pretrained_config = get_pretrained_config(graph)
 
         moe_plugin = MixtureOfExpertsPlugin(
             number_of_experts=moe.number_of_experts,
             top_k=moe.top_k,
             expert_hidden_size=moe.expert_hidden_size,
             expert_inter_size=moe.expert_inter_size,
-            normalization_mode=get_moe_normalization_mode(),
+            normalization_mode=get_moe_normalization_mode(pretrained_config),
             activation_type=get_moe_activation_type(),
             type_id=DataType(self.dtype).to(trt.DataType),
             weight_type_id=DataType(self.dtype).to(trt.DataType),
@@ -95,7 +97,7 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
     def postprocess(self, graph_module: GraphModule) -> None:
         super().postprocess(graph_module)
         if self.plugin is not None:
-            graph_module.meta["moe_config"] = {
+            graph_module.meta[MOE_CONFIG] = {
                 "num_experts": self.plugin.number_of_experts,
                 "shared_expert_intermediate_size": self.plugin._shared_expert_intermediate_size,
                 "top_k": self.plugin.top_k,

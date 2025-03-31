@@ -36,7 +36,7 @@ DeviceLikeType = str | torch.device | int
 NodeCriterion = Callable[[Node], bool]
 Number = int | float | bool
 SymbolicInteger = torch.SymInt | int
-SymbolicShape = tuple[SymbolicInteger, ...]  # type: ignore[valid-type]
+SymbolicShape = tuple[SymbolicInteger, ...]
 ShapeArg = list[int | Node]
 
 T = TypeVar("T")
@@ -61,7 +61,7 @@ def verify(value: Any, *, as_type: type[T], coerce: bool = False, **config: Unpa
             if (isclass(as_type) and not hasattr(as_type, "__origin__") and issubclass(as_type, BaseModel))
             else TypeAdapter(as_type, config={"arbitrary_types_allowed": True, **config}).validate_python(value)
         )
-        return coerced_value if coerce else value
+        return coerced_value if coerce else value  # type: ignore[return-value]
     except ValidationError:
         return None
 
@@ -128,9 +128,9 @@ class DataType:
         """
         if data_type is TensorProto.DataType:  # TensorProto.DataType is not actually a type
             if isinstance(self.dtype, int):
-                return cast(TensorProto.DataType, self.dtype)
+                return cast(TensorProto.DataType, self.dtype)  # type: ignore[return-value]
         elif verified_dtype := verify(self.dtype, as_type=data_type):
-            return verified_dtype
+            return verified_dtype  # type: ignore[return-value]
         actual_type: type[int] | type[torch.dtype] | type[trt.DataType] | type[str] = (
             int if data_type is TensorProto.DataType else str if data_type is DTypeLiteral else data_type
         )

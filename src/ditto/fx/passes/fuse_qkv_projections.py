@@ -18,6 +18,7 @@ from ...debug import save_for_debug
 from ...literals import LoraPluginInputPrefix
 from ..nodes import ScaledDotProductAttention
 from ..subgraphs import Linear, TrailingReformatPath
+from ..utils import find_nearest
 from .fuse_projections import FuseProjections
 
 
@@ -38,9 +39,9 @@ class FuseQKVProjections(FuseProjections):
         root = TrailingReformatPath.configure_from(attn_dense.input_node).top
         if not (
             (sdpa := ScaledDotProductAttention.specialize_from(root))
-            and (q_proj := Linear.find_nearest(sdpa.query))
-            and (k_proj := Linear.find_nearest(sdpa.key))
-            and (v_proj := Linear.find_nearest(sdpa.value))
+            and (q_proj := find_nearest(Linear, sdpa.query))
+            and (k_proj := find_nearest(Linear, sdpa.key))
+            and (v_proj := find_nearest(Linear, sdpa.value))
         ):
             return []
         attn_dense.bind_free_lora_proto(with_prefix="attn_dense")

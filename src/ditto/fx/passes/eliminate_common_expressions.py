@@ -47,7 +47,7 @@ def group_users(node: Node) -> list[list[Node]]:
         user = users.pop(0)
         group = [user] + [other_user for other_user in users if are_equivalent(user, other_user)]
         users = [x for x in users if x not in group]
-        groups.append(group)
+        groups.append(sorted(group))
     return groups
 
 

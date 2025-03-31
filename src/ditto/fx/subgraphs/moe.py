@@ -19,10 +19,10 @@ from torch.fx import Node
 from typing_extensions import Self
 
 from ...types import SymbolicInteger
-from ..nodes import MM, Gemm, IndexPut, MulTensorTensor, SelectInt, Softmax, ToCopy
-from ..utils import get_tensor_metadata
+from ..nodes import IndexPut, MulTensorTensor, SelectInt, Softmax, ToCopy
+from ..utils import find_nearest, get_tensor_metadata
 from .gated_mlp import GatedMLP
-from .linear import Linear
+from .linear import Linear, MMType
 from .one_hot import OneHot
 from .path import TrailingReformatPath
 from .subgraph import Subgraph
@@ -53,8 +53,9 @@ class Expert(Subgraph):
     def configure_from(cls, node: Node) -> Self | None:
         if not (
             (select := SelectInt.specialize_from(node))
-            and (gated_mlp := GatedMLP.find_nearest(select.node, follow_parent=False, follow_first_only=False))
-            and (down_proj := Linear.find_nearest(gated_mlp.mul.node, follow_parent=False))
+            and (gated_mlp := find_nearest(GatedMLP, select.node, follow_parent=False, follow_first_only=False))
+            and (gated_mlp_mul := gated_mlp.mul)
+            and (down_proj := find_nearest(Linear, gated_mlp_mul.node, follow_parent=False))
             and (len(users := list(down_proj.output_node.users)) == 1)
             and (weighted_expert := MulTensorTensor.specialize_from(users[0]))
             and (len(users := list(weighted_expert.users)) == 1)
@@ -71,6 +72,7 @@ class Expert(Subgraph):
             final_hidden_states=final_hidden_states.node,
         )
 
+    # pylint: disable=duplicate-code
     def find_unused_nodes(self) -> set[Node]:
         """Find unused nodes in the expert subgraph.
 
@@ -97,6 +99,7 @@ class Expert(Subgraph):
         return unused_nodes
 
 
+# pylint: disable=too-many-locals
 class MoESubgraph(Subgraph):
     """A Mixture of Experts (MoE) layer subgraph.
 
@@ -114,7 +117,7 @@ class MoESubgraph(Subgraph):
     """
 
     hidden_states: Node
-    router: MM | Gemm
+    router: MMType
     router_logits: Node
     top_k: int
     expert_weights: list[tuple[Node, Node, Node]]
@@ -162,10 +165,21 @@ class MoESubgraph(Subgraph):
         Returns:
             int: Intermediate dimension size for the shared expert network
         """
+        if len(self.shared_expert_weights) == 0:
+            return 0
         assert (
             shared_expert_weight := get_tensor_metadata(self.shared_expert_weights[0][0])
         ) is not None, "shared expert weight's metadata is not found"
         return shared_expert_weight.shape[1]
+
+    @property
+    def router_logits_dtype(self) -> torch.dtype:
+        """Get the data type of the router logits.
+
+        Returns:
+            torch.dtype: The data type of the router logits tensor
+        """
+        return self.router_logits.meta["val"].dtype
 
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
@@ -181,10 +195,10 @@ class MoESubgraph(Subgraph):
         ):
             return None
 
-        if not (expert := Expert.find_nearest(one_hot.eq.node, follow_parent=False)):
+        if not (expert := find_nearest(Expert, one_hot.eq.node, follow_parent=False)):
             raise NotImplementedError(f"Unsupported expert graph found from: {one_hot.eq.node}")
 
-        experts = []
+        experts: list[Expert] = []
         unused_nodes = set()
         for expert_entry in expert.entry_node.this.users:
             if not (expert := Expert.configure_from(expert_entry)):
@@ -192,23 +206,32 @@ class MoESubgraph(Subgraph):
             experts.append(expert)
             unused_nodes.update(expert.find_unused_nodes())
 
+        expert_hidden_states: ToCopy | MMType
         if to_copy := ToCopy.specialize_from(gate.mm.this):
             # When the router is casted to FP32.
             expert_hidden_states = to_copy
         else:
             expert_hidden_states = gate.mm
 
-        shared_experts = []
-        for user in expert_hidden_states.this.users:
-            if user == expert_hidden_states.node:
+        shared_experts: list[tuple[Linear, Linear, Linear]] = []
+        if len(TrailingReformatPath.get_parents(expert_hidden_states.this)) != 1:
+            raise NotImplementedError(f"Unsupported shared expert graph found from: {expert_hidden_states.this}")
+        common_hidden_states = TrailingReformatPath.get_parents(expert_hidden_states.this)[0]
+        for user in TrailingReformatPath.get_users(common_hidden_states):
+            if user == gate.mm.node or len(user.all_input_nodes[0].users) == len(experts):
                 continue
             if not (
                 Linear.configure_from(user)
-                and (gated_mlp := GatedMLP.find_nearest(user, follow_parent=False))
-                and (down_proj := Linear.find_nearest(gated_mlp.mul.node, follow_parent=False))
+                and (gated_mlp := find_nearest(GatedMLP, user, follow_parent=False))
+                and (gated_mlp_mul := gated_mlp.mul)
+                and (down_proj := find_nearest(Linear, gated_mlp_mul.node, follow_parent=False))
             ):
                 continue
-            shared_experts.append((gated_mlp.up_proj, gated_mlp.gate_proj, down_proj))
+            if len(shared_experts) > 0 and down_proj in [down for _, _, down in shared_experts]:
+                continue
+            for linear in (linears := (gated_mlp.up_proj, gated_mlp.gate_proj, down_proj)):
+                linear.mark_expert_type_as("shared_expert")
+            shared_experts.append(linears)
 
         router_logits = softmax.this
         experts.sort(key=lambda expert: expert.index)

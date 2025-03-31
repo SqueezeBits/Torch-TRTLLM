@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import safetensors
 import tensorrt as trt
 import tensorrt_llm as trtllm
 import torch
@@ -164,7 +165,7 @@ def patch_rope_embedding_utils_create_sinusoidal_positions_for_attention_plugin(
 def patch_generation_session_dump_debug_buffers() -> None:
     def patched_dump_debug_buffers(self: GenerationSession, step: int) -> None:
         debug_buffer = {**self.debug_buffer}
-        if "host_kv_cache_pool_pointers" in debug_buffer:
+        if "host_kv_cache_pool_pointers" in debug_buffer and hasattr(self, "kv_cache_pool"):
             debug_buffer["kv_cache_pool"] = self.kv_cache_pool
         with open_debug_artifact(f"step{step}.pt", "wb") as f:
             if f:
@@ -237,3 +238,72 @@ def patch_network_definition_add_plugin_v2() -> None:
         return layer
 
     trt.INetworkDefinition.add_plugin_v2 = patched_network_definition_add_plugin_v2
+
+
+# fmt: off
+@custom_patch(
+    name="tensorrt_llm.models.modeling_utils.PreTrainedModel.from_checkpoint",
+    reason="saving MLA weights from checkpoint for debugging",
+    required=should_save_debug_artifacts(),
+    env_var_to_disable="DISABLE_TRTLLM_PRETRAINED_MODEL_FROM_CHECKPOINT_PATCH",
+)
+def patch_pretrained_model_from_checkpoint() -> None:
+    @classmethod
+    def patched_pretrained_model_from_checkpoint(
+        cls,
+        ckpt_dir: str,
+        rank: int | None = None,
+        config = None,
+        *,
+        preprocess_weights_hook = None
+    ):
+        if config is None:
+            config = PretrainedConfig.from_json_file(
+                os.path.join(ckpt_dir, 'config.json'))
+
+        if rank is not None:
+            config.set_rank(rank)
+
+        rank = config.mapping.rank
+        # tp_cp_pp rank -> tp_pp rank: because different cp ranks share the same ckpt
+        if config.mapping.cp_size > 1:
+            tp_size = config.mapping.tp_size
+            cp_size = config.mapping.cp_size
+            rank = rank % tp_size + rank // (tp_size * cp_size) * tp_size
+        weights_path = os.path.join(ckpt_dir, f'rank{rank}.safetensors')
+
+        assert os.path.isfile(weights_path)
+        weights = safetensors.torch.load_file(weights_path)
+        is_checkpoint_pruned = getattr(config, 'is_pruned', False)
+
+        mla_weights_targets = [
+            "fused_q_proj",
+            "kv_b_proj",
+            "q_b_proj",
+        ]
+        gpt_attention_idx = -1
+        mla_weights = {}
+        for name, tensor in weights.items():
+            if any(target in name for target in mla_weights_targets):
+                mla_weights.update({target: tensor for target in mla_weights_targets if target in name})
+                if all(target in mla_weights for target in mla_weights_targets):
+                    gpt_attention_idx += 1
+                    with open_debug_artifact(f"mla_weights_{gpt_attention_idx}.pt", "wb") as f:
+                        if f:
+                            torch.save(
+                                mla_weights,
+                                f,
+                            )
+                    mla_weights = {}
+
+        if preprocess_weights_hook is not None:
+            weights = preprocess_weights_hook(weights)
+
+        weights = trtllm.models.modeling_utils.preprocess_weights(weights,
+                                     config,
+                                     from_pruned=is_checkpoint_pruned)
+        model = cls(config)
+        model.load(weights, from_pruned=is_checkpoint_pruned)
+        return model
+
+    trtllm.models.modeling_utils.PretrainedModel.from_checkpoint = patched_pretrained_model_from_checkpoint

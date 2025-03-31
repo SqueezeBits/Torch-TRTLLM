@@ -20,7 +20,7 @@ import torch.utils._pytree as pytree
 from loguru import logger
 from torch.fx import GraphModule, Node
 
-from ..nodes import ATenOp, GetAttr
+from ..nodes import ATenOp, GetAttr, GetItem
 from .infra import GraphOptimizationPass, PassResult, propagate_metadata_from
 from .infra.cleanup import cleanup
 
@@ -32,7 +32,7 @@ class ConstantFolding(GraphOptimizationPass):
     @torch.inference_mode()  # type: ignore[misc]
     def call(self, graph_module: GraphModule) -> PassResult:
         graph = graph_module.graph
-        foldable_nodes: dict[Node, torch.Tensor] = {}
+        foldable_nodes: dict[Node, torch.Tensor | list[torch.Tensor]] = {}
 
         def get_qualname() -> str:
             i = 0
@@ -49,7 +49,7 @@ class ConstantFolding(GraphOptimizationPass):
                 for input_node in n.all_input_nodes
             )
 
-        def fetch_value(n: Node) -> torch.Tensor:
+        def fetch_value(n: Node) -> torch.Tensor | list[torch.Tensor]:
             nonlocal foldable_nodes
             return get_attr.tensor if (get_attr := GetAttr.specialize_from(n)) else foldable_nodes[n]
 
@@ -58,11 +58,13 @@ class ConstantFolding(GraphOptimizationPass):
             if node in foldable_nodes:
                 return True
 
-            if (aten_op := ATenOp.specialize_from(node)) and are_all_input_nodes_fetchable(node):
+            if (
+                specialized_op := ATenOp.specialize_from(node) or GetItem.specialize_from(node)
+            ) and are_all_input_nodes_fetchable(node):
                 flat_inputs, spec = pytree.tree_flatten((node.args, node.kwargs))
                 flat_values = tuple(fetch_value(arg) if isinstance(arg, Node) else arg for arg in flat_inputs)
                 arg_values, kwarg_values = pytree.tree_unflatten(flat_values, spec)
-                foldable_nodes[node] = aten_op.target(*arg_values, **kwarg_values)
+                foldable_nodes[node] = specialized_op.target(*arg_values, **kwarg_values)
                 return True
 
             return False
@@ -76,7 +78,8 @@ class ConstantFolding(GraphOptimizationPass):
         for node in nodes_to_replace:
             name = get_qualname()
             with graph.inserting_after(node):
-                get_attr = GetAttr.create(graph, name, foldable_nodes.pop(node))
+                assert isinstance(foldable_value := foldable_nodes.pop(node), torch.Tensor)
+                get_attr = GetAttr.create(graph, name, foldable_value)
                 propagate_metadata_from(node, to=get_attr)
                 node.replace_all_uses_with(get_attr.node)
                 graph.erase_node(node)

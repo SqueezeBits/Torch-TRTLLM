@@ -86,7 +86,7 @@ from .reformatting import (
 from .select import SelectInt
 from .slice import Slice
 from .softmax import SafeSoftmax, Softmax, SoftmaxDefault
-from .split import Split, SplitDefault, SplitSizes, SplitTensor
+from .split import Split, SplitDefault, SplitSizes, SplitTensor, SplitWithSizes
 from .sym_size import SymSizeInt
 from .topk import TopK
 from .unary import Unary

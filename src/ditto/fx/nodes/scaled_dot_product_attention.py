@@ -51,7 +51,7 @@ class ScaledDotProductAttention(FinalCallFunction):
     attn_mask: Node | None = None
     dropout_p: float = 0.0
     is_causal: bool = False
-    scale: float | None = None
+    scale: float
     enable_gqa: bool = False
 
     @classmethod
@@ -60,20 +60,30 @@ class ScaledDotProductAttention(FinalCallFunction):
         return (torch._C._nn.scaled_dot_product_attention,)
 
     @property
-    def is_eligible_for_gpt_attention_plugin(self) -> bool:
+    def default_scale(self) -> float | None:
+        """Get the default scaling factor for the attention scores.
+
+        Returns:
+            float | None: The default scaling factor if head size can be determined,
+                         None otherwise.
+        """
+        head_size = q.shape[-1] if (q := get_tensor_metadata(self.query)) else None
+        return None if head_size is None else 1 / math.sqrt(head_size)
+
+    def is_eligible_for_gpt_attention_plugin(self, is_mla_enabled: bool = False) -> bool:
         """Check if the operation is eligible for the GPT attention plugin.
 
         Evaluates the compatibility of the scaled dot-product attention operation with
         the GPT attention plugin. This includes checks for default parameter values
         and specific scale settings.
         """
-        head_size = q.shape[-1] if (q := get_tensor_metadata(self.query)) else None
-        default_scale = None if head_size is None else 1 / math.sqrt(head_size)
         for name, field in self.model_fields.items():
             if field.is_required():
                 continue
             if (value := getattr(self, name)) != (default_value := field.get_default()):
-                if name == "scale" and default_scale and math.isclose(value, default_scale):
+                if is_mla_enabled:
+                    continue
+                if name == "scale" and self.default_scale and math.isclose(value, self.default_scale):
                     continue
                 logger.warning(
                     f"Cannot support the non-default '{name}={value}' provided to `F.scaled_dot_product_attention` "
