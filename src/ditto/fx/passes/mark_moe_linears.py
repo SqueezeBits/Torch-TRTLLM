@@ -18,7 +18,7 @@ from ...configs import TRTLLMMapping
 from ..nodes import MulTensorTensor
 from ..subgraphs import Linear, MoESubgraph
 from ..utils import find_nearest
-from .infra import NodewiseOptimizationPass, NodewisePassResult
+from .infra import ModifiedInsideThePass, NodewiseOptimizationPass, NodewisePassResult
 
 
 class MarkMoELinears(NodewiseOptimizationPass):
@@ -58,4 +58,4 @@ class MarkMoELinears(NodewiseOptimizationPass):
                     raise NotImplementedError(f"Unsupported shared expert gate found from: {shared_expert_gating}")
                 shared_expert_gate.mark_expert_type_as("shared_expert_gate")
 
-        return {}
+        return {node: ModifiedInsideThePass()}

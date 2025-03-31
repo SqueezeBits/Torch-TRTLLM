@@ -170,10 +170,7 @@ def get_intermediate_size(graph_module: GraphModule, mapping: TRTLLMMapping) -> 
         if isinstance(node.target, MixtureOfExpertsPlugin):
             values_of_experts.add(node.target.expert_inter_size * mapping.tp_size)
 
-    if len(values) == 0:
-        values = values_of_shared_experts if len(values_of_shared_experts) > 0 else values_of_experts
-
-    if len(values) == 0:
+    if not (values := values or values_of_shared_experts or values_of_experts):
         raise PretrainedConfigGenerationError("No intermediate size found in graph module")
 
     if len(values) > 1:
