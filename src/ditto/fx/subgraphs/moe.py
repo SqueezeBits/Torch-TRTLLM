@@ -113,13 +113,18 @@ class MoESubgraph(Subgraph):
     It includes:
     - Routing logics for expert selection
     - Expert computations and aggregation
+    - Optional shared experts
 
     Attributes:
         hidden_states (Node): The input hidden states node.
+        router (Linear): The router linear layer for expert selection.
         router_logits (Node): The router logits node before softmax.
-        expert_weights (list[tuple[Node, Node, Node]]): List of tuples containing the weight nodes for each expert.
-            Each tuple contains (up_proj, gate_proj, down_proj) nodes representing the expert's weights.
-        final_hidden_states (Node): The final output hidden states node after MoE computation.
+        top_k (int): Number of experts to select per token.
+        experts (list[Expert]): List of Expert objects representing each expert network.
+        shared_experts (list[tuple[Linear, Linear, Linear]]): List of shared expert weight tuples.
+            Each tuple contains (up_proj, gate_proj, down_proj) Linear layers.
+        final_hidden_states (Node): The final output hidden states after MoE computation.
+        unused_nodes (set[Node]): Set of unused nodes in the MoE computation graph.
     """
 
     hidden_states: Node

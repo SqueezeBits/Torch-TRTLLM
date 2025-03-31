@@ -33,6 +33,9 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
 
     Attributes:
         dtype (torch.dtype): Data type to use for the plugin tensors
+        tp_size (int): Tensor parallel size for distributed computation
+        tp_rank (int): Tensor parallel rank for distributed computation
+        plugin (MixtureOfExpertsPlugin | None): The MoE plugin instance, None if not yet created
     """
 
     dtype: torch.dtype
