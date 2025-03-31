@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, TypeVar, cast, overload
 from weakref import WeakKeyDictionary
 
 import torch
-from loguru import logger
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.shape_prop import TensorMetadata, _extract_tensor_metadata
@@ -310,7 +309,7 @@ def find_nearest(
     follow_first_only: bool = True,
     break_if: NodeCriterion | None = None,
     continue_if: NodeCriterion | None = None,
-    max_depth: int = 10,
+    max_depth: int = 15,
 ) -> SubgraphType | None:
     ...
 
@@ -324,7 +323,7 @@ def find_nearest(
     follow_first_only: bool = True,
     break_if: NodeCriterion | None = None,
     continue_if: NodeCriterion | None = None,
-    max_depth: int = 10,
+    max_depth: int = 15,
 ) -> NodeType | None:
     ...
 
@@ -335,8 +334,8 @@ def find_nearest(
     from_node: Node,
     follow_parent: bool = True,
     follow_first_only: bool = True,
-    break_if: NodeCriterion | None = None,
-    continue_if: NodeCriterion | None = None,
+    break_if: NodeCriterion = lambda _: False,
+    continue_if: NodeCriterion = lambda _: False,
     max_depth: int = 15,
 ) -> NodeType | SubgraphType | None:
     """Find the nearest node that can be specialized to this type using breadth-first search.
@@ -359,26 +358,22 @@ def find_nearest(
     """
     # pylint: disable=import-outside-toplevel
     from .nodes import NodeSpecialization
-    from .subgraphs import Subgraph
 
     if issubclass(node_type, NodeSpecialization):
         specialize_func = node_type.specialize_from
-    elif issubclass(node_type, Subgraph):
-        specialize_func = node_type.configure_from
     else:
-        raise TypeError(f"Invalid specialization type: {node_type}")
+        specialize_func = node_type.configure_from  # type: ignore[assignment]
 
     queue = [(from_node, 0)]
     while queue:
         node, depth = queue.pop(0)
         if target_node := specialize_func(node):
             return target_node  # type: ignore[return-value]
-        if break_if is not None and break_if(node):
+        if break_if(node):
             break
-        if continue_if is not None and continue_if(node):
+        if continue_if(node):
             continue
         if depth > max_depth:
-            logger.warning(f"Failed to find nearest {node_type} from {from_node} within max depth {max_depth}")
             continue
         if not (next_nodes := list(node.all_input_nodes if follow_parent else node.users)):
             continue
