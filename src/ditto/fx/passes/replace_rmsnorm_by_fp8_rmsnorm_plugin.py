@@ -22,7 +22,7 @@ from ...types import DataType
 from ..nodes import GetAttr, GetItem, SqueezeDim
 from ..subgraphs import Linear, RmsNormSubgraph
 from ..targets import RmsnormQuantizationPlugin
-from ..utils import get_val, name_generator
+from ..utils import find_nearest, get_val, name_generator
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
@@ -47,7 +47,9 @@ class ReplaceRmsNormByFp8RmsNormPlugin(NodewiseOptimizationPass):
             and self.global_quant_config.quant_configs[0].input_quant_scheme.mode == QuantizeMode.PER_TOKEN
             and self.global_quant_config.quant_configs[0].input_quant_scheme.dynamic
             and (rmsnorm := RmsNormSubgraph.configure_from(node))
-            and (nearest_linear := Linear.find_nearest(node, False))
+            and (
+                nearest_linear := find_nearest(Linear, node, follow_parent=False, follow_first_only=False, max_depth=10)
+            )
             and (lm_head := Linear.find_last(node.graph))
             and (nearest_linear != lm_head)
             and (graph_module := node.graph.owning_module) is not None
