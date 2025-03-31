@@ -102,6 +102,7 @@ PassName = Literal[
     "PropagateTensorParallelism",
     "ReplaceMoEByMoEPlugin",
     "ReplaceMMByFp8GemmPlugin",
+    "ReplaceMMByFp8RowwiseGemmPlugin",
     "ReplaceMMByGemmPlugin",
     "ReplaceMMByWoQGemmPlugin",
     "ReplaceRmsNormByFp8RmsNormPlugin",
