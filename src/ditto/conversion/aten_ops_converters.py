@@ -270,3 +270,49 @@ def aten_ops_to_copy(
         kwargs.get("dtype", args[0].dtype),
         force_layer=True,
     )
+
+
+@dynamo_tensorrt_converter(
+    torch.ops.aten.mul.Tensor,
+    supports_dynamic_shapes=True,
+    priority=ConverterPriority.HIGH,
+)
+def aten_ops_mul(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert PyTorch's aten.mul.Tensor operation to TensorRT.
+
+    This converter is to suppress the type promotion of float16/bfloat16 tensors to float32
+    compared to the default TorchTRT converter.
+
+    Args:
+        ctx (ConversionContext): Conversion context
+        target (Target): Target operation
+        args (tuple[Argument, ...]): Positional arguments
+        kwargs (dict[str, Argument]): Keyword arguments
+        name (str): Layer name
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Multiplied tensor
+    """
+    lhs_val, rhs_val = args[0], args[1]
+    if (
+        isinstance(lhs_val, trt.ITensor)
+        and isinstance(rhs_val, trt.ITensor)
+        and lhs_val.dtype in (trt.float16, trt.bfloat16)
+        and rhs_val.dtype == trt.float32
+    ):
+        rhs_val = cast_trt_tensor(ctx, rhs_val, lhs_val.dtype, f"{name}_rhs_cast", target, SourceIR.ATEN)
+
+    return impl.elementwise.mul(
+        ctx,
+        target,
+        SourceIR.ATEN,
+        name,
+        lhs_val,
+        rhs_val,
+    )
