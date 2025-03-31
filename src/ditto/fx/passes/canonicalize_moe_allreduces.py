@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# mypy: disable-error-code="union-attr"
 
 from torch.fx import Node
 
@@ -65,10 +66,10 @@ class CanonicalizeMoEAllReduces(NodewiseOptimizationPass):
             graph,
             moe.final_hidden_states,
             self.mapping.tp_group,
-            strategy=all_reduce.target.strategy,  # type: ignore[union-attr]
-            config=all_reduce.target.config,  # type: ignore[union-attr]
-            fusion_op=all_reduce.target.fusion_op,  # type: ignore[union-attr]
-            eps=all_reduce.target.eps,  # type: ignore[union-attr]
+            strategy=all_reduce.target.strategy,
+            config=all_reduce.target.config,
+            fusion_op=all_reduce.target.fusion_op,
+            eps=all_reduce.target.eps,
         )
 
         return results
