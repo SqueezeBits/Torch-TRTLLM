@@ -32,7 +32,7 @@ from ..nodes import (
 )
 from ..subgraphs import Linear
 from ..targets import ActivationQuantization
-from ..utils import find_nearest_node
+from ..utils import find_nearest
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
@@ -148,30 +148,10 @@ class ActivationQuantConfig(StrictlyTyped):
             and (div := DivTensorTensor.specialize_from(add.this))
             and (clamp2 := ClampScalar.specialize_from(mul.other))
             and (
-                (
-                    (
-                        aminmax_node := find_nearest_node(
-                            clamp2.this,
-                            lambda n: AMinMax.specialize_from(n) is not None,
-                        )
-                    )
-                    and AMinMax.specialize_from(aminmax_node) is not None
-                )
+                (find_nearest(AMinMax, clamp2.this, follow_first_only=False, max_depth=10) is not None)
                 or (
-                    (
-                        amin_node := find_nearest_node(
-                            clamp2.this,
-                            lambda n: AMin.specialize_from(n) is not None,
-                        )
-                    )
-                    and AMin.specialize_from(amin_node) is not None
-                    and (
-                        amax_node := find_nearest_node(
-                            clamp2.this,
-                            lambda n: AMax.specialize_from(n) is not None,
-                        )
-                    )
-                    and AMax.specialize_from(amax_node) is not None
+                    find_nearest(AMin, clamp2.this, follow_first_only=False, max_depth=10) is not None
+                    and find_nearest(AMax, clamp2.this, follow_first_only=False, max_depth=10) is not None
                 )
             )
         ):
