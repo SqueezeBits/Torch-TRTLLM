@@ -28,8 +28,8 @@ from ..configs import (
 from ..literals import DTypeLiteral
 from ..quantization import GlobalQuantConfig
 from ..types import DataType, verify
-from .nodes import Fp8RowwiseGemm, RmsnormQuantization, WeightOnlyGroupwiseQuantMatmul, WeightOnlyQuantMatmul
 from .metadata_keys import EXPERT_TYPE, MOE_CONFIG
+from .nodes import Fp8RowwiseGemm, RmsnormQuantization, WeightOnlyGroupwiseQuantMatmul, WeightOnlyQuantMatmul
 from .subgraphs import Linear, TokenEmbedding
 from .targets import GPTAttentionPlugin, MixtureOfExpertsPlugin
 

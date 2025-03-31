@@ -167,15 +167,18 @@ T = TypeVar("T", torch.Tensor, FakeTensor, torch.SymInt)
 
 
 @overload
-def get_val(node: Node, expected_type: type[torch.SymInt]) -> torch.SymInt | None: ...
+def get_val(node: Node, expected_type: type[torch.SymInt]) -> torch.SymInt | None:
+    ...
 
 
 @overload
-def get_val(node: Node, expected_type: type[torch.Tensor]) -> FakeTensor | None: ...
+def get_val(node: Node, expected_type: type[torch.Tensor]) -> FakeTensor | None:
+    ...
 
 
 @overload
-def get_val(node: Node) -> torch.Tensor | torch.SymInt | None: ...
+def get_val(node: Node) -> torch.Tensor | torch.SymInt | None:
+    ...
 
 
 def get_val(node: Node, expected_type: type[T] | None = None) -> T | None:
@@ -307,7 +310,8 @@ def find_nearest(
     break_if: NodeCriterion | None = None,
     continue_if: NodeCriterion | None = None,
     max_depth: int = 15,
-) -> SubgraphType | None: ...
+) -> SubgraphType | None:
+    ...
 
 
 @overload
@@ -320,7 +324,8 @@ def find_nearest(
     break_if: NodeCriterion | None = None,
     continue_if: NodeCriterion | None = None,
     max_depth: int = 15,
-) -> NodeType | None: ...
+) -> NodeType | None:
+    ...
 
 
 # pylint: disable-next=too-many-positional-arguments
