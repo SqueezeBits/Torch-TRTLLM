@@ -35,23 +35,22 @@ class ScaledDotProductAttention(FinalCallFunction):
         query (Node): The query tensor node in the attention computation.
         key (Node): The key tensor node in the attention computation.
         value (Node): The value tensor node in the attention computation.
+        scale (float): An optional scaling factor for the dot-product attention.
         attn_mask (Node | None): The attention mask node, if any. Defaults to None.
         dropout_p (float): The dropout probability applied during attention computation.
             Defaults to 0.0.
         is_causal (bool): Whether the attention is causal (e.g., masking future tokens).
             Defaults to False.
-        scale (float | None): An optional scaling factor for the dot-product attention.
-            Defaults to None.
         enable_gqa (bool): Whether to enable grouped-query attention (GQA). Defaults to False.
     """
 
     query: Node
     key: Node
     value: Node
+    scale: float
     attn_mask: Node | None = None
     dropout_p: float = 0.0
     is_causal: bool = False
-    scale: float
     enable_gqa: bool = False
 
     @classmethod
@@ -82,8 +81,6 @@ class ScaledDotProductAttention(FinalCallFunction):
                 continue
             if (value := getattr(self, name)) != (default_value := field.get_default()):
                 if is_mla_enabled:
-                    continue
-                if name == "scale" and self.default_scale and math.isclose(value, self.default_scale):
                     continue
                 logger.warning(
                     f"Cannot support the non-default '{name}={value}' provided to `F.scaled_dot_product_attention` "
