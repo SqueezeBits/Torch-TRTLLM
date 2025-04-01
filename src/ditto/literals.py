@@ -92,6 +92,7 @@ PassName = Literal[
     "HerdConstantsToTheRight",
     "IndexLayers",
     "InsertGatherLastTokenIds",
+    "OverrideMulScalarTypePromotion",
     "ParallelizeLinear",
     "ParallelizePipeline",
     "PopLoraPlugins",
