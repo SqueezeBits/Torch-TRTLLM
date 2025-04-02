@@ -241,7 +241,7 @@ class MoESubgraph(Subgraph):
             if len(shared_experts) > 0 and down_proj in [down for _, _, down in shared_experts]:
                 continue
             for linear in (linears := (gated_mlp.up_proj, gated_mlp.gate_proj, down_proj)):
-                linear.mark_expert_type_as("shared_expert")
+                linear.mark_linear_type_as("shared_expert")
             shared_experts.append(linears)
 
         router_logits = softmax.this

@@ -459,9 +459,9 @@ def get_shard_dim_idx(reshape: Reshape | Expand) -> int:
         shard_dim_idx = 2
     elif dynamic_dim_idx == 2 and len(reshape.shape) in [3, 4]:
         shard_dim_idx = 1 if len(reshape.shape) == 4 else 0
-    elif dynamic_dim_idx == 3 and len(reshape.shape) == 5:
+    elif dynamic_dim_idx in [2, 3] and len(reshape.shape) == 5:
         shard_dim_idx = 1
     else:
-        raise ValueError(f"unexpected shape of reformatting node: {reshape.shape}")
+        raise ValueError(f"unexpected shape of reformatting node{reshape.node.name}: {reshape.shape}")
 
     return shard_dim_idx

@@ -28,7 +28,7 @@ from ..configs import (
 from ..literals import DTypeLiteral
 from ..quantization import GlobalQuantConfig
 from ..types import verify
-from .metadata_keys import EXPERT_TYPE, MOE_CONFIG
+from .metadata_keys import LINEAR_TYPE, MOE_CONFIG
 from .subgraphs import Linear, TokenEmbedding
 from .targets import GPTAttentionPlugin, MixtureOfExpertsPlugin
 
@@ -163,7 +163,7 @@ def get_intermediate_size(graph_module: GraphModule, mapping: TRTLLMMapping) -> 
     values_of_experts: set[int] = set()
     for node in graph_module.graph.nodes:
         if (linear := Linear.configure_from(node)) and linear.lora_prefix == "mlp_4h_to_h":
-            if linear.mm.meta.get(EXPERT_TYPE) == "shared_expert":
+            if linear.mm.meta.get(LINEAR_TYPE) == "shared_expert":
                 values_of_shared_experts.add(linear.in_features)
             else:
                 values.add(linear.in_features)

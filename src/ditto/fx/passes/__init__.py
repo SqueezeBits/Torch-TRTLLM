@@ -45,6 +45,7 @@ from .fuse_reciprocal_mul import FuseReciprocalMul
 from .herd_constants_to_the_right import HerdConstantsToTheRight
 from .index_layers import IndexLayers
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
+from .mark_mla_linears import MarkMLALinears
 from .mark_moe_linears import MarkMoELinears
 from .override_mul_scalar_type_promotion import OverrideMulScalarTypePromotion
 from .parallelize_linear import ParallelizeLinear

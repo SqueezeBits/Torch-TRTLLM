@@ -56,6 +56,7 @@ from .passes import (
     HerdConstantsToTheRight,
     IndexLayers,
     InsertGatherLastTokenIds,
+    MarkMLALinears,
     MarkMoELinears,
     OverrideMulScalarTypePromotion,
     ParallelizeLinear,
@@ -98,6 +99,8 @@ def get_preoptimization_transform(
     Returns:
         Callable[[GraphModule], GraphModule]: the pre-optimization transform
     """
+    mark_linears_for_tp = [MarkMoELinears, MarkMLALinears]
+
     return get_transform(
         WrapWeightDequantSubgraphs(global_quant_config=global_quant_config, dtype=dtype),
         StashActQuantSubgraphs(global_quant_config=global_quant_config),
@@ -106,7 +109,7 @@ def get_preoptimization_transform(
         AddTRTLLMInputs(argument_hint=argument_hint),
         ResolveDynamicReshape(),
         EliminateCommonExpressions(),
-        MarkMoELinears(mapping=argument_hint.mapping),
+        *[mark_linear(mapping=argument_hint.mapping) for mark_linear in mark_linears_for_tp],
         PropagateTensorParallelism(mapping=argument_hint.mapping),
         ParallelizeLinear(mapping=argument_hint.mapping),
         CanonicalizeMoEAllReduces(mapping=argument_hint.mapping),

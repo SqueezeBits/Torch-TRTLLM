@@ -31,9 +31,11 @@ DTypeLiteral = Literal[
 """The available data types are listed in `_str_to_trt_dtype_dict` from `tensorrt_llm._utils`
 which is used by the function `str_dtype_to_trt` in the same file."""
 
-ExpertTypeLiteral = Literal["router", "shared_expert", "shared_expert_gate"]
-
 KVCacheTypeLiteral = Literal["CONTINUOUS", "DISABLED", "PAGED"]
+
+LinearTypeLiteral = Literal[
+    "router", "shared_expert", "shared_expert_gate", "mla_kv_a_proj", "mla_kv_b_proj", "mla_q_proj", "mla_o_proj"
+]
 
 LoraCheckpointLiteral = Literal["hf", "nemo"]
 
