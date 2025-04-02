@@ -14,12 +14,13 @@
 
 
 import torch
+from compressed_tensors.compressors.quantized_compressors.pack_quantized import unpack_from_int32
 from tensorrt_llm.quantization.functional import unpack_int32_into_int8
 from torch.fx import Node
 from transformers.utils.quantization_config import QuantizationMethod
 from typing_extensions import Self
 
-from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode
+from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode, QuantScheme
 from ...types import StrictlyTyped
 from ..nodes import MM, GetAttr, MulTensorTensor, Permute
 from ..targets import Dequantizer
@@ -49,7 +50,7 @@ class WrapWeightDequantSubgraphs(NodewiseOptimizationPass):
             and self.global_quant_config.quant_configs[0].target == mm.target
             and (
                 dequantize_path := TrailingDequantizePath.configure_from(
-                    mm.other, self.global_quant_config.hf_quant_method
+                    mm.other, weight_quant_scheme, self.global_quant_config.hf_quant_method
                 )
             )
         ):
@@ -124,11 +125,14 @@ class TrailingDequantizePath(StrictlyTyped):
     quantize_algorithm: QuantizeAlgorithm
 
     @classmethod
-    def configure_from(cls, node: Node, quant_method: QuantizationMethod) -> Self | None:
+    def configure_from(
+        cls, node: Node, weight_quant_scheme: QuantScheme, quant_method: QuantizationMethod
+    ) -> Self | None:
         """Configure the trailing dequantize path from a node.
 
         Args:
             node (Node): The node to configure the trailing dequantize path from
+            weight_quant_scheme (QuantScheme): The weight quantization scheme
             quant_method (QuantizationMethod): The quantization method used to quantize the weight
 
         Returns:
@@ -156,6 +160,7 @@ class TrailingDequantizePath(StrictlyTyped):
         qweight, zero = find_qweight_and_zero_node(
             [n for n in ancestors_with_maxdepth if n is not scale.node and GetAttr.specialize_from(n)],
             org_weight_tensor.shape,
+            weight_quant_scheme,
             quant_method,
             group_size=group_size,
         )
@@ -258,14 +263,21 @@ def get_quantize_mode(
     raise RuntimeError(f"Could not infer a quantization mode for {scale_shape=} and {org_weight_shape=}.")
 
 
+# pylint: disable-next=too-many-branches
 def find_qweight_and_zero_node(
-    nodes: list[Node], org_weight_shape: torch.Size, quant_method: QuantizationMethod, *, group_size: int | None = None
+    nodes: list[Node],
+    org_weight_shape: torch.Size,
+    weight_quant_scheme: QuantScheme,
+    quant_method: QuantizationMethod,
+    *,
+    group_size: int | None = None,
 ) -> tuple[GetAttr, GetAttr | None]:
     """Find the qweight and zero node for the quantized weight.
 
     Args:
         nodes (list[Node]): The nodes to find the qweight and zero node from
         org_weight_shape (torch.Size): The shape of the original weight
+        weight_quant_scheme (QuantScheme): The weight quantization scheme
         quant_method (QuantizationMethod): The quantization method used to quantize the weight
         group_size (int | None, optional): The group size for the quantized weight. Defaults to None.
 
@@ -302,19 +314,32 @@ def find_qweight_and_zero_node(
         return qweight, zero
 
     if quant_method == QuantizationMethod.COMPRESSED_TENSORS:
-        for node in nodes:
-            assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
-            shape = node_val.shape
-            if (
-                len(shape) == 2
-                and shape[1] == org_weight_shape[0]
-                and shape[0] != 1
-                and (qweight := GetAttr.specialize_from(node))
-            ):
-                break
+        if weight_quant_scheme.packed:
+            expected_equal_dim = 0
+            for node in nodes:
+                assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
+                shape = node_val.shape
+                if shape[expected_equal_dim] == org_weight_shape[1 - expected_equal_dim] and (
+                    qweight := GetAttr.specialize_from(node)
+                ):
+                    break
+            else:
+                raise ValueError("QWeight node not found")
+            nodes.remove(qweight.node)
         else:
-            raise ValueError("QWeight node not found")
-        nodes.remove(qweight.node)
+            for node in nodes:
+                assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
+                shape = node_val.shape
+                if (
+                    len(shape) == 2
+                    and shape[1] == org_weight_shape[0]
+                    and shape[0] != 1
+                    and (qweight := GetAttr.specialize_from(node))
+                ):
+                    break
+            else:
+                raise ValueError("QWeight node not found")
+            nodes.remove(qweight.node)
 
         # TODO: add zero node
         return qweight, None
@@ -323,7 +348,9 @@ def find_qweight_and_zero_node(
 
 
 def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: QuantizationMethod) -> torch.Tensor:
-    """Unpack the quantized weight tensor.
+    """Unpack the quantized weight tensor from int32 to int8 or uint8.
+
+    if the weight is already unpacked, it will return the original tensor.
 
     Args:
         qweight (torch.Tensor): The quantized weight tensor
@@ -353,6 +380,9 @@ def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: QuantizationM
             qweight = (qweight - 128).to(torch.int8)
     elif quant_method == QuantizationMethod.COMPRESSED_TENSORS:
         assert bits == 8, f"Unsupported bits: {bits=}. Only 8-bit quantization (FP8) is supported currently."
+        if qweight.dtype.itemsize == 4:
+            original_shape = torch.Size([qweight.shape[0], qweight.shape[1] * (32 // bits)])
+            qweight = unpack_from_int32(qweight, bits, original_shape)
         assert qweight.dtype.itemsize == 1, f"Wrong dtype of qweight: {qweight.dtype=}"
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")

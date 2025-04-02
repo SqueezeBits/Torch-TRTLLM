@@ -25,11 +25,11 @@ class WeightOnlyQuantMatmulPlugin(Plugin):
     """TensorRT plugin for matrix multiplication with weight-only quantization.
 
     Attributes:
-        weight_type_id (trt.DataType): Type ID for weight tensor.
+        weight_type_id (int): Type ID for weight tensor (1: int8, 2: int4).
         type_id (trt.DataType): Data type for computation.
     """
 
-    weight_type_id: trt.DataType
+    weight_type_id: int
     type_id: trt.DataType
 
     def __call__(
@@ -51,7 +51,7 @@ class WeightOnlyQuantMatmulPlugin(Plugin):
             torch.Tensor: Result of matrix multiplication
         """
         if is_in_fake_tensor_mode():
-            return torch.zeros(x.shape[0], scale.shape[1], dtype=x.dtype)
+            return torch.zeros(x.shape[0], weight.shape[1], dtype=x.dtype)
         raise NotImplementedError(f"{type(self).__name__} doesn't have implementation")
 
 
