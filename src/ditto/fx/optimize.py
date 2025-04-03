@@ -273,8 +273,7 @@ def get_trtllm_conversion_transform(
         RewriteIndexAsSingleSlice,
         ReplaceSDPAByGPTAttentionPlugin(
             dtype=dtype,
-            tp_size=argument_hint.mapping.tp_size,
-            tp_rank=argument_hint.mapping.tp_rank,
+            mapping=argument_hint.mapping,
         ),
         IndexLayers,
         BindUnmatchedLoraProtos,
