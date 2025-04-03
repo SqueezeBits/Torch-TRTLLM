@@ -19,6 +19,7 @@ import tensorrt as trt
 import torch
 
 from ...types import DataType
+from .fake_tensor_mode import is_in_fake_tensor_mode
 from .plugin import Plugin
 
 
@@ -71,4 +72,6 @@ class Fp8RowwiseGemmPlugin(Plugin):
         Returns:
             torch.Tensor: Result of matrix multiplication
         """
-        return torch.zeros((x.shape[0], weight.shape[0]), dtype=DataType(self.type_id).to(torch.dtype))
+        if is_in_fake_tensor_mode():
+            return torch.zeros((x.shape[0], weight.shape[0]), dtype=DataType(self.type_id).to(torch.dtype))
+        raise NotImplementedError(f"{type(self).__name__} doesn't have implementation")
