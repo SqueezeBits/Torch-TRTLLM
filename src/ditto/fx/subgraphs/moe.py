@@ -20,6 +20,7 @@ from typing_extensions import Self
 
 from ...types import SymbolicInteger
 from ..nodes import IndexPut, MulTensorTensor, SelectInt, Softmax, ToCopy
+from ..targets import AllReducePlugin
 from ..utils import find_nearest, get_tensor_metadata
 from .gated_mlp import GatedMLP
 from .linear import Linear, MMType
@@ -57,7 +58,12 @@ class Expert(Subgraph):
             and (gated_mlp_mul := gated_mlp.mul)
             and (down_proj := find_nearest(Linear, gated_mlp_mul.node, follow_parent=False))
             and (len(users := list(down_proj.output_node.users)) == 1)
-            and (weighted_expert := MulTensorTensor.specialize_from(users[0]))
+            and (
+                expert_hidden_states := (
+                    list(users[0].users)[0] if isinstance(users[0].target, AllReducePlugin) else users[0]
+                )
+            )
+            and (weighted_expert := MulTensorTensor.specialize_from(expert_hidden_states))
             and (len(users := list(weighted_expert.users)) == 1)
             and (final_hidden_states := IndexPut.specialize_from(users[0]))
         ):
@@ -107,21 +113,26 @@ class MoESubgraph(Subgraph):
     It includes:
     - Routing logics for expert selection
     - Expert computations and aggregation
+    - Optional shared experts
 
     Attributes:
         hidden_states (Node): The input hidden states node.
+        router (Linear): The router linear layer for expert selection.
         router_logits (Node): The router logits node before softmax.
-        expert_weights (list[tuple[Node, Node, Node]]): List of tuples containing the weight nodes for each expert.
-            Each tuple contains (up_proj, gate_proj, down_proj) nodes representing the expert's weights.
-        final_hidden_states (Node): The final output hidden states node after MoE computation.
+        top_k (int): Number of experts to select per token.
+        experts (list[Expert]): List of Expert objects representing each expert network.
+        shared_experts (list[tuple[Linear, Linear, Linear]]): List of shared expert weight tuples.
+            Each tuple contains (up_proj, gate_proj, down_proj) Linear layers.
+        final_hidden_states (Node): The final output hidden states after MoE computation.
+        unused_nodes (set[Node]): Set of unused nodes in the MoE computation graph.
     """
 
     hidden_states: Node
-    router: MMType
+    router: Linear
     router_logits: Node
     top_k: int
-    expert_weights: list[tuple[Node, Node, Node]]
-    shared_expert_weights: list[tuple[Node, Node, Node]]
+    experts: list[Expert]
+    shared_experts: list[tuple[Linear, Linear, Linear]]
     final_hidden_states: Node
     unused_nodes: set[Node]
 
@@ -132,7 +143,7 @@ class MoESubgraph(Subgraph):
         Returns:
             int: The number of expert networks
         """
-        return len(self.expert_weights)
+        return len(self.experts)
 
     @property
     def expert_hidden_size(self) -> int:
@@ -142,7 +153,7 @@ class MoESubgraph(Subgraph):
             int: Hidden dimension size for expert networks
         """
         assert (
-            expert_weight := get_tensor_metadata(self.expert_weights[0][0])
+            expert_weight := get_tensor_metadata(self.extract_weights(self.experts[0])[0])
         ) is not None, "expert weight's metadata is not found"
         return expert_weight.shape[0]
 
@@ -154,7 +165,7 @@ class MoESubgraph(Subgraph):
             int: Intermediate dimension size for expert networks
         """
         assert (
-            expert_weight := get_tensor_metadata(self.expert_weights[0][0])
+            expert_weight := get_tensor_metadata(self.extract_weights(self.experts[0])[0])
         ) is not None, "expert weight's metadata is not found"
         return expert_weight.shape[1]
 
@@ -165,10 +176,10 @@ class MoESubgraph(Subgraph):
         Returns:
             int: Intermediate dimension size for the shared expert network
         """
-        if len(self.shared_expert_weights) == 0:
+        if len(self.shared_experts) == 0:
             return 0
         assert (
-            shared_expert_weight := get_tensor_metadata(self.shared_expert_weights[0][0])
+            shared_expert_weight := get_tensor_metadata(self.extract_weights(self.shared_experts[0])[0])
         ) is not None, "shared expert weight's metadata is not found"
         return shared_expert_weight.shape[1]
 
@@ -191,7 +202,7 @@ class MoESubgraph(Subgraph):
             and (get_item := TrailingReformatPath.configure_from(one_hot.this).top)
             and (topk := TopK.configure_from(get_item))
             and (softmax := Softmax.specialize_from(topk.this))
-            and (gate := TrailingReformatPath.traceback(Linear, softmax.this))
+            and (router := TrailingReformatPath.traceback(Linear, softmax.this))
         ):
             return None
 
@@ -207,18 +218,18 @@ class MoESubgraph(Subgraph):
             unused_nodes.update(expert.find_unused_nodes())
 
         expert_hidden_states: ToCopy | MMType
-        if to_copy := ToCopy.specialize_from(gate.mm.this):
+        if to_copy := ToCopy.specialize_from(router.mm.this):
             # When the router is casted to FP32.
             expert_hidden_states = to_copy
         else:
-            expert_hidden_states = gate.mm
+            expert_hidden_states = router.mm
 
         shared_experts: list[tuple[Linear, Linear, Linear]] = []
         if len(TrailingReformatPath.get_parents(expert_hidden_states.this)) != 1:
             raise NotImplementedError(f"Unsupported shared expert graph found from: {expert_hidden_states.this}")
         common_hidden_states = TrailingReformatPath.get_parents(expert_hidden_states.this)[0]
         for user in TrailingReformatPath.get_users(common_hidden_states):
-            if user == gate.mm.node or len(user.all_input_nodes[0].users) == len(experts):
+            if user == router.mm.node or len(user.all_input_nodes[0].users) == len(experts):
                 continue
             if not (
                 Linear.configure_from(user)
@@ -238,11 +249,11 @@ class MoESubgraph(Subgraph):
         final_hidden_states = experts[-1].final_hidden_states
         return cls(
             hidden_states=expert_hidden_states.this,
-            router=gate.mm,
+            router=router,
             router_logits=router_logits,
             top_k=int(topk.k),
-            expert_weights=[cls.extract_weights(expert) for expert in experts],
-            shared_expert_weights=[cls.extract_weights(expert) for expert in shared_experts],
+            experts=experts,
+            shared_experts=shared_experts,
             final_hidden_states=final_hidden_states,
             unused_nodes=unused_nodes,
         )

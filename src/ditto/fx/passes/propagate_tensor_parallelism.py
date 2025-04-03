@@ -17,6 +17,7 @@ from enum import Enum
 from torch.fx import Node
 
 from ...configs.trtllm.pretrained import TRTLLMMapping
+from ..metadata_keys import EXPERT_TYPE
 from ..nodes import MM
 from .infra import NodewiseOptimizationPass, NodewisePassResult
 
@@ -66,11 +67,12 @@ class PropagateTensorParallelism(NodewiseOptimizationPass):
             node.meta["tp_type"] = prev_tp_type
             return {}
 
-        if prev_tp_type == TensorParallelType.NONE:
-            node.meta["tp_type"] = TensorParallelType.COLUMN
-        elif prev_tp_type == TensorParallelType.COLUMN:
+        if prev_tp_type == TensorParallelType.COLUMN:
             node.meta["tp_type"] = TensorParallelType.ROW
         else:
+            node.meta["tp_type"] = TensorParallelType.COLUMN
+
+        if should_exclude_from_tp(node):
             node.meta["tp_type"] = TensorParallelType.NONE
 
         return {}
@@ -90,4 +92,20 @@ def get_previous_tp_type(node: Node) -> TensorParallelType:
     prev_tp_types: list[TensorParallelType] = []
     for prev_node in node.all_input_nodes:
         prev_tp_types.append(prev_node.meta.get("tp_type", TensorParallelType.NONE))
+    assert not (TensorParallelType.COLUMN in prev_tp_types and TensorParallelType.ROW in prev_tp_types)
     return TensorParallelType.COLUMN if TensorParallelType.COLUMN in prev_tp_types else TensorParallelType.NONE
+
+
+def should_exclude_from_tp(node: Node) -> bool:
+    """Check if a node should be excluded from tensor parallelism.
+
+    It excludes router nodes from tensor parallelism.
+
+    Args:
+        node (Node): The node to check
+
+    Returns:
+        bool: True if the node should be excluded from tensor parallelism, False otherwise
+    """
+    assert MM.specialize_from(node)
+    return node.meta.get(EXPERT_TYPE) in ("router", "shared_expert_gate")

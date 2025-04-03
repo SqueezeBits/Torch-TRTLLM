@@ -30,7 +30,7 @@ from ..quantization import GlobalQuantConfig
 from ..types import verify
 from .metadata_keys import EXPERT_TYPE, MOE_CONFIG
 from .subgraphs import Linear, TokenEmbedding
-from .targets import GPTAttentionPlugin
+from .targets import GPTAttentionPlugin, MixtureOfExpertsPlugin
 
 
 class PretrainedConfigGenerationError(RuntimeError):
@@ -97,7 +97,7 @@ def generate_trtllm_pretrained_config(
         architecture=architecture or "UnknownLanguageModel",
         vocab_size=vocab_size,
         hidden_size=hidden_size,
-        intermediate_size=get_intermediate_size(graph_module),
+        intermediate_size=get_intermediate_size(graph_module, mapping),
         mapping=mapping,
     )
     pretrained_config.quantization = TRTLLMQuantConfig.create_from(global_quant_config) if global_quant_config else None
@@ -145,11 +145,12 @@ def collect_gpt_attention_plugins(graph: Graph) -> list[GPTAttentionPlugin]:
     return sorted(plugins, key=lambda plugin: plugin.layer_idx)
 
 
-def get_intermediate_size(graph_module: GraphModule) -> int:
+def get_intermediate_size(graph_module: GraphModule, mapping: TRTLLMMapping) -> int:
     """Get intermediate size from the graph module.
 
     Args:
-        graph_module (GraphModule): The graph module to process.
+        graph_module (GraphModule): The graph module to process
+        mapping (TRTLLMMapping): The tensor parallel mapping configuration
 
     Returns:
         int: The intermediate size.
@@ -158,19 +159,18 @@ def get_intermediate_size(graph_module: GraphModule) -> int:
         PretrainedConfigGenerationError: If no or multiple intermediate sizes are found.
     """
     values: set[int] = set()
-    values_with_shared_expert: set[int] = set()
+    values_of_shared_experts: set[int] = set()
+    values_of_experts: set[int] = set()
     for node in graph_module.graph.nodes:
         if (linear := Linear.configure_from(node)) and linear.lora_prefix == "mlp_4h_to_h":
-            # TODO: get intermediate size properly for MoE models without shared experts
             if linear.mm.meta.get(EXPERT_TYPE) == "shared_expert":
-                values_with_shared_expert.add(linear.in_features)
+                values_of_shared_experts.add(linear.in_features)
             else:
                 values.add(linear.in_features)
+        if isinstance(node.target, MixtureOfExpertsPlugin):
+            values_of_experts.add(node.target.expert_inter_size * mapping.tp_size)
 
-    if len(values) == 0:
-        values = values_with_shared_expert
-
-    if len(values) == 0:
+    if not (values := values or values_of_shared_experts or values_of_experts):
         raise PretrainedConfigGenerationError("No intermediate size found in graph module")
 
     if len(values) > 1:

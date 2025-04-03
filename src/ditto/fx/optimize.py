@@ -27,6 +27,7 @@ from .passes import (
     AddTRTLLMInputs,
     BindUnmatchedLoraProtos,
     CanonicalizeCopy,
+    CanonicalizeMoEAllReduces,
     CastMMToFP32,
     CastOutputLogits,
     CastRouterToFP32,
@@ -55,6 +56,7 @@ from .passes import (
     HerdConstantsToTheRight,
     IndexLayers,
     InsertGatherLastTokenIds,
+    MarkMoELinears,
     OverrideMulScalarTypePromotion,
     ParallelizeLinear,
     PopLoraPlugins,
@@ -104,8 +106,10 @@ def get_preoptimization_transform(
         AddTRTLLMInputs(argument_hint=argument_hint),
         ResolveDynamicReshape(),
         EliminateCommonExpressions(),
+        MarkMoELinears(mapping=argument_hint.mapping),
         PropagateTensorParallelism(mapping=argument_hint.mapping),
         ParallelizeLinear(mapping=argument_hint.mapping),
+        CanonicalizeMoEAllReduces(mapping=argument_hint.mapping),
         steps=1,
         warn_on_partial_convergence=False,
     )
@@ -254,7 +258,11 @@ def get_trtllm_conversion_transform(
         *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
         OverrideMulScalarTypePromotion,
         CastRouterToFP32,
-        ReplaceMoEByMoEPlugin(dtype=dtype),
+        ReplaceMoEByMoEPlugin(
+            dtype=dtype,
+            tp_size=argument_hint.mapping.tp_size,
+            tp_rank=argument_hint.mapping.tp_rank,
+        ),
         FuseQKVProjections,
         FuseGatedMLPProjections,
         FuseDequantizes,
@@ -355,7 +363,7 @@ def get_transform(
             pass_name := type(fx_pass).__name__ if isinstance(fx_pass, GraphOptimizationPass) else fx_pass.__name__
         ) in skipped_optimizers:
             logger.info(f"Skipping FX optimization pass {pass_name}")
-            _ = skipped_optimizers.pop(skipped_optimizers.index(pass_name))
+            _ = skipped_optimizers.pop(skipped_optimizers.index(pass_name))  # type: ignore[arg-type]
             continue
         pass_manager.add_pass(fx_pass)
 

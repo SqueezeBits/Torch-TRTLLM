@@ -15,6 +15,7 @@
 from .add_trtllm_inputs import AddTRTLLMInputs
 from .bind_unmatched_lora_protos import BindUnmatchedLoraProtos
 from .canonicalize_copy import CanonicalizeCopy
+from .canonicalize_moe_allreduces import CanonicalizeMoEAllReduces
 from .cast_mm_to_fp32 import CastMMToFP32
 from .cast_output_logits import CastOutputLogits
 from .cast_router_to_fp32 import CastRouterToFP32
@@ -44,6 +45,7 @@ from .fuse_reciprocal_mul import FuseReciprocalMul
 from .herd_constants_to_the_right import HerdConstantsToTheRight
 from .index_layers import IndexLayers
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
+from .mark_moe_linears import MarkMoELinears
 from .override_mul_scalar_type_promotion import OverrideMulScalarTypePromotion
 from .parallelize_linear import ParallelizeLinear
 from .parallelize_pipeline import ParallelizePipeline
