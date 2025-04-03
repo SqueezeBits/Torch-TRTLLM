@@ -23,6 +23,7 @@ from .replace_sdpa_by_gpt_attention_plugin import MLA
 class MarkMLALinears(NodewiseOptimizationPass):
     """Mark linear nodes in MLA layers with the corresponding type to exclude them from tensor parallelism.
 
+    Some of them will be parallelized later in ReplaceSDPAByGPTAttentionPlugin pass.
     It is a preprocessing of parallelize_linear pass required for proper conversion of MLA subgraphs
     with Tensor Parallelism.
 
@@ -49,6 +50,8 @@ class MarkMLALinears(NodewiseOptimizationPass):
             return {}
         mla.kv_a_proj.mark_linear_type_as("mla_kv_a_proj")
         mla.kv_b_proj.mark_linear_type_as("mla_kv_b_proj")
-        mla.q_proj.mark_linear_type_as("mla_q_proj")
+        mla.q_b_proj.mark_linear_type_as("mla_q_b_proj")
         mla.o_proj.mark_linear_type_as("mla_o_proj")
+        if mla.q_a_proj is not None:
+            mla.q_a_proj.mark_linear_type_as("mla_q_a_proj")
         return {node: ModifiedInsideThePass()}

@@ -148,9 +148,15 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 if isinstance(attn, MHA):
                     qkv = attn.qkv
                 else:
-                    k_pe = SqueezeDim.create(graph, attn.k_pe, 0)
-                    qkv = Cat.create(graph, [attn.hidden_states, attn.compressed_kv, k_pe], 1).node
-                    fused_q_proj, q_b_proj, kv_b_proj = attn.create_mla_weights(graph)
+                    if attn.is_deepseek_v2_lite:
+                        k_pe = SqueezeDim.create(graph, attn.k_pe, 0)
+                        qkv = Cat.create(graph, [attn.hidden_states, attn.compressed_kv, k_pe], 1).node
+                        fused_q_proj, q_b_proj, kv_b_proj = attn.create_mla_weights(graph)
+                    else:
+                        compressed_q = attn.q_b_proj.mm.this
+                        k_pe = SqueezeDim.create(graph, attn.k_pe, 0)
+                        qkv = Cat.create(graph, [compressed_q, attn.compressed_kv, k_pe], 1).node
+                        fused_q_proj, q_b_proj, kv_b_proj = attn.create_mla_weights(graph)
                     mla_inputs = {
                         "fused_q_proj": fused_q_proj,
                         "q_b_proj": q_b_proj,
@@ -360,7 +366,8 @@ class MLA(StrictlyTyped):
     hidden_states: Node
     compressed_kv: Node
     k_pe: Node
-    q_proj: Linear
+    q_a_proj: Linear | None
+    q_b_proj: Linear
     kv_a_proj: Linear
     kv_b_proj: Linear
     o_proj: Linear
@@ -369,6 +376,7 @@ class MLA(StrictlyTyped):
     qk_nope_head_dim: int
     qk_rope_head_dim: int
     v_head_dim: int
+    is_deepseek_v2_lite: bool
 
     @property
     def num_kv_heads_per_group(self) -> int:
@@ -389,7 +397,7 @@ class MLA(StrictlyTyped):
         Returns:
             ROPEConfig | None: The RoPE configuration if found, None otherwise
         """
-        if not (rope := find_nearest(Rope, self.q_proj.output_node, follow_parent=False, follow_first_only=False)):
+        if not (rope := find_nearest(Rope, self.q_b_proj.output_node, follow_parent=False, follow_first_only=False)):
             return None
         return rope.meta.get("rope_config")
 
@@ -407,14 +415,13 @@ class MLA(StrictlyTyped):
         Returns:
             Self | None: MLA configuration if pattern matches, None otherwise
         """
-        # TODO: Current pattern is based on deepseek_v2_lite. Should be improved to support normal v2 as well.
         if not (
             (query := get_tensor_metadata(sdpa.query))
             and (key := get_tensor_metadata(sdpa.key))
             and (value := get_tensor_metadata(sdpa.value))
             and (num_kv_heads := expect_identical(key.shape[-3], value.shape[-3])) is not None
             and (
-                q_proj := find_nearest(
+                q_b_proj := find_nearest(
                     Linear,
                     sdpa.query,
                     follow_first_only=False,
@@ -423,7 +430,7 @@ class MLA(StrictlyTyped):
             )
             and (
                 q_split := find_nearest(
-                    SplitWithSizes, q_proj.output_node, follow_parent=False, follow_first_only=False
+                    SplitWithSizes, q_b_proj.output_node, follow_parent=False, follow_first_only=False
                 )
             )
             and (q_split_outputs := [getitem for user in q_split.users if (getitem := GetItem.specialize_from(user))])
@@ -464,10 +471,16 @@ class MLA(StrictlyTyped):
         ):
             return None
 
+        is_deepseek_v2_lite = q_b_proj.mm.this == kv_a_proj.mm.this
+        q_a_proj = None
+        if not is_deepseek_v2_lite:
+            q_a_proj = find_nearest(Linear, q_b_proj.mm.this, follow_first_only=False)
+            if q_a_proj is None or q_a_proj.mm.this != kv_a_proj.mm.this:
+                raise NotImplementedError("Found MLA graph that is not supported yet.")
         hidden_states = kv_a_proj.mm.this
         compressed_kv = kv_b_proj.mm.this
         k_pe = kv_a_split_outputs[1].node
-        q_lora_rank = q_proj.weight_tensor.shape[0]
+        q_lora_rank = q_b_proj.weight_tensor.shape[0]
         kv_lora_rank = kv_b_proj.weight_tensor.shape[0]
         qk_nope_head_dim = q_split_outputs[0].meta["val"].shape[-1]
         qk_rope_head_dim = q_split_outputs[1].meta["val"].shape[-1]
@@ -481,7 +494,8 @@ class MLA(StrictlyTyped):
             hidden_states=hidden_states,
             compressed_kv=compressed_kv,
             k_pe=k_pe,
-            q_proj=q_proj,
+            q_a_proj=q_a_proj,
+            q_b_proj=q_b_proj,
             kv_a_proj=kv_a_proj,
             kv_b_proj=kv_b_proj,
             o_proj=o_proj,
@@ -490,6 +504,7 @@ class MLA(StrictlyTyped):
             qk_nope_head_dim=qk_nope_head_dim,
             qk_rope_head_dim=qk_rope_head_dim,
             v_head_dim=v_head_dim,
+            is_deepseek_v2_lite=is_deepseek_v2_lite,
         )
 
     def apply_lazy_tensor_parallelism(self, mapping: TRTLLMMapping) -> None:
@@ -515,7 +530,7 @@ class MLA(StrictlyTyped):
         if mapping.tp_size == 1:
             return
 
-        parallelize_column_linear(self.q_proj, mapping, inplace=True)
+        parallelize_column_linear(self.q_b_proj, mapping, inplace=True)
         parallelize_column_linear(self.kv_b_proj, mapping, inplace=True)
         parallelize_row_linear(self.o_proj, mapping)
         intermediate_nodes = get_nodes_with_depth(
@@ -540,7 +555,7 @@ class MLA(StrictlyTyped):
                 - Query projection weight node
                 - Concatenated key-value projection weight node
         """
-        q_b_proj_weight: Node | NodeSpecialization = self.q_proj.weight_node
+        q_b_proj_weight: Node | NodeSpecialization = self.q_b_proj.weight_node
         kv_b_proj_weight: Node | NodeSpecialization = self.kv_b_proj.weight_node
 
         q_b_proj_weight_permute = Permute.create(graph, q_b_proj_weight, (1, 0))

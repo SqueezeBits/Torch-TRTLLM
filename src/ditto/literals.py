@@ -34,7 +34,14 @@ which is used by the function `str_dtype_to_trt` in the same file."""
 KVCacheTypeLiteral = Literal["CONTINUOUS", "DISABLED", "PAGED"]
 
 LinearTypeLiteral = Literal[
-    "router", "shared_expert", "shared_expert_gate", "mla_kv_a_proj", "mla_kv_b_proj", "mla_q_proj", "mla_o_proj"
+    "router",
+    "shared_expert",
+    "shared_expert_gate",
+    "mla_kv_a_proj",
+    "mla_kv_b_proj",
+    "mla_q_a_proj",
+    "mla_q_b_proj",
+    "mla_o_proj",
 ]
 
 LoraCheckpointLiteral = Literal["hf", "nemo"]

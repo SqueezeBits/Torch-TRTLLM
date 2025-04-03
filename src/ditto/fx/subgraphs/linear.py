@@ -258,11 +258,13 @@ class Linear(Subgraph):
         """Whether to exclude this linear layer from tensor parallelism."""
         if not (linear_type := verify(self.mm.meta.get(LINEAR_TYPE, None), as_type=LinearTypeLiteral)):  # type: ignore
             return False
+        # pylint: disable=R0801
         return linear_type in [
             "router",
             "shared_expert_gate",
             "mla_kv_a_proj",
             "mla_kv_b_proj",
-            "mla_q_proj",
+            "mla_q_a_proj",
+            "mla_q_b_proj",
             "mla_o_proj",
         ]
