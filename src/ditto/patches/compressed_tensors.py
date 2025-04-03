@@ -15,7 +15,7 @@
 import torch
 from compressed_tensors.compressors.quantized_compressors.pack_quantized import PackedQuantizationCompressor
 from compressed_tensors.linear.compressed_linear import CompressedLinear
-from compressed_tensors.quantization import QuantizationArgs, QuantizationStrategy
+from compressed_tensors.quantization import QuantizationArgs, QuantizationScheme, QuantizationStrategy
 from compressed_tensors.quantization.lifecycle import forward
 
 from .patch import custom_patch
@@ -40,9 +40,17 @@ def patch_decompress_weight() -> None:
         num_bits = quantization_args.num_bits
 
         shifts = torch.arange(0, 32, num_bits, device=weight.device)
+        # unpacking weight
         unpacked = torch.bitwise_right_shift(weight[:, :, None], shifts[None, None, :]).to(torch.int32)
         unpacked = unpacked.view(unpacked.shape[0], -1) - (pow(2, num_bits) // 2)
         unpacked = unpacked.to(torch.int8)
+        # unpacking zero point
+        if zero_point is not None:
+            zero_point = zero_point.T
+            zero_point = torch.bitwise_right_shift(zero_point[:, :, None], shifts[None, None, :]).to(torch.int8)
+            zero_point = zero_point.reshape(zero_point.shape[0], -1)
+            zero_point = zero_point.T
+
         decompressed_weight = forward.dequantize(x_q=unpacked, scale=scale, zero_point=zero_point, g_idx=g_idx)
 
         return decompressed_weight
@@ -52,11 +60,36 @@ def patch_decompress_weight() -> None:
 
 @custom_patch(
     name="compressed linear process",
-    reason="resolving torch.export error and the registration of the parameters during forward pass.",
+    reason="resolving torch.export error and the registration of the parameters.",
     required=True,
     env_var_to_disable="DISABLE_COMPRESSED_TENSORS_COMPRESSED_LINEAR_PROCESS_PACH",
 )
 def patch_compressed_linear_process() -> None:
+    original_from_linear = CompressedLinear.from_linear
+
+    @torch.no_grad()
+    def patched_from_linear(module: torch.nn.Linear, quantization_scheme: QuantizationScheme, quantization_format: str):
+        ret = original_from_linear(module, quantization_scheme, quantization_format)
+
+        if (
+            quantization_scheme.weights
+            and not quantization_scheme.weights.symmetric
+            and (weight_zero_point := getattr(ret, "weight_zero_point", None)) is not None
+            and quantization_scheme.weights.strategy
+            and quantization_scheme.weights.strategy == QuantizationStrategy.GROUP
+            and quantization_scheme.weights.group_size
+        ):
+            expected_shape = (
+                weight_zero_point.shape[0] // (32 // quantization_scheme.weights.num_bits),
+                weight_zero_point.shape[1],
+            )
+            new_zero_point = torch.nn.Parameter(
+                torch.zeros(expected_shape, device=weight_zero_point.device, dtype=torch.int32), requires_grad=False
+            )
+            ret.register_parameter("weight_zero_point", new_zero_point)
+
+        return ret
+
     def patched_forward(self, input: torch.Tensor) -> torch.Tensor:
         unpacked_weight = self.compressor.decompress_module(self)
         return torch.nn.functional.linear(input, unpacked_weight, self.bias)
@@ -81,9 +114,9 @@ def patch_compressed_linear_process() -> None:
                 zero_point = zero_point.unsqueeze(1) if zero_point is not None else None
 
             assert g_idx is None or -1 in g_idx
-            assert zero_point is None, "zero point is not supported yet"
             scale = scale.reshape(scale.shape[0], 1, -1)
             output = x.reshape(x.shape[0], group_size, -1)
+            zero_point = zero_point.reshape(zero_point.shape[0], 1, -1) if zero_point is not None else None
 
             if do_dequantize:
                 output = forward._dequantize(output, scale, zero_point)
@@ -107,4 +140,5 @@ def patch_compressed_linear_process() -> None:
         return output
 
     forward._process_quantization = patched_process_quantization
+    CompressedLinear.from_linear = patched_from_linear
     CompressedLinear.forward = patched_forward

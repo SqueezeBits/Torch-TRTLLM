@@ -301,7 +301,6 @@ def find_qweight_and_zero_node(
             if shape[expected_equal_dim] == org_weight_shape[expected_equal_dim] and (
                 qweight := GetAttr.specialize_from(node)
             ):
-                packed_ratio = org_weight_shape[1 - expected_equal_dim] / shape[1 - expected_equal_dim]
                 break
         else:
             raise ValueError("QWeight node not found")
@@ -310,6 +309,7 @@ def find_qweight_and_zero_node(
         for node in nodes:
             assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
             shape = node_val.shape
+            packed_ratio = org_weight_shape[1 - expected_equal_dim] / qweight.tensor.shape[1 - expected_equal_dim]
             if (
                 shape[0] * group_size == org_weight_shape[0]
                 and shape[1] * packed_ratio == org_weight_shape[1]
@@ -323,17 +323,27 @@ def find_qweight_and_zero_node(
 
     if quant_method == QuantizationMethod.COMPRESSED_TENSORS:
         if weight_quant_scheme.packed:
-            expected_equal_dim = 0
             for node in nodes:
                 assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
                 shape = node_val.shape
-                if shape[expected_equal_dim] == org_weight_shape[1 - expected_equal_dim] and (
-                    qweight := GetAttr.specialize_from(node)
-                ):
+                if shape[0] == org_weight_shape[1] and (qweight := GetAttr.specialize_from(node)):
                     break
             else:
                 raise ValueError("QWeight node not found")
             nodes.remove(qweight.node)
+
+            zero: GetAttr | None = None  # type: ignore [no-redef]
+            for node in nodes:
+                assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
+                shape = node_val.shape
+                packed_ratio = org_weight_shape[0] / qweight.tensor.shape[1]
+                if (
+                    group_size is not None
+                    and shape[0] * packed_ratio == org_weight_shape[1]
+                    and shape[1] * group_size == org_weight_shape[0]
+                    and (zero := GetAttr.specialize_from(node))
+                ):
+                    break
         else:
             for node in nodes:
                 assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
@@ -347,10 +357,9 @@ def find_qweight_and_zero_node(
                     break
             else:
                 raise ValueError("QWeight node not found")
-            nodes.remove(qweight.node)
+            zero = None
 
-        # TODO: add zero node
-        return qweight, None
+        return qweight, zero
 
     raise NotImplementedError(f"Quantization for {quant_method} is not implemented yet.")
 
@@ -411,17 +420,18 @@ def unpack_zeros(zeros: torch.Tensor, bits: int, quant_method: QuantizationMetho
     Returns:
         torch.Tensor: The unpacked zero point tensor
     """
-    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
+    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ, QuantizationMethod.COMPRESSED_TENSORS):
         assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
         if bits == 4:
-            zeros = unpack_int32_into_int8(zeros, quant_method is QuantizationMethod.AWQ)
+            zeros = unpack_int32_into_int8(
+                zeros.T if quant_method is QuantizationMethod.COMPRESSED_TENSORS else zeros,
+                quant_method is QuantizationMethod.AWQ,
+            )
         else:
             zeros = zeros.view(torch.int8)
         zeros = -zeros + 2 ** (bits - 1) - 1 * (quant_method is QuantizationMethod.GPTQ)
-    elif quant_method == QuantizationMethod.COMPRESSED_TENSORS:
-        assert bits == 8, f"Unsupported bits: {bits=}. Only 8-bit quantization (FP8) is supported currently."
-        assert zeros.dtype.itemsize == 1, f"Wrong dtype of zeros: {zeros.dtype=}"
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
 
+    assert zeros.dtype.itemsize == 1, f"Wrong dtype of zeros: {zeros.dtype=}"
     return zeros
