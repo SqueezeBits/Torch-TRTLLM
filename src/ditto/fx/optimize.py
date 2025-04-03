@@ -57,6 +57,7 @@ from .passes import (
     IndexLayers,
     InsertGatherLastTokenIds,
     MarkMoELinears,
+    OverrideMulScalarTypePromotion,
     ParallelizeLinear,
     PopLoraPlugins,
     PropagateTensorParallelism,
@@ -255,6 +256,7 @@ def get_trtllm_conversion_transform(
     """
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
         *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
+        OverrideMulScalarTypePromotion,
         CastRouterToFP32,
         ReplaceMoEByMoEPlugin(
             dtype=dtype,

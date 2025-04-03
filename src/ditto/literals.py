@@ -94,6 +94,7 @@ PassName = Literal[
     "IndexLayers",
     "InsertGatherLastTokenIds",
     "MarkRouters",
+    "OverrideMulScalarTypePromotion",
     "ParallelizeLinear",
     "ParallelizePipeline",
     "PopLoraPlugins",
