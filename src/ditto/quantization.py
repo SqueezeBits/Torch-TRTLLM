@@ -21,7 +21,7 @@ from compressed_tensors.quantization import QuantizationScheme, QuantizationStra
 from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
 from torch._ops import OpOverload
-from transformers import PretrainedConfig
+from transformers import PreTrainedModel
 from transformers.utils.quantization_config import (
     AwqConfig,
     CompressedTensorsConfig,
@@ -32,6 +32,12 @@ from transformers.utils.quantization_config import (
 from typing_extensions import Self
 
 from .types import StrictlyTyped
+from .modelopt import get_modelopt_modules, infer_modelopt_quanitzation
+
+from peft import PeftModel
+
+from .literals import ModelOptQuantFormat
+
 
 
 class QuantizeMode(Enum):
@@ -67,6 +73,15 @@ class QuantizeAlgorithm(Enum):
     AWQ = auto()
     SMOOTHQUANT = auto()
 
+    ###### modelopt algorithms
+    MODELOPT_QUANTIZATION_NVFP4 = auto()
+    MODELOPT_QUANTIZATION_NVFP4_AWQ = auto()
+    MODELOPT_QUANTIZATION_FP8 = auto()
+    MODELOPT_QUANTIZATION_INT4_AWQ = auto()
+    MODELOPT_QUANTIZATION_INT8_SQ = auto()
+    MODELOPT_QUANTIZATION_W4A8_AWQ = auto()
+    MODELOPT_QUANTIZATION_NONE = auto()
+
     @classmethod
     def from_hf_quant_method(cls, hf_quant_method: QuantizationMethod) -> "QuantizeAlgorithm":
         """Convert Hugging Face quantization method to Ditto quantization algorithm.
@@ -86,6 +101,16 @@ class QuantizeAlgorithm(Enum):
             return cls.PTQ
 
         raise NotImplementedError(f"Unsupported quantization method: {hf_quant_method}")
+
+
+    def is_modelopt_algorithm(self) -> bool:
+        """Check if current quantization is done by modelopt.
+
+        Returns:
+            bool: True if quantization is done by modelopt, False elsewise
+        """
+        return self.value >= QuantizeAlgorithm.MODELOPT_QUANTIZATION_NVFP4.value
+
 
 
 class QuantScheme(StrictlyTyped):
@@ -126,28 +151,52 @@ class GlobalQuantConfig(StrictlyTyped):
     """Global quantization configuration.
 
     Attributes:
-        hf_quant_method (QuantizationMethod): The quantization method used by the Hugging Face model
+        hf_quant_method (QuantizationMethod | None): The quantization method used, `None` means modelopt
         trtllm_quant_algo (QuantAlgo): The quantization algorithm used by TRT-LLM
         trtllm_kv_cache_quant_algo (QuantAlgo | None): The quantization algorithm used by TRT-LLM for the KV cache.
             Defaults to None.
         quant_configs (list[TargetQuantConfig]): The quantization schemes for the target operators.
     """
 
-    hf_quant_method: QuantizationMethod
+    hf_quant_method: QuantizationMethod | None
+    modelopt_quant_format: ModelOptQuantFormat | None
     trtllm_quant_algo: QuantAlgo
     trtllm_kv_cache_quant_algo: QuantAlgo | None = None
     quant_configs: list[TargetQuantConfig] = []
 
     @classmethod
-    def create_from(cls, pretrained_config: PretrainedConfig) -> Self | None:
+    def create_from(cls, model: PreTrainedModel | PeftModel) -> Self | None:
         """Create a GlobalQuantConfig from a pretrained config.
 
         Args:
-            pretrained_config (PretrainedConfig): The pretrained config
+            model (PreTrainedModel | PeftModel): The pretrained model
 
         Returns:
             Self | None: The created GlobalQuantConfig or None if no quantization config is found
         """
+
+        modelopt_quant_modules = get_modelopt_modules(model)
+        if modelopt_quant_modules:
+            quant_format, quant_algo, group_size = infer_modelopt_quanitzation(modelopt_quant_modules)
+            return cls(
+                hf_quant_method=None,
+                modelopt_quant_format=quant_format,
+                trtllm_quant_algo=quant_algo,
+                trtllm_kv_cache_quant_algo=None,
+                quant_configs=[
+                    TargetQuantConfig(
+                        target=torch.ops.aten.mm.default,
+                        input_quant_scheme=None,
+                        weight_quant_scheme=QuantScheme(
+                            bits=4,
+                            mode=QuantizeMode.PER_GROUP,
+                            group_size=group_size,
+                        ),
+                    ),
+                ],        
+            )
+
+        pretrained_config = model.config
         if not (
             (quantization_config := getattr(pretrained_config, "quantization_config", None)) is not None
             and isinstance(quantization_config, QuantizationConfigMixin)
@@ -160,6 +209,7 @@ class GlobalQuantConfig(StrictlyTyped):
                 raise ValueError(f"Unsupported GPTQ bits: {quantization_config.bits=}")
             return cls(
                 hf_quant_method=quantization_config.quant_method,
+                modelopt_quant_format=None,
                 trtllm_quant_algo=QuantAlgo.W4A16_GPTQ if quantization_config.bits == 4 else QuantAlgo.W8A16_GPTQ,
                 quant_configs=[
                     TargetQuantConfig(
@@ -179,6 +229,7 @@ class GlobalQuantConfig(StrictlyTyped):
                 raise ValueError(f"Unsupported AWQ bits: {quantization_config.bits=}")
             return cls(
                 hf_quant_method=quantization_config.quant_method,
+                modelopt_quant_format=None,
                 trtllm_quant_algo=QuantAlgo.W4A16_AWQ if quantization_config.bits == 4 else QuantAlgo.W8A16,
                 quant_configs=[
                     TargetQuantConfig(
@@ -222,6 +273,7 @@ class GlobalQuantConfig(StrictlyTyped):
             ), "Currently, only per-tensor 8-bit quantization is supported"
             return cls(
                 hf_quant_method=quantization_config.quantization_config.quant_method,
+                modelopt_quant_format=None,
                 trtllm_quant_algo=QuantAlgo.FP8,
                 quant_configs=[
                     TargetQuantConfig(
@@ -246,14 +298,14 @@ class GlobalQuantConfig(StrictlyTyped):
 
 
 def inference_trtllm_quant_algo(
-    bits: int, compute_dtype: torch.dtype, *, hf_quant_method: QuantizationMethod
+    bits: int, compute_dtype: torch.dtype, *, hf_quant_method: QuantizationMethod | None
 ) -> QuantAlgo:
     """Infer the quantization algorithm for TensorRT-LLM .
 
     Args:
         bits (int): The number of bits used for quantization
         compute_dtype (torch.dtype): The compute data type
-        hf_quant_method (QuantizationMethod): The quantization method used by the Hugging Face model
+        hf_quant_method (QuantizationMethod | None): The quantization method used, `None` means modelopt
 
     Returns:
         QuantAlgo: The quantization algorithm for TensorRT-LLM
@@ -263,6 +315,8 @@ def inference_trtllm_quant_algo(
     if hf_quant_method == QuantizationMethod.GPTQ:
         quant_algo = f"{quant_algo}_GPTQ"
     elif hf_quant_method == QuantizationMethod.AWQ:
+        quant_algo = f"{quant_algo}_AWQ"
+    elif hf_quant_method is None: # modelopt
         quant_algo = f"{quant_algo}_AWQ"
     else:
         raise RuntimeError(f"Unsupported quantization method: {hf_quant_method}")

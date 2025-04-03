@@ -139,7 +139,7 @@ def get_weightonly_groupwise_quant_algo(
 def postprocess_qweight_for_trtllm(
     qweight: torch.Tensor,
     bits: int,
-    quant_method: QuantizationMethod,
+    hf_quant_method: QuantizationMethod | None,
     *,
     model_dtype: torch.dtype,
 ) -> torch.Tensor:
@@ -148,13 +148,13 @@ def postprocess_qweight_for_trtllm(
     Args:
         qweight (torch.Tensor): The quantized weight tensor
         bits (int): The number of bits used for quantization
-        quant_method (QuantizationMethod): The quantization method used
+        hf_quant_method (QuantizationMethod | None): The quantization method used, `None` means modelopt
         model_dtype (torch.dtype): The model data type.
 
     Returns:
         torch.Tensor: The postprocessed weight tensor for TensorRT-LLM
     """
-    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
+    if hf_quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ, None):
         assert qweight.dtype in (torch.uint8, torch.int8), f"Unsupported tensor dtype: {qweight.dtype=}"
         assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
         if bits == 4:
@@ -164,7 +164,7 @@ def postprocess_qweight_for_trtllm(
             model_dtype
         )
     else:
-        raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
+        raise NotImplementedError(f"Unsupported quantization method: {hf_quant_method}")
 
     return qweight
 

@@ -12,14 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .aten import *
-from .call_function import CallFunction
-from .dequantize import Dequantize
-from .get_attr import GetAttr
-from .node_specialization import NodeSpecialization
-from .operator import GetItem
-from .placeholder import Placeholder
-from .plugins import Gemm, GPTAttention, WeightOnlyGroupwiseQuantMatmul, WeightOnlyQuantMatmul
-from .rope import Rope
-from .scaled_dot_product_attention import ScaledDotProductAttention
-from .modelopt_quantizer import ModelOptQuantizer
+from collections.abc import Callable
+from typing import Any
+
+from torch.fx import Node
+
+from .call_function import FinalCallFunction
+from modelopt.torch.quantization.tensor_quant import quantize_op
+
+class ModelOptQuantizer(FinalCallFunction):
+    input: Node
+    amax: Node
+    num_bits: int
+    exponent_bits: int
+    unsigned: bool
+    narrow_range: bool
+
+    @classmethod
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
+        return (quantize_op.default,)
+

@@ -129,3 +129,5 @@ LogLevelLiteral = Literal[
     "DEBUG",
     "NOTSET",
 ]
+
+ModelOptQuantFormat = Literal["fp8", "int8_sq", "int4_awq", "w4a8_awq", "nvfp4", "nvfp4_awq"]

@@ -19,6 +19,7 @@ import time
 from typing import Annotated, Literal
 
 import click
+import modelopt.torch.opt as mto
 import torch
 from loguru import logger
 from transformers import (
@@ -196,6 +197,8 @@ def build(
 
     with disable_torch_jit_state(), disable_modelopt_peft_patches():
         logger.info(f"Loading model {model_id}")
+
+        mto.enable_huggingface_checkpointing()        
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             torch_dtype=get_model_dtype(dtype),

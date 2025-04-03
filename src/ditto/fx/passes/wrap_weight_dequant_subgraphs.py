@@ -19,9 +19,10 @@ from torch.fx import Node
 from transformers.utils.quantization_config import QuantizationMethod
 from typing_extensions import Self
 
+from ...modelopt import export_modelopt_weight_and_scale
 from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode
 from ...types import StrictlyTyped
-from ..nodes import MM, GetAttr, MulTensorTensor, Permute
+from ..nodes import MM, GetAttr, MulTensorTensor, Permute, ModelOptQuantizer
 from ..targets import Dequantizer
 from ..utils import find_nearest, get_val
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
@@ -47,11 +48,7 @@ class WrapWeightDequantSubgraphs(NodewiseOptimizationPass):
             and (weight_quant_scheme := self.global_quant_config.quant_configs[0].weight_quant_scheme) is not None
             and (mm := MM.specialize_from(node))
             and self.global_quant_config.quant_configs[0].target == mm.target
-            and (
-                dequantize_path := TrailingDequantizePath.configure_from(
-                    mm.other, self.global_quant_config.hf_quant_method
-                )
-            )
+            and (dequantize_path := TrailingDequantizePath.configure_from(mm.other, self.global_quant_config))
         ):
             return {}
 
@@ -59,16 +56,28 @@ class WrapWeightDequantSubgraphs(NodewiseOptimizationPass):
             weight_quant_scheme.mode = dequantize_path.quantize_mode
         weight_quant_scheme.has_zero_point = weight_quant_scheme.has_zero_point or dequantize_path.zero is not None
 
-        unpacked_qweight = unpack_qweight(
-            dequantize_path.qweight.tensor, dequantize_path.bits, self.global_quant_config.hf_quant_method
-        )
-        unpacked_zeros = (
-            unpack_zeros(dequantize_path.zero.tensor, dequantize_path.bits, self.global_quant_config.hf_quant_method)
-            if dequantize_path.zero is not None
-            else None
-        )
 
-        with node.graph.inserting_before(dequantize_path.qweight.node):
+        if dequantize_path.quantize_algorithm.is_modelopt_algorithm():
+            assert isinstance(dequantize_path.scale, torch.Tensor)
+            unpacked_qweight, scale = export_modelopt_weight_and_scale(dequantize_path.qweight.tensor, dequantize_path.scale)
+            unpacked_zeros = None
+            with node.graph.inserting_before(dequantize_path.qweight.node):
+                scale_node = GetAttr.create(node.graph, f"{dequantize_path.qweight.name}_scale", scale.T.contiguous()).node
+
+        else:
+            hf_quant_method = self.global_quant_config.hf_quant_method
+            assert hf_quant_method
+            assert isinstance(dequantize_path.scale, GetAttr)
+
+            unpacked_qweight = unpack_qweight(dequantize_path.qweight.tensor, dequantize_path.bits, hf_quant_method)
+            unpacked_zeros = (
+                unpack_zeros(dequantize_path.zero.tensor, dequantize_path.bits, hf_quant_method)
+                if dequantize_path.zero is not None
+                else None
+            )
+            scale_node = dequantize_path.scale.node
+
+        with node.graph.inserting_before(dequantize_path.qweight.node):            
             unpacked_qweight_getattr = GetAttr.create(
                 node.graph,
                 f"{dequantize_path.qweight.name}_unpacked",
@@ -94,7 +103,7 @@ class WrapWeightDequantSubgraphs(NodewiseOptimizationPass):
                 dequantize,
                 args=(
                     unpacked_qweight_getattr.node,
-                    dequantize_path.scale.node,
+                    scale_node,
                     unpacked_zeros_getattr.node if unpacked_zeros_getattr else None,
                 ),
             )
@@ -116,7 +125,7 @@ class TrailingDequantizePath(StrictlyTyped):
     bits: int
     org_weight_shape: torch.Size
     qweight: GetAttr
-    scale: GetAttr
+    scale: GetAttr | torch.Tensor
     zero: GetAttr | None = None
     group_size: int | None = None
     has_permuted_weight: bool = False
@@ -124,18 +133,41 @@ class TrailingDequantizePath(StrictlyTyped):
     quantize_algorithm: QuantizeAlgorithm
 
     @classmethod
-    def configure_from(cls, node: Node, quant_method: QuantizationMethod) -> Self | None:
+    def configure_from(cls, node: Node, global_quant_config: GlobalQuantConfig) -> Self | None:
         """Configure the trailing dequantize path from a node.
 
         Args:
             node (Node): The node to configure the trailing dequantize path from
-            quant_method (QuantizationMethod): The quantization method used to quantize the weight
+            global_quant_config (GlobalQuantConfig): Global quantization config
 
         Returns:
             Self | None: The trailing dequantize path or None if no such path is found
         """
+        if (
+            global_quant_config.hf_quant_method is None
+            and (quantizer := find_nearest(ModelOptQuantizer, node))
+            and (weight := find_nearest(GetAttr, quantizer.input))
+            and (amax := find_nearest(GetAttr, quantizer.amax))
+        ):
+            maxbound = (1 << (quantizer.num_bits - 1 + int(quantizer.unsigned))) - 1
+            scaling_factor = (amax.tensor.float() /  maxbound).to(amax.tensor.dtype)
+            
+            return cls(
+                bits=quantizer.num_bits,
+                org_weight_shape=weight.tensor.T.shape,
+                qweight=weight,
+                scale=scaling_factor,
+                zero=None,
+                group_size=weight.tensor.numel()//amax.tensor.numel(),
+                has_permuted_weight=True,
+                quantize_mode=QuantizeMode.PER_GROUP,
+                quantize_algorithm=QuantizeAlgorithm.MODELOPT_QUANTIZATION_INT4_AWQ,
+            )
+ 
+        hf_quant_method = global_quant_config.hf_quant_method
         if not (
-            isinstance(org_weight_tensor := get_val(node), torch.Tensor)
+            hf_quant_method
+            and isinstance(org_weight_tensor := get_val(node), torch.Tensor)
             and (ancestors_with_maxdepth := get_ancestors_with_maxdepth_to_root(node))
             and (mul := find_nearest(MulTensorTensor, node))
             and (
@@ -147,16 +179,16 @@ class TrailingDequantizePath(StrictlyTyped):
         ):
             return None
 
-        group_size = get_group_size(scale.tensor.shape, org_weight_tensor.shape, quant_method)
+        group_size = get_group_size(scale.tensor.shape, org_weight_tensor.shape, hf_quant_method)
         quantize_mode = (
-            get_quantize_mode(scale.tensor.shape, org_weight_tensor.shape, quant_method)
+            get_quantize_mode(scale.tensor.shape, org_weight_tensor.shape, hf_quant_method)
             if group_size is None
             else QuantizeMode.PER_GROUP
         )
         qweight, zero = find_qweight_and_zero_node(
             [n for n in ancestors_with_maxdepth if n is not scale.node and GetAttr.specialize_from(n)],
             org_weight_tensor.shape,
-            quant_method,
+            hf_quant_method,
             group_size=group_size,
         )
 
@@ -171,7 +203,7 @@ class TrailingDequantizePath(StrictlyTyped):
                 (permute := Permute.specialize_from(node)) is not None and permute.ndim == 2 and permute.dims == [1, 0]
             ),
             quantize_mode=quantize_mode,
-            quantize_algorithm=QuantizeAlgorithm.from_hf_quant_method(quant_method),
+            quantize_algorithm=QuantizeAlgorithm.from_hf_quant_method(hf_quant_method),
         )
 
 
