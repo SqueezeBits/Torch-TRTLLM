@@ -21,7 +21,7 @@ from ...types import DataType
 from ..nodes import Dequantize, GetAttr, Permute
 from ..subgraphs import Linear
 from ..targets import GemmPlugin, Quantizer
-from ..utils import get_tensor_metadata, name_generator
+from ..utils import attr_name_generator, get_tensor_metadata
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
@@ -46,7 +46,7 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
         ):
             return {}
 
-        name_gen = name_generator(graph_module, "activation_quant_scale")
+        name_gen = attr_name_generator(graph_module, "activation_quant_scale")
 
         with node.graph.inserting_before(node):
             act_scale_attr = GetAttr.create(node.graph, next(name_gen), activation_quantization.scale)

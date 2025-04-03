@@ -384,8 +384,10 @@ def find_nearest(
     return None
 
 
-def name_generator(graph_module: GraphModule, basename: str) -> Generator[str, None, None]:
-    """Generate unique names for nodes in a graph module.
+def attr_name_generator(graph_module: GraphModule, basename: str) -> Generator[str, None, None]:
+    """Generate unique names for GetAttr nodes in a graph module.
+
+    GetAttr nodes are used to register tensors in a graph module. So, it needs unique names.
 
     Args:
         graph_module (GraphModule): The graph module to generate names for

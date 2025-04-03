@@ -22,7 +22,7 @@ from ...types import DataType
 from ..nodes import GetAttr, GetItem, SqueezeDim
 from ..subgraphs import Linear, RmsNormSubgraph
 from ..targets import RmsnormQuantizationPlugin
-from ..utils import find_nearest, get_val, name_generator
+from ..utils import attr_name_generator, find_nearest, get_val
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
@@ -56,9 +56,9 @@ class ReplaceRmsNormByFp8RmsNormPlugin(NodewiseOptimizationPass):
         ):
             return {}
 
-        bias_name_gen = name_generator(graph_module, "rmsnorm_bias")
-        clamp_name_gen = name_generator(graph_module, "rmsnorm_clamp_val")
-        scale_name_gen = name_generator(graph_module, "rmsnorm_scale")
+        bias_name_gen = attr_name_generator(graph_module, "rmsnorm_bias")
+        clamp_name_gen = attr_name_generator(graph_module, "rmsnorm_clamp_val")
+        scale_name_gen = attr_name_generator(graph_module, "rmsnorm_scale")
 
         weight = rmsnorm.weight
         with node.graph.inserting_before(rmsnorm.input_node):

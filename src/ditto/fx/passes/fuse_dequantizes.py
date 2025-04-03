@@ -17,7 +17,7 @@ from torch.fx import Node
 
 from ...quantization import QuantizeMode
 from ..nodes import Cat, Dequantize, GetAttr
-from ..utils import name_generator
+from ..utils import attr_name_generator
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
@@ -41,7 +41,7 @@ class FuseDequantizes(NodewiseOptimizationPass):
         ):
             return {}
 
-        name_gen = name_generator(graph_module, "dequantize_fused_constant")
+        name_gen = attr_name_generator(graph_module, "dequantize_fused_constant")
         input_nodes: list[Node | None] = []
 
         fused_qweight_tensor = fuse_weights(

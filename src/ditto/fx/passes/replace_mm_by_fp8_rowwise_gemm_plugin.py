@@ -22,7 +22,7 @@ from ...types import DataType
 from ..nodes import Dequantize, GetAttr, GetItem, Permute, RmsnormQuantization, ToCopy
 from ..subgraphs import Linear
 from ..targets import Fp8RowwiseGemmPlugin, QuantizePerTokenPlugin
-from ..utils import get_val, name_generator
+from ..utils import attr_name_generator, get_val
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
@@ -58,7 +58,7 @@ class ReplaceMMByFp8RowwiseGemmPlugin(NodewiseOptimizationPass):
         ):
             return {}
 
-        clamp_name_gen = name_generator(graph_module, "fp8rowwise_mm_clamp_val")
+        clamp_name_gen = attr_name_generator(graph_module, "fp8rowwise_mm_clamp_val")
         input_node = linear.input_node
         token_scale_node: Node | None = None
         if (
@@ -73,14 +73,13 @@ class ReplaceMMByFp8RowwiseGemmPlugin(NodewiseOptimizationPass):
                     node.graph, next(clamp_name_gen), torch.tensor([-1200.0, 1200.0], dtype=torch.float32)
                 )
             with node.graph.inserting_before(node):
-                quantize_per_token = QuantizePerTokenPlugin(
-                    type_id=trt.fp8,
-                    quant_mode=QuantMode.from_description(use_fp8_rowwise=True),
-                    clamp_enabled=True,
-                    sum_per_token=False,
-                )
                 quantize_per_token_node = node.graph.call_function(
-                    quantize_per_token,
+                    QuantizePerTokenPlugin(
+                        type_id=trt.fp8,
+                        quant_mode=QuantMode.from_description(use_fp8_rowwise=True),
+                        clamp_enabled=True,
+                        sum_per_token=False,
+                    ),
                     (
                         input_node,
                         clamp_val.node,
@@ -104,15 +103,14 @@ class ReplaceMMByFp8RowwiseGemmPlugin(NodewiseOptimizationPass):
             with node.graph.inserting_before(node):
                 channel_scale_node = ToCopy.create(node.graph, channel_scale_node, dtype=torch.float32).node
 
-        fp8_rowwise_gemm_plugin = Fp8RowwiseGemmPlugin(
-            has_per_channel_scaling=True,
-            has_per_token_scaling=True,
-            type_id=DataType(self.model_dtype).to(trt.DataType),
-        )
         with node.graph.inserting_before(node):
             permute_node = Permute.create(node.graph, dequantize.qweight, (1, 0)).node
             fp8_rowwise_gemm_plugin_node = node.graph.call_function(
-                fp8_rowwise_gemm_plugin,
+                Fp8RowwiseGemmPlugin(
+                    has_per_channel_scaling=True,
+                    has_per_token_scaling=True,
+                    type_id=DataType(self.model_dtype).to(trt.DataType),
+                ),
                 (
                     input_node,
                     permute_node,
