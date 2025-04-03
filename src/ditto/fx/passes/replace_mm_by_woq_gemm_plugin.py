@@ -72,6 +72,7 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
             dequantize.target.bits,
             dequantize.target.global_quant_config.hf_quant_method,
             model_dtype=self.model_dtype,
+            per_group=dequantize.target.group_size is not None,
         )
         with node.graph.inserting_before(unpacked_weight.node):
             postprocessed_qweight = GetAttr.create(
@@ -145,6 +146,7 @@ def postprocess_qweight_for_trtllm(
     quant_method: QuantizationMethod,
     *,
     model_dtype: torch.dtype,
+    per_group: bool = False,
 ) -> torch.Tensor:
     """Postprocess the quantized weight tensor for TensorRT-LLM.
 
@@ -153,23 +155,20 @@ def postprocess_qweight_for_trtllm(
         bits (int): The number of bits used for quantization
         quant_method (QuantizationMethod): The quantization method used
         model_dtype (torch.dtype): The model data type.
+        per_group (bool): Whether the quantization is per group. Defaults to False.
 
     Returns:
         torch.Tensor: The postprocessed weight tensor for TensorRT-LLM
     """
-    if quant_method in (QuantizationMethod.AWQ, QuantizationMethod.GPTQ):
+    assert bits in (4, 8), "Only 4-bit or 8-bit quantization is supported for Weight-Only Quantization of TensorRT-LLM"
+    if quant_method in (QuantizationMethod.AWQ, QuantizationMethod.GPTQ, QuantizationMethod.COMPRESSED_TENSORS):
         assert qweight.dtype in (torch.uint8, torch.int8), f"Unsupported tensor dtype: {qweight.dtype=}"
-        assert bits in (4, 8), "Only 4-bit or 8-bit quantization is supported for TensorRT-LLM"
         if bits == 4:
             qweight = (qweight[:, 1::2] * 16 + qweight[:, ::2]).view(torch.int8)
         weight_dtype = torch.int8 if bits == 8 else torch.quint4x2
-        qweight = torch.ops.trtllm.preprocess_weights_for_mixed_gemm(qweight, weight_dtype, torch.float16).view(
-            model_dtype
-        )
-    elif quant_method == QuantizationMethod.COMPRESSED_TENSORS:
-        assert bits == 8, "Only 8-bit quantization is supported for compressed tensors yet"
-        weight_dtype = torch.int8 if bits == 8 else torch.quint4x2
         qweight = torch.ops.trtllm.preprocess_weights_for_mixed_gemm(qweight, weight_dtype, torch.float16)
+        if per_group:
+            qweight = qweight.view(model_dtype)
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
 

@@ -286,7 +286,8 @@ class GlobalQuantConfig(StrictlyTyped):
                 assert (
                     config.weights.strategy is not None
                     and config.weights.num_bits in (4, 8)
-                    and config.weights.strategy in (QuantizationStrategy.TENSOR, QuantizationStrategy.CHANNEL)
+                    and config.weights.strategy
+                    in (QuantizationStrategy.TENSOR, QuantizationStrategy.CHANNEL, QuantizationStrategy.GROUP)
                 ), f"Unsupported weight quantization scheme: {config.weights}"
                 weight_quant_scheme = QuantScheme(
                     bits=config.weights.num_bits,
@@ -304,7 +305,7 @@ class GlobalQuantConfig(StrictlyTyped):
                 if weight_quant_scheme.type == QuantizeType.INT:
                     trtllm_quant_algo = QuantAlgo.W8A16 if weight_quant_scheme.bits == 8 else QuantAlgo.W4A16
                 else:
-                    raise NotImplementedError(f"Unsupported weight-only quantization mode: {weight_quant_scheme=}")
+                    raise NotImplementedError(f"Unsupported weight-only quantization type: {weight_quant_scheme.type=}")
             else:
                 assert (
                     quantize_type := input_quant_scheme.type

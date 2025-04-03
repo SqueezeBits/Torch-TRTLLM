@@ -165,6 +165,14 @@ class TrailingDequantizePath(StrictlyTyped):
             group_size=group_size,
         )
 
+        if (
+            scale.tensor.ndim == 2
+            and group_size is not None
+            and scale.tensor.shape[1] == org_weight_tensor.shape[0] // group_size
+        ):
+            with scale.node.graph.inserting_before(scale.node):
+                scale = GetAttr.create(scale.node.graph, f"{scale.name}_permuted", scale.tensor.T)
+
         return cls(
             bits=int(qweight.tensor.dtype.itemsize * 8 / (org_weight_tensor.numel() / qweight.tensor.numel())),
             org_weight_shape=org_weight_tensor.shape,
@@ -360,8 +368,8 @@ def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: QuantizationM
     Returns:
         torch.Tensor: The unpacked weight tensor
     """
+    assert bits in (4, 8), f"Unsupported bits: {bits=}"
     if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
-        assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
         if bits == 4:
             qweight = unpack_int32_into_int8(
                 qweight if quant_method is QuantizationMethod.AWQ else qweight.T,
@@ -379,14 +387,16 @@ def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: QuantizationM
             )
             qweight = (qweight - 128).to(torch.int8)
     elif quant_method == QuantizationMethod.COMPRESSED_TENSORS:
-        assert bits == 8, f"Unsupported bits: {bits=}. Only 8-bit quantization (FP8) is supported currently."
-        if qweight.dtype.itemsize == 4:
-            original_shape = torch.Size([qweight.shape[0], qweight.shape[1] * (32 // bits)])
-            qweight = unpack_from_int32(qweight, bits, original_shape)
-        assert qweight.dtype.itemsize == 1, f"Wrong dtype of qweight: {qweight.dtype=}"
+        original_shape = torch.Size([qweight.shape[0], qweight.shape[1] * (32 // bits)])
+        qweight = unpack_from_int32(qweight, bits, original_shape)
+
+        if bits == 4:
+            qweight[qweight < 0] += 16
+            qweight = qweight.view(torch.uint8).contiguous()
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
 
+    assert qweight.dtype.itemsize == 1, f"Wrong dtype of qweight: {qweight.dtype=}"
     return qweight
 
 

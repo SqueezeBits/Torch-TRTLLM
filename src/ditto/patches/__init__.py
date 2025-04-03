@@ -18,6 +18,6 @@ from .torch import patch_modulelist_getitem
 from .transformers import patch_attention_mask_converter_make_causal_mask
 from .auto_awq import patch_wqlinear_mm_func_forward
 from .auto_gptq import patch_dynamically_import_quantlinear
-from .compressed_tensors import patch_decompress_weight
+from .compressed_tensors import patch_compressed_linear_process, patch_decompress_weight
 
 # Do NOT import from .trtllm! We don't want to apply the trtllm patches here.
