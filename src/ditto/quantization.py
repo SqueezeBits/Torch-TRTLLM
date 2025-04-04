@@ -16,7 +16,6 @@ from enum import Enum, auto
 
 import torch
 from auto_gptq.nn_modules.qlinear import qlinear_cuda_old
-from compressed_tensors.config import CompressionFormat
 from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy, QuantizationType
 from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
@@ -106,42 +105,6 @@ class QuantizeMode(Enum):
         raise NotImplementedError(f"Unsupported quantization strategy: {quant_strategy}")
 
 
-class QuantizeAlgorithm(Enum):
-    """Quantization algorithm.
-
-    Attributes:
-        PTQ (auto): Post-training quantization.
-        GPTQ (auto): GPTQ quantization.
-        AWQ (auto): AWQ quantization.
-        SMOOTHQUANT (auto): SmoothQuant quantization.
-    """
-
-    PTQ = auto()
-    GPTQ = auto()
-    AWQ = auto()
-    SMOOTHQUANT = auto()
-
-    @classmethod
-    def from_hf_quant_method(cls, hf_quant_method: QuantizationMethod) -> "QuantizeAlgorithm":
-        """Convert Hugging Face quantization method to Ditto quantization algorithm.
-
-        Args:
-            hf_quant_method (QuantizationMethod): The Hugging Face quantization method
-
-        Returns:
-            Self: The Ditto quantization algorithm
-        """
-        if hf_quant_method == QuantizationMethod.GPTQ:
-            return cls.GPTQ
-        if hf_quant_method == QuantizationMethod.AWQ:
-            return cls.AWQ
-        if hf_quant_method == QuantizationMethod.COMPRESSED_TENSORS:
-            # Note: only support PTQ for compressed tensors currently
-            return cls.PTQ
-
-        raise NotImplementedError(f"Unsupported quantization method: {hf_quant_method}")
-
-
 class QuantScheme(StrictlyTyped):
     """Quantization scheme.
 
@@ -152,7 +115,6 @@ class QuantScheme(StrictlyTyped):
         group_size (int | None): The size of the quantization group.
         has_zero_point (bool): Whether the quantization uses a zero point.
         dynamic (bool): Whether the quantization is dynamic.
-        packed (bool): Whether the weight is packed.
     """
 
     bits: int
@@ -161,7 +123,6 @@ class QuantScheme(StrictlyTyped):
     group_size: int | None = None
     has_zero_point: bool = False
     dynamic: bool = False
-    packed: bool = False
 
 
 class TargetQuantConfig(StrictlyTyped):
@@ -296,7 +257,6 @@ class GlobalQuantConfig(StrictlyTyped):
                     group_size=config.weights.group_size,
                     has_zero_point=not config.weights.symmetric,
                     dynamic=config.weights.dynamic,
-                    packed=quantization_config.quantization_config.format == CompressionFormat.pack_quantized.value,
                 )
 
             assert weight_quant_scheme is not None, "Weight quantization scheme is required"

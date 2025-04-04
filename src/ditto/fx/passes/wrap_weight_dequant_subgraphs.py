@@ -20,7 +20,7 @@ from torch.fx import Node
 from transformers.utils.quantization_config import QuantizationMethod
 from typing_extensions import Self
 
-from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode, QuantScheme
+from ...quantization import GlobalQuantConfig, QuantizeMode, QuantScheme
 from ...types import StrictlyTyped
 from ..nodes import MM, GetAttr, MulTensorTensor, Permute
 from ..targets import Dequantizer
@@ -87,7 +87,6 @@ class WrapWeightDequantSubgraphs(NodewiseOptimizationPass):
             output_shape=dequantize_path.org_weight_shape,
             bits=dequantize_path.bits,
             mode=dequantize_path.quantize_mode,
-            algorithm=dequantize_path.quantize_algorithm,
             group_size=dequantize_path.group_size,
         )
         with node.graph.inserting_before(mm.other):
@@ -112,6 +111,8 @@ class TrailingDequantizePath(StrictlyTyped):
         scale (GetAttr): The get_attr node for the scale
         zero (GetAttr | None): The get_attr node for the zero point. Defaults to None.
         group_size (int | None): The group size for the quantized weight. Defaults to None.
+        has_permuted_weight (bool): Whether the weight has been permuted. Defaults to False.
+        quantize_mode (QuantizeMode): The quantization mode for the quantized weight.
     """
 
     bits: int
@@ -121,8 +122,7 @@ class TrailingDequantizePath(StrictlyTyped):
     zero: GetAttr | None = None
     group_size: int | None = None
     has_permuted_weight: bool = False
-    quantize_mode: QuantizeMode
-    quantize_algorithm: QuantizeAlgorithm
+    quantize_mode: QuantizeMode = QuantizeMode.UNKNOWN
 
     @classmethod
     def configure_from(
@@ -184,7 +184,6 @@ class TrailingDequantizePath(StrictlyTyped):
                 (permute := Permute.specialize_from(node)) is not None and permute.ndim == 2 and permute.dims == [1, 0]
             ),
             quantize_mode=quantize_mode,
-            quantize_algorithm=QuantizeAlgorithm.from_hf_quant_method(quant_method),
         )
 
 
@@ -322,7 +321,7 @@ def find_qweight_and_zero_node(
         return qweight, zero
 
     if quant_method == QuantizationMethod.COMPRESSED_TENSORS:
-        if weight_quant_scheme.packed:
+        if weight_quant_scheme.bits == 4:  # Note: weight is expected to be packed and it might have zero point
             for node in nodes:
                 assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
                 shape = node_val.shape
