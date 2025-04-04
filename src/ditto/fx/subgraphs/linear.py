@@ -22,21 +22,29 @@ from typing_extensions import Self
 
 from ...literals import ExpertTypeLiteral, LoraPluginInputPrefix
 from ...types import verify
-from ..metadata_keys import ACTIVATION_QUANT_SCALE, EXPERT_TYPE, FREE_LORA_PROTO, LAYER_INDEX, LORA_PREFIX, LORA_PROTOS
+from ..metadata_keys import (
+    ACTIVATION_QUANTIZATION,
+    EXPERT_TYPE,
+    FREE_LORA_PROTO,
+    LAYER_INDEX,
+    LORA_PREFIX,
+    LORA_PROTOS,
+)
 from ..nodes import (
     MM,
     AddTensorTensor,
     Dequantize,
+    Fp8RowwiseGemm,
     Gemm,
     Reshape,
     WeightOnlyGroupwiseQuantMatmul,
     WeightOnlyQuantMatmul,
 )
-from ..targets import LoraProto
+from ..targets import ActivationQuantization, LoraProto
 from ..utils import get_val
 from .subgraph import Subgraph
 
-MMType = MM | Gemm | WeightOnlyGroupwiseQuantMatmul | WeightOnlyQuantMatmul
+MMType = MM | Fp8RowwiseGemm | Gemm | WeightOnlyGroupwiseQuantMatmul | WeightOnlyQuantMatmul
 
 
 # pylint: disable-next=too-many-public-methods
@@ -73,7 +81,7 @@ class Linear(Subgraph):
         """Whether the weight is transposed."""
         if isinstance(self.mm, Gemm):
             return self.mm.target.transb == 1
-        return False
+        return isinstance(self.mm, Fp8RowwiseGemm)
 
     @property
     def weight_in_features_dim(self) -> Literal[0, 1]:
@@ -151,6 +159,7 @@ class Linear(Subgraph):
         if not (
             (
                 mm := MM.specialize_from(node)
+                or Fp8RowwiseGemm.specialize_from(node)
                 or Gemm.specialize_from(node)
                 or WeightOnlyGroupwiseQuantMatmul.specialize_from(node)
                 or WeightOnlyQuantMatmul.specialize_from(node)
@@ -232,15 +241,15 @@ class Linear(Subgraph):
         return Dequantize.specialize_from(self.mm.other)
 
     @property
-    def activation_quant_scale(self) -> torch.Tensor | None:
-        """The activation quantization scale."""
-        return verify(self.mm.meta.get(ACTIVATION_QUANT_SCALE, None), as_type=torch.Tensor)
+    def activation_quantization(self) -> ActivationQuantization | None:
+        """The activation quantization associated with this linear layer."""
+        return verify(self.mm.meta.get(ACTIVATION_QUANTIZATION, None), as_type=ActivationQuantization)
 
-    @activation_quant_scale.setter
-    def activation_quant_scale(self, scale: torch.Tensor) -> None:
-        """Set the activation quantization scale."""
-        assert ACTIVATION_QUANT_SCALE not in self.mm.meta, f"Activation quant scale already set for {self.mm}"
-        self.mm.meta[ACTIVATION_QUANT_SCALE] = scale
+    @activation_quantization.setter
+    def activation_quantization(self, value: ActivationQuantization) -> None:
+        """Set the activation quantization for this linear layer."""
+        assert ACTIVATION_QUANTIZATION not in self.mm.meta, f"Activation quantization already set for {self.mm}"
+        self.mm.meta[ACTIVATION_QUANTIZATION] = value
 
     def mark_expert_type_as(self, expert_type: ExpertTypeLiteral) -> None:
         """Mark the expert type of this linear layer if it is a part of a MoE layer."""

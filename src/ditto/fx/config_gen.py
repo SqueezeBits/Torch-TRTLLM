@@ -27,8 +27,9 @@ from ..configs import (
 )
 from ..literals import DTypeLiteral
 from ..quantization import GlobalQuantConfig
-from ..types import verify
+from ..types import DataType, verify
 from .metadata_keys import EXPERT_TYPE, MOE_CONFIG
+from .nodes import Fp8RowwiseGemm, RmsnormQuantization, WeightOnlyGroupwiseQuantMatmul, WeightOnlyQuantMatmul
 from .subgraphs import Linear, TokenEmbedding
 from .targets import GPTAttentionPlugin, MixtureOfExpertsPlugin
 
@@ -62,6 +63,31 @@ def generate_trtllm_engine_config(
         build_config.plugin_config.lora_plugin = "auto"
     if graph_module.meta.get(MOE_CONFIG, None) is not None:
         build_config.plugin_config.moe_plugin = "auto"
+
+    build_config.plugin_config.fp8_rowwise_gemm_plugin = (
+        DataType(fp8_rowwise_gemm.target.type_id).to(str)  # type: ignore[assignment]
+        if (fp8_rowwise_gemm := Fp8RowwiseGemm.find_in(graph_module.graph))
+        else None
+    )
+    build_config.plugin_config.weight_only_groupwise_quant_matmul_plugin = (
+        DataType(woq_group_mm.target.type_id).to(str)  # type: ignore[assignment]
+        if (woq_group_mm := WeightOnlyGroupwiseQuantMatmul.find_in(graph_module.graph))
+        else None
+    )
+    build_config.plugin_config.weight_only_quant_matmul_plugin = (
+        DataType(woq_mm.target.type_id).to(str)  # type: ignore[assignment]
+        if (woq_mm := WeightOnlyQuantMatmul.find_in(graph_module.graph))
+        else None
+    )
+    build_config.plugin_config.rmsnorm_quantization_plugin = (
+        DataType(rms_quant.target.type_id).to(str)  # type: ignore[assignment]
+        if (rms_quant := RmsnormQuantization.find_in(graph_module.graph))
+        else None
+    )
+    build_config.plugin_config.quantize_per_token_plugin = build_config.plugin_config.quantize_tensor_plugin = (
+        build_config.plugin_config.fp8_rowwise_gemm_plugin is not None
+    )
+
     return TRTLLMEngineConfig(
         pretrained_config=generate_trtllm_pretrained_config(
             graph_module,
@@ -285,6 +311,4 @@ def infer_pretrained_config(
         num_key_value_heads=plugin.num_kv_heads * mapping.tp_size,
         intermediate_size=intermediate_size,
         mapping=mapping,
-        # TODO: fill in appropriate values in the quantization when quantization are supported.
-        # quantization=TRTLLMQuantConfig(...),
     )

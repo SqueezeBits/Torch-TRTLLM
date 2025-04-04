@@ -17,7 +17,7 @@ from enum import Enum, auto
 import torch
 from auto_gptq.nn_modules.qlinear import qlinear_cuda_old
 from compressed_tensors.config import CompressionFormat
-from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy
+from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy, QuantizationType
 from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
 from torch._ops import OpOverload
@@ -34,22 +34,76 @@ from typing_extensions import Self
 from .types import StrictlyTyped
 
 
+class QuantizeType(Enum):
+    """Quantization type.
+
+    Attributes:
+        FLOAT (auto): float quantization.
+        INT (auto): int quantization.
+    """
+
+    FLOAT = auto()
+    INT = auto()
+
+    @classmethod
+    def from_quant_type(cls, quant_type: QuantizationType) -> "QuantizeType":
+        """Convert quantization type to Ditto quantization type.
+
+        Args:
+            quant_type (QuantizationType): The quantization type
+
+        Returns:
+            QuantizeType: The Ditto quantization type
+        """
+        if quant_type == QuantizationType.FLOAT:
+            return cls.FLOAT
+        if quant_type == QuantizationType.INT:
+            return cls.INT
+
+        raise NotImplementedError(f"Unsupported quantization type: {quant_type}")
+
+
 class QuantizeMode(Enum):
     """Quantization mode.
 
     Attributes:
-        PER_TENSOR (auto): Quantization mode for the quantized tensor.
-        PER_GROUP (auto): Quantization mode for the quantized tensor.
-        PER_CHANNEL (auto): Quantization mode for the quantized tensor.
-        PER_TOKEN (auto): Quantization mode for the quantized tensor.
-        UNKNOWN (auto): Quantization mode for the quantized tensor.
+        PER_TENSOR (auto): per-tensor quantization.
+        PER_GROUP (auto): per-group quantization.
+        PER_CHANNEL (auto): per-channel quantization.
+        PER_BLOCK (auto): per-block quantization.
+        PER_TOKEN (auto): per-token quantization.
+        UNKNOWN (auto): unknown quantization mode.
     """
 
     PER_TENSOR = auto()
     PER_GROUP = auto()
     PER_CHANNEL = auto()
+    PER_BLOCK = auto()
     PER_TOKEN = auto()
     UNKNOWN = auto()
+
+    @classmethod
+    def from_quant_strategy(cls, quant_strategy: QuantizationStrategy) -> "QuantizeMode":
+        """Convert quantization strategy to Ditto quantization mode.
+
+        Args:
+            quant_strategy (QuantizationStrategy): The quantization strategy
+
+        Returns:
+            QuantizeMode: The Ditto quantization mode
+        """
+        if quant_strategy == QuantizationStrategy.TENSOR:
+            return cls.PER_TENSOR
+        if quant_strategy == QuantizationStrategy.CHANNEL:
+            return cls.PER_CHANNEL
+        if quant_strategy == QuantizationStrategy.GROUP:
+            return cls.PER_GROUP
+        if quant_strategy == QuantizationStrategy.BLOCK:
+            return cls.PER_BLOCK
+        if quant_strategy == QuantizationStrategy.TOKEN:
+            return cls.PER_TOKEN
+
+        raise NotImplementedError(f"Unsupported quantization strategy: {quant_strategy}")
 
 
 class QuantizeAlgorithm(Enum):
@@ -94,7 +148,7 @@ class QuantScheme(StrictlyTyped):
     Attributes:
         bits (int): The number of bits used for quantization.
         mode (QuantizeMode): The quantization mode.
-        type (str | None): The type of the quantization.
+        type (QuantizeType | None): The type of the quantization.
         group_size (int | None): The size of the quantization group.
         has_zero_point (bool): Whether the quantization uses a zero point.
         dynamic (bool): Whether the quantization is dynamic.
@@ -102,7 +156,7 @@ class QuantScheme(StrictlyTyped):
 
     bits: int
     mode: QuantizeMode
-    type: str | None = None
+    type: QuantizeType | None = None
     group_size: int | None = None
     has_zero_point: bool = False
     dynamic: bool = False
@@ -130,12 +184,14 @@ class GlobalQuantConfig(StrictlyTyped):
         trtllm_quant_algo (QuantAlgo): The quantization algorithm used by TRT-LLM
         trtllm_kv_cache_quant_algo (QuantAlgo | None): The quantization algorithm used by TRT-LLM for the KV cache.
             Defaults to None.
+        clamp_val (list[float] | None): The clamp values for the quantization. Defaults to None.
         quant_configs (list[TargetQuantConfig]): The quantization schemes for the target operators.
     """
 
     hf_quant_method: QuantizationMethod
     trtllm_quant_algo: QuantAlgo
     trtllm_kv_cache_quant_algo: QuantAlgo | None = None
+    clamp_val: list[float] | None = None
     quant_configs: list[TargetQuantConfig] = []
 
     @classmethod
@@ -168,6 +224,7 @@ class GlobalQuantConfig(StrictlyTyped):
                         weight_quant_scheme=QuantScheme(
                             bits=quantization_config.bits,
                             mode=QuantizeMode.PER_GROUP,
+                            type=QuantizeType.INT,
                             group_size=quantization_config.group_size,
                         ),
                     ),
@@ -187,6 +244,7 @@ class GlobalQuantConfig(StrictlyTyped):
                         weight_quant_scheme=QuantScheme(
                             bits=quantization_config.bits,
                             mode=QuantizeMode.PER_GROUP,
+                            type=QuantizeType.INT,
                             group_size=quantization_config.group_size,
                             has_zero_point=quantization_config.zero_point,
                         ),
@@ -213,30 +271,40 @@ class GlobalQuantConfig(StrictlyTyped):
             assert (
                 config.input_activations is not None
                 and config.input_activations.strategy is not None
-                and config.input_activations.strategy == QuantizationStrategy.TENSOR
                 and config.input_activations.num_bits == 8
                 and config.weights is not None
                 and config.weights.strategy is not None
-                and config.weights.strategy == QuantizationStrategy.TENSOR
                 and config.weights.num_bits == 8
-            ), "Currently, only per-tensor 8-bit quantization is supported"
+                and (config.input_activations.strategy, config.weights.strategy)
+                in (
+                    (QuantizationStrategy.TENSOR, QuantizationStrategy.TENSOR),
+                    (QuantizationStrategy.TOKEN, QuantizationStrategy.CHANNEL),
+                )
+            ), "Currently, 8-bit per-tensor quantization or dynamic quantization is supported"
+            trtllm_quant_algo = (
+                QuantAlgo.FP8
+                if (config.input_activations.strategy, config.weights.strategy)
+                == (QuantizationStrategy.TENSOR, QuantizationStrategy.TENSOR)
+                else QuantAlgo.FP8_PER_CHANNEL_PER_TOKEN
+            )
             return cls(
                 hf_quant_method=quantization_config.quantization_config.quant_method,
-                trtllm_quant_algo=QuantAlgo.FP8,
+                trtllm_quant_algo=trtllm_quant_algo,
+                clamp_val=[-1200.0, 1200.0] if trtllm_quant_algo == QuantAlgo.FP8_PER_CHANNEL_PER_TOKEN else None,
                 quant_configs=[
                     TargetQuantConfig(
                         target=torch.ops.aten.mm.default,
                         input_quant_scheme=QuantScheme(
                             bits=config.input_activations.num_bits,
-                            mode=QuantizeMode.UNKNOWN,
+                            mode=QuantizeMode.from_quant_strategy(config.input_activations.strategy),
+                            type=QuantizeType.from_quant_type(config.input_activations.type),
                             dynamic=config.input_activations.dynamic,
-                            type=config.input_activations.type,
                         ),
                         weight_quant_scheme=QuantScheme(
                             bits=config.weights.num_bits,
-                            mode=QuantizeMode.UNKNOWN,
+                            mode=QuantizeMode.from_quant_strategy(config.weights.strategy),
+                            type=QuantizeType.from_quant_type(config.weights.type),
                             dynamic=config.weights.dynamic,
-                            type=config.weights.type,
                         ),
                     ),
                 ],

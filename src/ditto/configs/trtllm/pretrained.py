@@ -377,7 +377,7 @@ class TRTLLMQuantConfig(StrictlyTyped):
     group_size: int | None = None
     smoothquant_val: float | None = None
     clamp_val: list[float] | None = Field(default=None, min_length=2, max_length=2)
-    has_zero_point: bool = False
+    has_zero_point: bool | None = None
     pre_quant_scale: bool = False
     exclude_modules: list[str] | None = None
 
@@ -400,6 +400,7 @@ class TRTLLMQuantConfig(StrictlyTyped):
             group_size=global_quant_config.quant_configs[0].weight_quant_scheme.group_size
             if global_quant_config.quant_configs[0].weight_quant_scheme is not None
             else None,
+            clamp_val=global_quant_config.clamp_val,
             has_zero_point=global_quant_config.quant_configs[0].weight_quant_scheme.has_zero_point
             if global_quant_config.quant_configs[0].weight_quant_scheme is not None
             else None,

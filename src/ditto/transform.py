@@ -118,6 +118,7 @@ def transform(
                     argument_hint,
                     model_config,
                     dtype,
+                    global_quant_config=global_quant_config,
                     skipped_optimizers=skipped_optimizers,
                     run_matmuls_in_fp32=run_matmuls_in_fp32,
                     run_activations_in_model_dtype=run_activations_in_model_dtype,

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ACTIVATION_QUANT_SCALE = "activation_quant_scale"
+ACTIVATION_QUANTIZATION = "activation_quantization"
 EXPERT_TYPE = "expert_type"
 FREE_LORA_PROTO = "free_lora_proto"
 LORA_PREFIX = "lora_prefix"

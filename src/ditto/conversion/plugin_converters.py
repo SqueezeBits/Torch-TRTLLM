@@ -28,12 +28,15 @@ from ..debug import enable_plugin_debug_info_hook
 from ..fx.targets import (
     AllGatherPlugin,
     AllReducePlugin,
+    Fp8RowwiseGemmPlugin,
     GemmPlugin,
     GPTAttentionPlugin,
     LoraPlugin,
     MixtureOfExpertsPlugin,
     Plugin,
+    QuantizePerTokenPlugin,
     RecvPlugin,
+    RmsnormQuantizationPlugin,
     SendPlugin,
     WeightOnlyGroupwiseQuantMatmulPlugin,
     WeightOnlyQuantMatmulPlugin,
@@ -94,6 +97,34 @@ def convert_allreduce_plugin(
     """
     assert isinstance(target, AllReducePlugin)
     return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="allreduce")
+
+
+@dynamo_tensorrt_converter(
+    Fp8RowwiseGemmPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_fp8_rowwise_gemm_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a Fp8RowwiseGemmPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The Fp8RowwiseGemmPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, Fp8RowwiseGemmPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="fp8_rowwise_gemm")
 
 
 @dynamo_tensorrt_converter(
@@ -195,6 +226,34 @@ def convert_lora_plugin(
 
 
 @dynamo_tensorrt_converter(
+    QuantizePerTokenPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_quantize_per_token_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a QuantizePerTokenPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The QuantizePerTokenPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, QuantizePerTokenPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="quantize_per_token")
+
+
+@dynamo_tensorrt_converter(
     RecvPlugin,
     supports_dynamic_shapes=True,
 )
@@ -220,6 +279,34 @@ def convert_recv_plugin(
     """
     assert isinstance(target, RecvPlugin)
     return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="recv")
+
+
+@dynamo_tensorrt_converter(
+    RmsnormQuantizationPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_rmsnorm_quantization_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a RmsnormQuantizationPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The RmsnormQuantizationPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, RmsnormQuantizationPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="rmsnorm_quantized")
 
 
 @dynamo_tensorrt_converter(

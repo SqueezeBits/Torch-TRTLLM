@@ -40,7 +40,7 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (linear := Linear.configure_from(node))
-            and linear.activation_quant_scale is None
+            and linear.activation_quantization is None
             and (dequantize := linear.weight_dequantize_node) is not None
             and (unpacked_weight := GetAttr.specialize_from(dequantize.qweight))
             and (scale := GetAttr.specialize_from(dequantize.scale))
