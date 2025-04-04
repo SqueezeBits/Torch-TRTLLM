@@ -36,12 +36,13 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
             and (other := get_tensor_metadata(linear.mm.other))
             and len(other.shape) == 2
             and (activation_quantization := linear.activation_quantization) is not None
-            and (activation_quantization.scale is not None)
+            and activation_quantization.quant_mode == QuantizeMode.PER_TENSOR
+            and activation_quantization.scale is not None
             and (dequantize := Dequantize.specialize_from(linear.mm.other)) is not None
             and dequantize.qweight_tensor is not None
             and dequantize.qweight_tensor.dtype == torch.float8_e4m3fn
             and dequantize.scale_tensor is not None
-            and dequantize.target.mode in (QuantizeMode.PER_TENSOR, QuantizeMode.PER_CHANNEL)
+            and dequantize.target.mode == QuantizeMode.PER_TENSOR
             and (graph_module := node.graph.owning_module) is not None
         ):
             return {}
