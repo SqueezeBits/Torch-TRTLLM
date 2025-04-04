@@ -396,12 +396,13 @@ def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: QuantizationM
             )
             qweight = (qweight - 128).to(torch.int8)
     elif quant_method == QuantizationMethod.COMPRESSED_TENSORS:
-        original_shape = torch.Size([qweight.shape[0], qweight.shape[1] * (32 // bits)])
-        qweight = unpack_from_int32(qweight, bits, original_shape)
+        if qweight.dtype == torch.int32:
+            original_shape = torch.Size([qweight.shape[0], qweight.shape[1] * (32 // bits)])
+            qweight = unpack_from_int32(qweight, bits, original_shape)
 
-        if bits == 4:
-            qweight[qweight < 0] += 16
-            qweight = qweight.view(torch.uint8).contiguous()
+            if bits == 4:
+                qweight[qweight < 0] += 16
+                qweight = qweight.view(torch.uint8).contiguous()
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
 
