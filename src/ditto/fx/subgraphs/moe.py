@@ -19,7 +19,7 @@ from torch.fx import Node
 from typing_extensions import Self
 
 from ...types import SymbolicInteger
-from ..nodes import IndexPut, MulTensorTensor, SelectInt, Softmax, ToCopy, Where
+from ..nodes import IndexPut, MulTensorTensor, SelectInt, Softmax, ToCopy
 from ..targets import AllReducePlugin
 from ..utils import find_nearest, get_tensor_metadata
 from .gated_mlp import GatedMLP
@@ -195,13 +195,13 @@ class MoESubgraph(Subgraph):
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
         # The common pattern for Mixture of Experts (MoE) is:
-        # softmax -> top-k -> one-hot
+        # router -> softmax -> top-k -> one-hot
         # This pattern is used in Qwen and Mixtral.
         if not (
             (one_hot := OneHot.configure_from(node))
             and (get_item := TrailingReformatPath.configure_from(one_hot.this).top)
-            and (topk := cls.get_moe_topk(get_item))
-            and (softmax := Softmax.specialize_from(topk.this))
+            and (topk := TopK.configure_from(get_item))
+            and (softmax := find_nearest(Softmax, topk.this, follow_first_only=False))
             and (router := TrailingReformatPath.traceback(Linear, softmax.this))
         ):
             return None
@@ -244,7 +244,16 @@ class MoESubgraph(Subgraph):
                 linear.mark_linear_type_as("shared_expert")
             shared_experts.append(linears)
 
-        router_logits = softmax.this
+        if Softmax.specialize_from(topk.this):
+            # greedy
+            router_logits = softmax.this
+        else:
+            # group_limited_greedy
+            # This topk method is used in DeepSeek-V2. Deepseek-V2-Lite uses greedy method.
+            #
+            # Currently, it only finds proper router logits and pattern matching
+            # for full group_limited_greedy graph is not implemented, as it's not necessary.
+            router_logits = topk.this
         experts.sort(key=lambda expert: expert.index)
         final_hidden_states = experts[-1].final_hidden_states
         return cls(
@@ -281,33 +290,3 @@ class MoESubgraph(Subgraph):
         if isinstance(expert, Expert):
             return (expert.up_proj.mm.other, expert.gate_proj.mm.other, expert.down_proj.mm.other)
         return (expert[0].mm.other, expert[1].mm.other, expert[2].mm.other)
-
-    @classmethod
-    def get_moe_topk(cls, node: Node) -> TopK | None:
-        """Get the TopK operation used in MoE routing.
-
-        This method identifies and extracts the TopK operation used for routing in Mixture of Experts (MoE).
-
-        Args:
-            node (Node): The node to analyze for TopK operation
-
-        Returns:
-            TopK | None: The configured TopK operation if found and supported, None otherwise
-
-        Raises:
-            NotImplementedError: If an unsupported TopK method is encountered
-        """
-        if not (topk := TopK.configure_from(node)):
-            return None
-        if Softmax.specialize_from(topk.this):
-            # "greedy" method
-            return topk
-        if where := Where.specialize_from(topk.this):
-            # "group_limited_greedy" method
-            # This topk method is used in DeepSeek-V2. Deepseek-V2-Lite uses greedy method.
-            #
-            # Currently, it only finds proper router scores(output of softmax) and pattern matching
-            # for full group_limited_greedy method is not implemented, as it's not necessary.
-            topk.this = where.other
-            return topk
-        raise NotImplementedError(f"topk method found from {topk} is not supported yet.")
