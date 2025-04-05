@@ -455,7 +455,6 @@ class MLA(StrictlyTyped):
             )
             and len(kv_b_split_outputs) == 2
             and (kv_a_proj := find_nearest(Linear, kv_b_proj.mm.this, follow_first_only=False))
-            and (kv_a_proj_meta := kv_a_proj.mm.meta["tensor_meta"])
             and (
                 kv_a_split := find_nearest(
                     SplitWithSizes, kv_a_proj.output_node, follow_parent=False, follow_first_only=False
@@ -468,6 +467,10 @@ class MLA(StrictlyTyped):
             )
             and len(kv_a_split_outputs) == 2
             and (o_proj := find_nearest(Linear, sdpa.value, follow_parent=False, follow_first_only=False))
+            and get_tensor_metadata(q_split_outputs[0].node) is not None
+            and get_tensor_metadata(q_split_outputs[1].node) is not None
+            and get_tensor_metadata(kv_b_split_outputs[1].node) is not None
+            and get_tensor_metadata(kv_a_split.this) is not None
         ):
             return None
 
@@ -485,10 +488,11 @@ class MLA(StrictlyTyped):
         qk_nope_head_dim = q_split_outputs[0].meta["val"].shape[-1]
         qk_rope_head_dim = q_split_outputs[1].meta["val"].shape[-1]
         v_head_dim = kv_b_split_outputs[1].meta["val"].shape[-1]
+        embed_dim = kv_a_split.this.meta["val"].shape[-1]
 
         return cls(
             num_heads=query.shape[-3] // tp_size,
-            embed_dim=kv_a_proj_meta.shape[1],
+            embed_dim=embed_dim,
             num_kv_heads=num_kv_heads // tp_size,
             output_shape=(*query.shape[:-1], value.shape[-1]),
             hidden_states=hidden_states,

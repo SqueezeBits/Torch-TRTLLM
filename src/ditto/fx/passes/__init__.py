@@ -40,7 +40,7 @@ from .fuse_consecutive_split_concat import FuseConsecutiveSplitConcat
 from .fuse_consecutive_to_copys import FuseConsecutiveToCopys
 from .fuse_dequantizes import FuseDequantizes
 from .fuse_gated_mlp_projections import FuseGatedMLPProjections
-from .fuse_qkv_projections import FuseQKVProjections
+from .fuse_qkv_projections import FuseMLAQKVProjections, FuseQKVProjections
 from .fuse_reciprocal_mul import FuseReciprocalMul
 from .herd_constants_to_the_right import HerdConstantsToTheRight
 from .index_layers import IndexLayers

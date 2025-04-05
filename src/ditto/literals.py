@@ -97,6 +97,7 @@ PassName = Literal[
     "FuseConsecutiveToCopys",
     "FuseDequantizes",
     "FuseGatedMLPProjections",
+    "FuseMLAQKVProjections",
     "FuseQKVProjections",
     "FuseReciprocalMul",
     "HerdConstantsToTheRight",
