@@ -57,6 +57,7 @@ from .replace_mm_by_gemm_plugin import ReplaceMMByGemmPlugin
 from .replace_mm_by_woq_gemm_plugin import ReplaceMMByWoQGemmPlugin
 from .replace_moe_by_mixture_of_experts_plugin import ReplaceMoEByMoEPlugin
 from .replace_sdpa_by_gpt_attention_plugin import ReplaceSDPAByGPTAttentionPlugin
+from .replace_topk_by_topk_plugin import ReplaceTopkByTopkLastDimPlugin
 from .replace_view_by_reshape import ReplaceViewByReshape
 from .reset_code_gen import ResetCodeGen
 from .resolve_dynamic_reshape import ResolveDynamicReshape

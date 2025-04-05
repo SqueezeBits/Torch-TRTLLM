@@ -17,8 +17,10 @@
 import torch
 from torch.fx.node import Node
 
-from ....types import Number, SymbolicInteger
+from ....types import SymbolicInteger
+from ...utils import get_tensor_metadata
 from .aten_op import ATenOp, FinalATenOp
+from .utils import make_dim_nonnegative
 
 
 @ATenOp.register(torch.ops.aten.topk.default)
@@ -28,13 +30,35 @@ class TopK(FinalATenOp):
     Attributes:
         this (Node): The input tensor.
         k (SymbolicInteger): Number of top elements to return.
-        dim (Number): The dimension to sort along. Default: -1 (last dimension).
+        dim (int): The dimension to sort along. Default: -1 (last dimension).
         largest (bool): Whether to return the largest or smallest elements. Default: True.
         sorted (bool): Whether to return the elements in sorted order. Default: True.
     """
 
     this: Node
     k: SymbolicInteger
-    dim: Number = -1
+    dim: int = -1
     largest: bool = True
     sorted: bool = True
+
+    @property
+    def input_ndim(self) -> int | None:
+        """The number of dimensions of the input tensor.
+
+        Returns:
+            int | None: The number of dimensions of the input tensor.
+        """
+        if t := get_tensor_metadata(self.this):
+            return len(t.shape)
+        return None
+
+    @property
+    def nonnegative_dim(self) -> int | None:
+        """The non-negative dimension of the input tensor.
+
+        Returns:
+            int | None: The non-negative dimension of the input tensor.
+        """
+        if (ndim := self.input_ndim) is not None:
+            return make_dim_nonnegative(self.dim, ndim=ndim)
+        return None

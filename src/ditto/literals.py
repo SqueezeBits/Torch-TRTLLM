@@ -113,6 +113,7 @@ PassName = Literal[
     "ReplaceMMByGemmPlugin",
     "ReplaceMMByWoQGemmPlugin",
     "ReplaceSDPAByGPTAttentionPlugin",
+    "ReplaceTopkByTopkLastDimPlugin",
     "ReplaceViewByReshape",
     "ResetCodeGen",
     "ResolveDynamicReshape",
