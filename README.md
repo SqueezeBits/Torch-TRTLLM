@@ -187,20 +187,23 @@ Performance benchmarks were conducted using [TensorRT-LLM gptManagerBenchmark](h
 - Helium1-2B
 - Sky-T1-32B
 - SmolLM2-1.7B
+- Mixtral-8x7B
+- Qwen-MoE
+- DeepSeek-V1, V2
 - and many others that we haven't tested yet
 
 ### Features
 - Multi LoRA
-- Tensor Parallelism
+- Tensor Parallelism / Pipeline Parallelism
+- Mixture of Experts
 
 ## What's Next?
 Below features are planned to be supported in Ditto in the near future. Feel free to reach out if you have any questions or suggestions.
 - Quantization
-- MoE
+- Expert Parallelism
 - Multimodal
 - Speculative Decoding
 - Prefix Caching
-- Pipeline Parallelism
 - State Space Model
 - Encode-Decoder Model
 
