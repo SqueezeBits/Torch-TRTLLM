@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from enum import IntEnum
 from typing import Any
 
+import numpy as np
 import tensorrt as trt
 import torch
 
@@ -21,16 +23,43 @@ from .fake_tensor_mode import is_in_fake_tensor_mode
 from .plugin import Plugin
 
 
+class WeightTypeId(IntEnum):
+    """Type ID for weight tensor.
+
+    Attributes:
+        INT8 (int): Type ID for int8 weight tensor.
+        INT4 (int): Type ID for int4 weight tensor.
+    """
+
+    INT8 = 1
+    INT4 = 2
+
+
 class WeightOnlyQuantMatmulPlugin(Plugin):
     """TensorRT plugin for matrix multiplication with weight-only quantization.
 
     Attributes:
-        weight_type_id (int): Type ID for weight tensor (1: int8, 2: int4).
+        weight_type_id (WeightTypeId): Type ID for weight tensor.
         type_id (trt.DataType): Data type for computation.
     """
 
-    weight_type_id: int
+    weight_type_id: WeightTypeId
     type_id: trt.DataType
+
+    @classmethod
+    def get_field_dtype(cls, name: str, value: Any) -> type[np.number]:
+        """Get numpy dtype for a plugin field value.
+
+        Args:
+            name (str): Name of the field
+            value (Any): Value to get dtype for
+
+        Returns:
+            type[np.number]: numpy dtype for the value
+        """
+        if name == "weight_type_id":
+            return np.int32
+        return super().get_field_dtype(name, value)
 
     def __call__(
         self,

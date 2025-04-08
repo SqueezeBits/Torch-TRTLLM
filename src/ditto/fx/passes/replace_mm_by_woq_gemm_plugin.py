@@ -24,6 +24,7 @@ from ...types import DataType
 from ..nodes import GetAttr
 from ..subgraphs import Linear
 from ..targets import WeightOnlyGroupwiseQuantMatmulPlugin, WeightOnlyQuantMatmulPlugin
+from ..targets.weightonly_quantmatmul_plugin import WeightTypeId
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
@@ -112,7 +113,7 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
                 assert len(plugin_inputs) == 3, "Zero point is not supported for weight-only quantization"
                 plugin = WeightOnlyQuantMatmulPlugin(
                     type_id=DataType(dequantize.target.dtype).to(trt.DataType),
-                    weight_type_id=1 if dequantize.target.bits == 8 else 2,
+                    weight_type_id=WeightTypeId.INT8 if dequantize.target.bits == 8 else WeightTypeId.INT4,
                 )
 
             plugin_node = node.graph.call_function(plugin, tuple(plugin_inputs))
