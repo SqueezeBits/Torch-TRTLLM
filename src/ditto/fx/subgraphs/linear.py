@@ -20,13 +20,13 @@ from torch._subclasses import FakeTensor
 from torch.fx import Node
 from typing_extensions import Self
 
-from ...literals import ExpertTypeLiteral, LoraPluginInputPrefix
+from ...literals import LinearTypeLiteral, LoraPluginInputPrefix
 from ...types import verify
 from ..metadata_keys import (
     ACTIVATION_QUANTIZATION,
-    EXPERT_TYPE,
     FREE_LORA_PROTO,
     LAYER_INDEX,
+    LINEAR_TYPE,
     LORA_PREFIX,
     LORA_PROTOS,
 )
@@ -233,7 +233,7 @@ class Linear(Subgraph):
     @property
     def lora_prefix(self) -> LoraPluginInputPrefix | None:
         """The LoRA prefix associated with this linear layer."""
-        return verify(self.mm.meta.get(LORA_PREFIX), as_type=LoraPluginInputPrefix)
+        return verify(self.mm.meta.get(LORA_PREFIX), as_type=LoraPluginInputPrefix)  # type: ignore[arg-type]
 
     @property
     def weight_dequantize_node(self) -> Dequantize | None:
@@ -251,6 +251,22 @@ class Linear(Subgraph):
         assert ACTIVATION_QUANTIZATION not in self.mm.meta, f"Activation quantization already set for {self.mm}"
         self.mm.meta[ACTIVATION_QUANTIZATION] = value
 
-    def mark_expert_type_as(self, expert_type: ExpertTypeLiteral) -> None:
-        """Mark the expert type of this linear layer if it is a part of a MoE layer."""
-        self.mm.meta[EXPERT_TYPE] = expert_type
+    def mark_linear_type_as(self, linear_type: LinearTypeLiteral) -> None:
+        """Mark the linear type of this linear layer if it is a part of a MoE layer."""
+        self.mm.meta[LINEAR_TYPE] = linear_type
+
+    @property
+    def exclude_from_tp(self) -> bool:
+        """Whether to exclude this linear layer from tensor parallelism."""
+        if not (linear_type := verify(self.mm.meta.get(LINEAR_TYPE, None), as_type=LinearTypeLiteral)):  # type: ignore
+            return False
+        # pylint: disable=R0801
+        return linear_type in [
+            "router",
+            "shared_expert_gate",
+            "mla_kv_a_proj",
+            "mla_kv_b_proj",
+            "mla_q_a_proj",
+            "mla_q_b_proj",
+            "mla_o_proj",
+        ]

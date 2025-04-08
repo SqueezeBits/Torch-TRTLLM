@@ -43,6 +43,7 @@ from .recv_plugin import RecvPlugin
 from .rmsnorm_quantization_plugin import RmsnormQuantizationPlugin
 from .rope import FAKE_ROPE_TARGETS
 from .send_plugin import SendPlugin
+from .topk_last_dim_plugin import TopkLastDimPlugin
 from .weightonly_quantmatmul_plugin import (
     WeightOnlyGroupwiseQuantMatmulPlugin,
     WeightOnlyQuantMatmulPlugin,

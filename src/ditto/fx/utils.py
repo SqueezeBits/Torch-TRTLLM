@@ -40,8 +40,8 @@ def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
         Node | None: The closest common ancestor node if one exists, None otherwise
     """
     # Get ancestors with their depths for both nodes x and y
-    ancestors_x = get_ancestors_with_depth(x)
-    ancestors_y = get_ancestors_with_depth(y)
+    ancestors_x = get_nodes_with_depth(x)
+    ancestors_y = get_nodes_with_depth(y)
 
     # Find common ancestors
     common_ancestors = set(ancestors_x.keys()).intersection(ancestors_y.keys())
@@ -64,30 +64,6 @@ def find_closest_common_ancestor(x: Node, y: Node) -> Node | None:
     return closest_common_ancestor
 
 
-def get_ancestors_with_depth(node: Node) -> dict[Node, int]:
-    """Get all ancestor nodes of a given node with their depths.
-
-    Args:
-        node (Node): The node to get ancestors for
-
-    Returns:
-        dict[Node, int]: Dictionary mapping ancestor nodes to their depths
-    """
-    ancestors: dict[Node, int] = {}
-    queue = [(node, 0)]  # Initialize queue with (node, depth)
-
-    while queue:
-        current, depth = queue.pop(0)
-        # If node is not visited or found at a greater depth
-        if current not in ancestors or depth > ancestors[current]:
-            ancestors[current] = depth
-            # Traverse input nodes and increase the depth by 1
-            for input_node in current.all_input_nodes:
-                queue.append((input_node, depth + 1))
-
-    return ancestors
-
-
 def find_closest_common_descendant(x: Node, y: Node) -> Node | None:
     """Find the closest common descendant node between two nodes in a graph.
 
@@ -98,34 +74,44 @@ def find_closest_common_descendant(x: Node, y: Node) -> Node | None:
     Returns:
         Node | None: The closest common descendant node if one exists, None otherwise
     """
-    descendants_x = get_descendants_with_depth(x)
-    descendants_y = get_descendants_with_depth(y)
+    descendants_x = get_nodes_with_depth(x, follow_parent=False)
+    descendants_y = get_nodes_with_depth(y, follow_parent=False)
     common_descendants = set(descendants_x.keys()).intersection(descendants_y.keys())
     if not common_descendants:
         return None
     return min(common_descendants, key=lambda d: descendants_x[d] + descendants_y[d])
 
 
-def get_descendants_with_depth(node: Node) -> dict[Node, int]:
-    """Get all descendant nodes of a given node with their depths.
+def get_nodes_with_depth(
+    node: Node, follow_parent: bool = True, break_if: NodeCriterion = lambda _: False
+) -> dict[Node, int]:
+    """Get all ancestor(descendant) nodes of a given node with their depths.
 
     Args:
-        node (Node): The node to get descendants for
+        node (Node): The node to get ancestor(descendant) nodes for
+        follow_parent (bool, optional): Whether to follow parent nodes (True) or child nodes
+            (False). Defaults to True.
+        break_if (NodeCriterion, optional): Function that returns True to break search
+            at a node. Defaults to lambda _: False.
 
     Returns:
-        dict[Node, int]: Dictionary mapping descendant nodes to their depths
+        dict[Node, int]: Dictionary mapping ancestor(descendant) nodes to their depths
     """
-    descendants: dict[Node, int] = {}
+    visited: dict[Node, int] = {}
     queue = [(node, 0)]
 
     while queue:
         current, depth = queue.pop(0)
-        if current not in descendants or depth > descendants[current]:
-            descendants[current] = depth
-            for user in current.users:
-                queue.append((user, depth + 1))
+        if break_if(current):
+            break
+        if current not in visited or depth > visited[current]:
+            visited[current] = depth
+            if not (next_nodes := list(current.all_input_nodes if follow_parent else current.users)):
+                continue
+            for next_node in next_nodes:
+                queue.append((next_node, depth + 1))
 
-    return descendants
+    return visited
 
 
 def forget_all_descendant_fake_tensors(node: Node) -> None:
@@ -135,7 +121,7 @@ def forget_all_descendant_fake_tensors(node: Node) -> None:
         node (Node): The root node to start removing fake tensors from
     """
     _ = node.meta.pop("val", None)
-    for n in get_descendants_with_depth(node):
+    for n in get_nodes_with_depth(node, follow_parent=False):
         _ = n.meta.pop("val", None)
 
 
@@ -307,8 +293,8 @@ def find_nearest(
     from_node: Node,
     follow_parent: bool = True,
     follow_first_only: bool = True,
-    break_if: NodeCriterion | None = None,
-    continue_if: NodeCriterion | None = None,
+    break_if: NodeCriterion = lambda _: False,
+    continue_if: NodeCriterion = lambda _: False,
     max_depth: int = 15,
 ) -> SubgraphType | None:
     ...
@@ -321,8 +307,8 @@ def find_nearest(
     from_node: Node,
     follow_parent: bool = True,
     follow_first_only: bool = True,
-    break_if: NodeCriterion | None = None,
-    continue_if: NodeCriterion | None = None,
+    break_if: NodeCriterion = lambda _: False,
+    continue_if: NodeCriterion = lambda _: False,
     max_depth: int = 15,
 ) -> NodeType | None:
     ...

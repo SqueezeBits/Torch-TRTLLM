@@ -40,11 +40,12 @@ from .fuse_consecutive_split_concat import FuseConsecutiveSplitConcat
 from .fuse_consecutive_to_copys import FuseConsecutiveToCopys
 from .fuse_dequantizes import FuseDequantizes
 from .fuse_gated_mlp_projections import FuseGatedMLPProjections
-from .fuse_qkv_projections import FuseQKVProjections
+from .fuse_qkv_projections import FuseMLAQKVProjections, FuseQKVProjections
 from .fuse_reciprocal_mul import FuseReciprocalMul
 from .herd_constants_to_the_right import HerdConstantsToTheRight
 from .index_layers import IndexLayers
 from .insert_gather_last_token_ids import InsertGatherLastTokenIds
+from .mark_mla_linears import MarkMLALinears
 from .mark_moe_linears import MarkMoELinears
 from .override_mul_scalar_type_promotion import OverrideMulScalarTypePromotion
 from .parallelize_linear import ParallelizeLinear
@@ -58,6 +59,7 @@ from .replace_mm_by_woq_gemm_plugin import ReplaceMMByWoQGemmPlugin
 from .replace_moe_by_mixture_of_experts_plugin import ReplaceMoEByMoEPlugin
 from .replace_rmsnorm_by_fp8_rmsnorm_plugin import ReplaceRmsNormByFp8RmsNormPlugin
 from .replace_sdpa_by_gpt_attention_plugin import ReplaceSDPAByGPTAttentionPlugin
+from .replace_topk_by_topk_plugin import ReplaceTopkByTopkLastDimPlugin
 from .replace_view_by_reshape import ReplaceViewByReshape
 from .reset_code_gen import ResetCodeGen
 from .resolve_dynamic_reshape import ResolveDynamicReshape

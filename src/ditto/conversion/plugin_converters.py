@@ -38,6 +38,7 @@ from ..fx.targets import (
     RecvPlugin,
     RmsnormQuantizationPlugin,
     SendPlugin,
+    TopkLastDimPlugin,
     WeightOnlyGroupwiseQuantMatmulPlugin,
     WeightOnlyQuantMatmulPlugin,
 )
@@ -421,6 +422,34 @@ def convert_mixture_of_experts_plugin(
     return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="mixture_of_experts")
 
 
+@dynamo_tensorrt_converter(
+    TopkLastDimPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_topk_last_dim_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a TopkLastDimPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The TopkLastDimPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, TopkLastDimPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="topk_last_dim")
+
+
 def _convert_plugin(
     ctx: ConversionContext,
     target: Plugin,
@@ -445,7 +474,7 @@ def _convert_plugin(
     Returns:
         trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
     """
-    creator_name = type(target).__name__.removesuffix("Plugin")
+    creator_name = type(target).__name__.removesuffix("Plugin")  # type: ignore
     plugin_creator = trt.get_plugin_registry().get_plugin_creator(
         creator_name, plugin_version, TRT_LLM_PLUGIN_NAMESPACE
     )

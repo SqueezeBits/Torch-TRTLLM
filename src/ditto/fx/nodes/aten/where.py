@@ -12,14 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ACTIVATION_QUANTIZATION = "activation_quantization"
-FREE_LORA_PROTO = "free_lora_proto"
-LORA_PREFIX = "lora_prefix"
-LAYER_INDEX = "layer_index"
-LORA_PROTOS = "lora_protos"
-LINEAR_TYPE = "linear_type"
-MOE_CONFIG = "moe_config"
-ORIGINAL_TARGET = "original_target"
-STACK_TRACE = "stack_trace"
-TENSOR_META = "tensor_meta"
-VAL = "val"
+# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
+
+import torch
+from torch.fx.node import Node
+
+from .aten_op import ATenOp, FinalATenOp
+
+
+@ATenOp.register(torch.ops.aten.where.self)
+class Where(FinalATenOp):
+    """The final specialization of `torch.ops.aten.where.self`.
+
+    Attributes:
+        condition (Node): The boolean mask tensor
+        this (Node): The tensor to select from where condition is True
+        other (Node): The tensor to select from where condition is False
+    """
+
+    condition: Node
+    this: Node
+    other: Node

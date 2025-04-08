@@ -51,11 +51,13 @@ from .passes import (
     FuseConsecutiveToCopys,
     FuseDequantizes,
     FuseGatedMLPProjections,
+    FuseMLAQKVProjections,
     FuseQKVProjections,
     FuseReciprocalMul,
     HerdConstantsToTheRight,
     IndexLayers,
     InsertGatherLastTokenIds,
+    MarkMLALinears,
     MarkMoELinears,
     OverrideMulScalarTypePromotion,
     ParallelizeLinear,
@@ -68,6 +70,7 @@ from .passes import (
     ReplaceMoEByMoEPlugin,
     ReplaceRmsNormByFp8RmsNormPlugin,
     ReplaceSDPAByGPTAttentionPlugin,
+    ReplaceTopkByTopkLastDimPlugin,
     ReplaceViewByReshape,
     ResolveDynamicReshape,
     RewriteFloatingPointLiteralsAsNodes,
@@ -100,6 +103,8 @@ def get_preoptimization_transform(
     Returns:
         Callable[[GraphModule], GraphModule]: the pre-optimization transform
     """
+    mark_linears_for_tp = [MarkMoELinears, MarkMLALinears]
+
     return get_transform(
         WrapWeightDequantSubgraphs(global_quant_config=global_quant_config, dtype=dtype),
         StashActQuantSubgraphs(global_quant_config=global_quant_config),
@@ -108,7 +113,7 @@ def get_preoptimization_transform(
         AddTRTLLMInputs(argument_hint=argument_hint),
         ResolveDynamicReshape(),
         EliminateCommonExpressions(),
-        MarkMoELinears(mapping=argument_hint.mapping),
+        *[mark_linear(mapping=argument_hint.mapping) for mark_linear in mark_linears_for_tp],
         PropagateTensorParallelism(mapping=argument_hint.mapping),
         ParallelizeLinear(mapping=argument_hint.mapping),
         CanonicalizeMoEAllReduces(mapping=argument_hint.mapping),
@@ -270,15 +275,16 @@ def get_trtllm_conversion_transform(
             tp_size=argument_hint.mapping.tp_size,
             tp_rank=argument_hint.mapping.tp_rank,
         ),
+        ReplaceTopkByTopkLastDimPlugin,
         FuseQKVProjections,
+        FuseMLAQKVProjections,
         FuseGatedMLPProjections,
         FuseDequantizes,
         WrapRoPESubgraphs,
         RewriteIndexAsSingleSlice,
         ReplaceSDPAByGPTAttentionPlugin(
             dtype=dtype,
-            tp_size=argument_hint.mapping.tp_size,
-            tp_rank=argument_hint.mapping.tp_rank,
+            mapping=argument_hint.mapping,
         ),
         IndexLayers,
         BindUnmatchedLoraProtos,

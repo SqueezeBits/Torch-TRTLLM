@@ -17,9 +17,11 @@ import operator
 import tensorrt as trt
 import torch
 from loguru import logger
+from pydantic import Field
 from torch.fx import Graph, GraphModule, Node
 from typing_extensions import Self
 
+from ...configs import TRTLLMMapping
 from ...debug import save_for_debug
 from ...types import DataType, StrictlyTyped, SymbolicShape, expect_identical
 from ..nodes import (
@@ -38,8 +40,13 @@ from ..nodes import (
 )
 from ..subgraphs import FusedLinear, Linear, TrailingReformatPath
 from ..targets import FAKE_ROPE_TARGETS, GPTAttentionPlugin, GPTAttentionPluginInputs, ROPEConfig
-from ..utils import find_nearest, get_tensor_metadata
+from ..utils import find_nearest, get_nodes_with_depth, get_tensor_metadata
 from .infra import GraphOptimizationPass, PassResult
+from .parallelize_linear import (
+    parallelize_column_linear,
+    parallelize_reformat,
+    parallelize_row_linear,
+)
 
 
 class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
@@ -50,8 +57,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
     """
 
     dtype: torch.dtype
-    tp_size: int
-    tp_rank: int
+    mapping: TRTLLMMapping = Field(frozen=True)
 
     # pylint: disable-next=too-many-locals,too-many-statements
     def call(self, graph_module: GraphModule) -> PassResult:
@@ -66,11 +72,14 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
             if not (
                 (sdpa := ScaledDotProductAttention.specialize_from(node))
                 and sdpa.default_scale is not None
-                and (attn := MHA.extract_from(sdpa) or MLA.extract_from(sdpa))
+                and (attn := MHA.extract_from(sdpa) or MLA.extract_from(sdpa, self.mapping.tp_size))
             ):
                 continue
 
-            if not sdpa.is_eligible_for_gpt_attention_plugin(is_mla_enabled=isinstance(attn, MLA)):
+            if not (
+                sdpa.is_eligible_for_gpt_attention_plugin(is_mla_enabled=isinstance(attn, MLA))
+                and attn.rope_config is not None
+            ):
                 continue
             if isinstance(attn, MLA):
                 q_lora_rank = attn.q_lora_rank
@@ -112,14 +121,17 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph, global_rope_config.is_rope)
                 logger.debug(f"Found GPTAttentionPluginInputs for layer {layer_idx}")
 
+            if isinstance(attn, MLA):
+                attn.apply_lazy_tensor_parallelism(self.mapping)
+
             gpt_attention_plugin = GPTAttentionPlugin(
                 layer_idx=layer_idx,
                 num_heads=attn.num_heads,
                 num_kv_heads=attn.num_kv_heads_per_group,
                 layer_idx_in_cache_pool=layer_idx,
                 head_size=attn.embed_dim,
-                tp_size=self.tp_size,
-                tp_rank=self.tp_rank,
+                tp_size=self.mapping.tp_size,
+                tp_rank=self.mapping.tp_rank,
                 type_id=DataType(self.dtype).to(trt.DataType),
                 q_scaling=sdpa.default_scale / sdpa.scale,
                 is_mla_enabled=isinstance(attn, MLA),
@@ -136,11 +148,15 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 if isinstance(attn, MHA):
                     qkv = attn.qkv
                 else:
-                    hidden_states = SqueezeDim.create(graph, attn.hidden_states, 0)
-                    compressed_kv = SqueezeDim.create(graph, attn.compressed_kv, 0)
-                    k_pe = SqueezeDim.create(graph, attn.k_pe, 0)
-                    qkv = Cat.create(graph, [hidden_states, compressed_kv, k_pe], 1).node
-                    fused_q_proj, q_b_proj, kv_b_proj = attn.create_mla_weights(graph)
+                    if attn.is_deepseek_v2_lite:
+                        k_pe = SqueezeDim.create(graph, attn.k_pe, 0)
+                        qkv = Cat.create(graph, [attn.hidden_states, attn.compressed_kv, k_pe], 1).node
+                        fused_q_proj, q_b_proj, kv_b_proj = attn.create_mla_weights(graph)
+                    else:
+                        compressed_q = attn.q_b_proj.mm.this
+                        k_pe = SqueezeDim.create(graph, attn.k_pe, 0)
+                        qkv = Cat.create(graph, [compressed_q, attn.compressed_kv, k_pe], 1).node
+                        fused_q_proj, q_b_proj, kv_b_proj = attn.create_mla_weights(graph)
                     mla_inputs = {
                         "fused_q_proj": fused_q_proj,
                         "q_b_proj": q_b_proj,
@@ -161,13 +177,17 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 # See https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
                 # pylint: disable-next=invalid-name
                 N, *others, Hq, _, Ev = attn.output_shape  # noqa: N806
-                out_reshape = Reshape.create(graph, plugin_node, [N, *others, -1, Hq // self.tp_size, Ev])
+                out_reshape = Reshape.create(graph, plugin_node, [N, *others, -1, Hq // self.mapping.tp_size, Ev])
                 dims = [*range(4 + len(others))]
                 dims[-2], dims[-3] = dims[-3], dims[-2]
                 out_permute = Permute.create(graph, out_reshape, dims)
             node.replace_all_uses_with(out_permute.node)
             modified = True
-        return PassResult(graph_module=graph_module, modified=modified)
+        return PassResult(
+            graph_module=graph_module,
+            modified=modified,
+            require_fake_tensor_prop=isinstance(attn, MLA) and self.mapping.tp_size > 1,
+        )
 
     def create_rope_input_nodes(
         self,
@@ -323,7 +343,6 @@ class MLA(StrictlyTyped):
     This class represents a multi-head latent attention mechanism that is introduced in DeepseekV2.
 
     Attributes:
-        rope_config (ROPEConfig): Configuration for rotary position embeddings
         num_heads (int): Number of attention heads
         embed_dim (int): Dimension of the embeddings
         num_kv_heads (int): Number of key/value heads (for GQA)
@@ -340,7 +359,6 @@ class MLA(StrictlyTyped):
         v_head_dim (int): Head dimension for values
     """
 
-    rope_config: ROPEConfig
     num_heads: int
     embed_dim: int
     num_kv_heads: int
@@ -348,13 +366,17 @@ class MLA(StrictlyTyped):
     hidden_states: Node
     compressed_kv: Node
     k_pe: Node
-    q_proj: Linear
+    q_a_proj: Linear | None
+    q_b_proj: Linear
+    kv_a_proj: Linear
     kv_b_proj: Linear
+    o_proj: Linear
     q_lora_rank: int
     kv_lora_rank: int
     qk_nope_head_dim: int
     qk_rope_head_dim: int
     v_head_dim: int
+    is_deepseek_v2_lite: bool
 
     @property
     def num_kv_heads_per_group(self) -> int:
@@ -365,8 +387,22 @@ class MLA(StrictlyTyped):
         """
         return 1
 
+    @property
+    def rope_config(self) -> ROPEConfig | None:
+        """Get the RoPE configuration from the query projection output node.
+
+        Searches for a RoPE node in the computation graph starting from the query projection
+        output node and returns its configuration if found.
+
+        Returns:
+            ROPEConfig | None: The RoPE configuration if found, None otherwise
+        """
+        if not (rope := find_nearest(Rope, self.q_b_proj.output_node, follow_parent=False, follow_first_only=False)):
+            return None
+        return rope.meta.get("rope_config")
+
     @classmethod
-    def extract_from(cls, sdpa: ScaledDotProductAttention) -> Self | None:
+    def extract_from(cls, sdpa: ScaledDotProductAttention, tp_size: int = 1) -> Self | None:
         """Extracts MLA configuration from a scaled dot product attention node.
 
         Analyzes the computation graph around the SDPA node to identify the MLA pattern
@@ -374,18 +410,18 @@ class MLA(StrictlyTyped):
 
         Args:
             sdpa (ScaledDotProductAttention): The SDPA node to analyze
+            tp_size (int): Tensor parallelism size for model parallelism
 
         Returns:
             Self | None: MLA configuration if pattern matches, None otherwise
         """
-        # TODO: Current pattern is based on deepseek_v2_lite. Should be improved to support normal v2 as well.
         if not (
             (query := get_tensor_metadata(sdpa.query))
             and (key := get_tensor_metadata(sdpa.key))
             and (value := get_tensor_metadata(sdpa.value))
             and (num_kv_heads := expect_identical(key.shape[-3], value.shape[-3])) is not None
             and (
-                q_proj := find_nearest(
+                q_b_proj := find_nearest(
                     Linear,
                     sdpa.query,
                     follow_first_only=False,
@@ -394,7 +430,7 @@ class MLA(StrictlyTyped):
             )
             and (
                 q_split := find_nearest(
-                    SplitWithSizes, q_proj.output_node, follow_parent=False, follow_first_only=False
+                    SplitWithSizes, q_b_proj.output_node, follow_parent=False, follow_first_only=False
                 )
             )
             and (q_split_outputs := [getitem for user in q_split.users if (getitem := GetItem.specialize_from(user))])
@@ -419,9 +455,6 @@ class MLA(StrictlyTyped):
             )
             and len(kv_b_split_outputs) == 2
             and (kv_a_proj := find_nearest(Linear, kv_b_proj.mm.this, follow_first_only=False))
-            and (rope := find_nearest(Rope, q_proj.output_node, follow_parent=False, follow_first_only=False))
-            and (rope_config := rope.meta.get("rope_config"))
-            and (kv_a_proj_meta := kv_a_proj.mm.meta["tensor_meta"])
             and (
                 kv_a_split := find_nearest(
                     SplitWithSizes, kv_a_proj.output_node, follow_parent=False, follow_first_only=False
@@ -433,35 +466,83 @@ class MLA(StrictlyTyped):
                 ]
             )
             and len(kv_a_split_outputs) == 2
+            and (o_proj := find_nearest(Linear, sdpa.value, follow_parent=False, follow_first_only=False))
+            and get_tensor_metadata(q_split_outputs[0].node) is not None
+            and get_tensor_metadata(q_split_outputs[1].node) is not None
+            and get_tensor_metadata(kv_b_split_outputs[1].node) is not None
+            and get_tensor_metadata(kv_a_split.this) is not None
         ):
             return None
 
-        hidden_states = TrailingReformatPath.configure_from(kv_a_proj.mm.this).top
-        compressed_kv = TrailingReformatPath.configure_from(kv_b_proj.mm.this).top
+        is_deepseek_v2_lite = q_b_proj.mm.this == kv_a_proj.mm.this
+        q_a_proj = None
+        if not is_deepseek_v2_lite:
+            q_a_proj = find_nearest(Linear, q_b_proj.mm.this, follow_first_only=False)
+            if q_a_proj is None or q_a_proj.mm.this != kv_a_proj.mm.this:
+                raise NotImplementedError("Found MLA graph that is not supported yet.")
+        hidden_states = kv_a_proj.mm.this
+        compressed_kv = kv_b_proj.mm.this
         k_pe = kv_a_split_outputs[1].node
-        q_lora_rank = q_proj.weight_tensor.shape[0]
+        q_lora_rank = q_b_proj.weight_tensor.shape[0]
         kv_lora_rank = kv_b_proj.weight_tensor.shape[0]
         qk_nope_head_dim = q_split_outputs[0].meta["val"].shape[-1]
         qk_rope_head_dim = q_split_outputs[1].meta["val"].shape[-1]
         v_head_dim = kv_b_split_outputs[1].meta["val"].shape[-1]
+        embed_dim = kv_a_split.this.meta["val"].shape[-1]
 
         return cls(
-            rope_config=rope_config,
-            num_heads=query.shape[-3],
-            embed_dim=kv_a_proj_meta.shape[1],
-            num_kv_heads=num_kv_heads,
+            num_heads=query.shape[-3] // tp_size,
+            embed_dim=embed_dim,
+            num_kv_heads=num_kv_heads // tp_size,
             output_shape=(*query.shape[:-1], value.shape[-1]),
             hidden_states=hidden_states,
             compressed_kv=compressed_kv,
             k_pe=k_pe,
-            q_proj=q_proj,
+            q_a_proj=q_a_proj,
+            q_b_proj=q_b_proj,
+            kv_a_proj=kv_a_proj,
             kv_b_proj=kv_b_proj,
+            o_proj=o_proj,
             q_lora_rank=q_lora_rank,
             kv_lora_rank=kv_lora_rank,
             qk_nope_head_dim=qk_nope_head_dim,
             qk_rope_head_dim=qk_rope_head_dim,
             v_head_dim=v_head_dim,
+            is_deepseek_v2_lite=is_deepseek_v2_lite,
         )
+
+    def apply_lazy_tensor_parallelism(self, mapping: TRTLLMMapping) -> None:
+        """Apply tensor parallelism transformations lazily to the MLA layers.
+
+        Tensor parallelism on MLA linears doesn't follow the original pattern.
+        Instead,
+            - q_a_proj, kv_a_proj: excluded from TP
+            - q_b_proj, kv_b_proj: column parallel
+            - o_proj: row parallel
+        However, applying it in the original step(in the ParallelizeLinear pass) yields a fake tensor propagation error,
+        because shape mismatches occur in the MLA layers that have not been wrapped into the GPTAttention plugin.
+        Those shape mismatches of intermediate activations are meant to be handled inside the GPTAttention plugin.
+        Therefore, we apply tensor parallelism on the MLA layers lazily while wrapping them into the plugin.
+
+        Args:
+            mapping (TRTLLMMapping): The tensor parallelism mapping configuration
+
+
+        Returns:
+            None
+        """
+        if mapping.tp_size == 1:
+            return
+
+        parallelize_column_linear(self.q_b_proj, mapping, inplace=True)
+        parallelize_column_linear(self.kv_b_proj, mapping, inplace=True)
+        parallelize_row_linear(self.o_proj, mapping)
+        intermediate_nodes = get_nodes_with_depth(
+            self.o_proj.mm.this, break_if=lambda n: ScaledDotProductAttention.specialize_from(n) is not None
+        )
+        for node in intermediate_nodes:
+            parallelize_reformat(node, mapping)
+            node.meta.pop("val", None)
 
     def create_mla_weights(self, graph: Graph) -> tuple[Node, Node, Node]:
         """Creates and processes MLA weight tensors.
@@ -478,7 +559,7 @@ class MLA(StrictlyTyped):
                 - Query projection weight node
                 - Concatenated key-value projection weight node
         """
-        q_b_proj_weight: Node | NodeSpecialization = self.q_proj.weight_node
+        q_b_proj_weight: Node | NodeSpecialization = self.q_b_proj.weight_node
         kv_b_proj_weight: Node | NodeSpecialization = self.kv_b_proj.weight_node
 
         q_b_proj_weight_permute = Permute.create(graph, q_b_proj_weight, (1, 0))

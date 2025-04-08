@@ -20,6 +20,7 @@ from ..nodes import ScaledDotProductAttention
 from ..subgraphs import Linear, TrailingReformatPath
 from ..utils import find_nearest
 from .fuse_projections import FuseProjections
+from .replace_sdpa_by_gpt_attention_plugin import MLA
 
 
 class FuseQKVProjections(FuseProjections):
@@ -50,5 +51,27 @@ class FuseQKVProjections(FuseProjections):
             return []
 
         for prefix, proj in zip(("attn_q", "attn_k", "attn_v"), (q_proj, k_proj, v_proj)):
-            proj.bind_free_lora_proto(with_prefix=prefix)
+            proj.bind_free_lora_proto(with_prefix=prefix)  # type: ignore
         return [q_proj, k_proj, v_proj]
+
+
+class FuseMLAQKVProjections(FuseProjections):
+    """Fuse input projections of a MLA layer to a single Linear subgraph."""
+
+    @property
+    def fused_lora_prefix(self) -> LoraPluginInputPrefix | None:
+        return "attn_qkv"
+
+    def preprocess(self, graph_module: GraphModule) -> None:
+        super().preprocess(graph_module)
+        save_for_debug("before_qkv_fusion", graph_module)
+
+    def find_projections(self, node: Node) -> list[Linear]:
+        if not (
+            (sdpa := ScaledDotProductAttention.specialize_from(node))
+            and (mla := MLA.extract_from(sdpa))
+            and (q_a_proj := mla.q_a_proj)
+        ):
+            return []
+
+        return [q_a_proj, mla.kv_a_proj]

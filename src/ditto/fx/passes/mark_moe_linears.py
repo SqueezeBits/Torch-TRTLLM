@@ -45,7 +45,7 @@ class MarkMoELinears(NodewiseOptimizationPass):
         if self.mapping.tp_size == 1 or not (moe := MoESubgraph.configure_from(node)):
             return {}
 
-        moe.router.mark_expert_type_as("router")
+        moe.router.mark_linear_type_as("router")
         for _, _, down_proj in moe.shared_experts:
             if shared_expert_gating := MulTensorTensor.specialize_from(list(down_proj.output_node.users)[0]):
                 # Normally, the output of shared expert is directly added to the output of MoE layers.
@@ -56,6 +56,6 @@ class MarkMoELinears(NodewiseOptimizationPass):
                     shared_expert_gate = find_nearest(Linear, shared_expert_gating.this)
                 if shared_expert_gate is None:
                     raise NotImplementedError(f"Unsupported shared expert gate found from: {shared_expert_gating}")
-                shared_expert_gate.mark_expert_type_as("shared_expert_gate")
+                shared_expert_gate.mark_linear_type_as("shared_expert_gate")
 
         return {node: ModifiedInsideThePass()}

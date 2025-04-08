@@ -195,13 +195,13 @@ class MoESubgraph(Subgraph):
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
         # The common pattern for Mixture of Experts (MoE) is:
-        # softmax -> top-k -> one-hot
+        # router -> softmax -> top-k -> one-hot
         # This pattern is used in Qwen and Mixtral.
         if not (
             (one_hot := OneHot.configure_from(node))
             and (get_item := TrailingReformatPath.configure_from(one_hot.this).top)
             and (topk := TopK.configure_from(get_item))
-            and (softmax := Softmax.specialize_from(topk.this))
+            and (softmax := find_nearest(Softmax, topk.this, follow_first_only=False))
             and (router := TrailingReformatPath.traceback(Linear, softmax.this))
         ):
             return None
@@ -241,10 +241,19 @@ class MoESubgraph(Subgraph):
             if len(shared_experts) > 0 and down_proj in [down for _, _, down in shared_experts]:
                 continue
             for linear in (linears := (gated_mlp.up_proj, gated_mlp.gate_proj, down_proj)):
-                linear.mark_expert_type_as("shared_expert")
+                linear.mark_linear_type_as("shared_expert")
             shared_experts.append(linears)
 
-        router_logits = softmax.this
+        if Softmax.specialize_from(topk.this):
+            # greedy
+            router_logits = softmax.this
+        else:
+            # group_limited_greedy
+            # This topk method is used in DeepSeek-V2. Deepseek-V2-Lite uses greedy method.
+            #
+            # Currently, it only finds proper router logits and pattern matching
+            # for full group_limited_greedy graph is not implemented, as it's not necessary.
+            router_logits = topk.this
         experts.sort(key=lambda expert: expert.index)
         final_hidden_states = experts[-1].final_hidden_states
         return cls(
