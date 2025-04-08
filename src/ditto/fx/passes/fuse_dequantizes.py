@@ -12,13 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Generator
-
 import torch
-from torch.fx import GraphModule, Node
+from torch.fx import Node
 
 from ...quantization import QuantizeMode
 from ..nodes import Cat, Dequantize, GetAttr
+from ..utils import attr_name_generator
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
@@ -26,17 +25,6 @@ class FuseDequantizes(NodewiseOptimizationPass):
     """Fuse consecutive dequantize nodes with cat node."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
-        def name_generator(graph_module: GraphModule) -> Generator[str, None, None]:
-            name = "dequantize_fused_constant"
-            if not hasattr(graph_module, name):
-                yield name
-
-            idx = 1
-            while True:
-                if not hasattr(graph_module, f"{name}_{idx}"):
-                    yield f"{name}_{idx}"
-                idx += 1
-
         if not (
             (cat := Cat.specialize_from(node))
             and len(dequantize_nodes := cat.tensors) > 1
@@ -53,7 +41,7 @@ class FuseDequantizes(NodewiseOptimizationPass):
         ):
             return {}
 
-        name_gen = name_generator(graph_module)
+        name_gen = attr_name_generator(graph_module, "dequantize_fused_constant")
         input_nodes: list[Node | None] = []
 
         fused_qweight_tensor = fuse_weights(
@@ -105,22 +93,29 @@ def are_fusible(dequantizes: list[Dequantize]) -> bool:
     if not (
         all(dequantizes[0].target.bits == dequantize.target.bits for dequantize in dequantizes[1:])
         and all(dequantizes[0].target.mode == dequantize.target.mode for dequantize in dequantizes[1:])
-        and all(dequantizes[0].target.algorithm == dequantize.target.algorithm for dequantize in dequantizes[1:])
+        and dequantizes[0].target.mode in (QuantizeMode.PER_TENSOR, QuantizeMode.PER_GROUP, QuantizeMode.PER_CHANNEL)
         and (qweight_nodes := [dequantize.qweight for dequantize in dequantizes])
         and (scale_nodes := [dequantize.scale for dequantize in dequantizes])
     ):
         return False
 
-    for nodes in (qweight_nodes, scale_nodes):
-        if not (
-            (attrs := [attr for node in nodes if (attr := GetAttr.specialize_from(node)) is not None])
-            and len(attrs) == len(nodes)
-            and all(
-                attrs[0].tensor.shape[0] == attr.tensor.shape[0] and attrs[0].tensor.dtype == attr.tensor.dtype
-                for attr in attrs[1:]
-            )
-        ):
-            return False
+    if not (
+        (attrs := [attr for node in qweight_nodes if (attr := GetAttr.specialize_from(node)) is not None])
+        and len(attrs) == len(qweight_nodes)
+        and all(
+            attrs[0].tensor.shape[0] == attr.tensor.shape[0] and attrs[0].tensor.dtype == attr.tensor.dtype
+            for attr in attrs[1:]
+        )
+        and (attrs := [attr for node in scale_nodes if (attr := GetAttr.specialize_from(node)) is not None])
+        and len(attrs) == len(scale_nodes)
+        and all(
+            attrs[0].tensor.shape[1 if dequantizes[0].target.mode == QuantizeMode.PER_CHANNEL else 0]
+            == attr.tensor.shape[1 if dequantizes[0].target.mode == QuantizeMode.PER_CHANNEL else 0]
+            and attrs[0].tensor.dtype == attr.tensor.dtype
+            for attr in attrs[1:]
+        )
+    ):
+        return False
 
     return True
 
@@ -159,5 +154,7 @@ def fuse_scales(scales: list[torch.Tensor], *, quant_mode: QuantizeMode) -> torc
     assert len(scales) > 1
     if quant_mode == QuantizeMode.PER_TENSOR:
         return torch.stack(scales).max(dim=0).values
+    if quant_mode == QuantizeMode.PER_CHANNEL:
+        return torch.cat(scales, dim=0)
 
     return torch.cat(scales, dim=1)

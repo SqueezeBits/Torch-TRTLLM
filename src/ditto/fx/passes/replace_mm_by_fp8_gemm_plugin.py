@@ -12,18 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Generator
-
 import tensorrt as trt
 import torch
-from torch.fx import GraphModule, Node
+from torch.fx import Node
 
 from ...quantization import QuantizeMode
 from ...types import DataType
 from ..nodes import Dequantize, GetAttr, Permute
 from ..subgraphs import Linear
 from ..targets import GemmPlugin, Quantizer
-from ..utils import get_tensor_metadata
+from ..utils import attr_name_generator, get_tensor_metadata
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
@@ -31,36 +29,28 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
     """Replace torch.ops.aten.mm.default by GemmPlugin for FP8 precision (required for trtllm)."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
-        def name_generator(graph_module: GraphModule) -> Generator[str, None, None]:
-            name = "act_scale"
-            if not hasattr(graph_module, name):
-                yield name
-
-            idx = 1
-            while True:
-                if not hasattr(graph_module, f"{name}_{idx}"):
-                    yield f"{name}_{idx}"
-                idx += 1
-
         if not (
             (linear := Linear.configure_from(node))
             and (this := get_tensor_metadata(linear.mm.this))
             and len(this.shape) == 2
             and (other := get_tensor_metadata(linear.mm.other))
             and len(other.shape) == 2
-            and (act_scale_tensor := linear.activation_quant_scale) is not None
+            and (activation_quantization := linear.activation_quantization) is not None
+            and activation_quantization.quant_mode == QuantizeMode.PER_TENSOR
+            and activation_quantization.scale is not None
             and (dequantize := Dequantize.specialize_from(linear.mm.other)) is not None
             and dequantize.qweight_tensor is not None
             and dequantize.qweight_tensor.dtype == torch.float8_e4m3fn
             and dequantize.scale_tensor is not None
-            and dequantize.target.mode in (QuantizeMode.PER_TENSOR, QuantizeMode.PER_CHANNEL)
+            and dequantize.target.mode == QuantizeMode.PER_TENSOR
+            and (graph_module := node.graph.owning_module) is not None
         ):
             return {}
 
-        name_gen = name_generator(node.graph.owning_module)
+        name_gen = attr_name_generator(graph_module, "activation_quant_scale")
 
         with node.graph.inserting_before(node):
-            act_scale_attr = GetAttr.create(node.graph, next(name_gen), act_scale_tensor)
+            act_scale_attr = GetAttr.create(node.graph, next(name_gen), activation_quantization.scale)
             quantize = node.graph.call_function(
                 Quantizer(),
                 (
@@ -74,7 +64,7 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
             transb=1,
             type_id=DataType(dequantize.target.dtype).to(trt.DataType),
             use_fp8=1,
-            alpha=(act_scale_tensor * dequantize.scale_tensor).item(),
+            alpha=(activation_quantization.scale * dequantize.scale_tensor).item(),
         )
         with node.graph.inserting_before(node):
             permute = Permute.create(node.graph, dequantize.qweight, (1, 0))

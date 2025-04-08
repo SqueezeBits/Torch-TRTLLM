@@ -17,8 +17,45 @@ from typing import Any
 
 from torch.fx.node import Node
 
-from ..targets import GemmPlugin, GPTAttentionPlugin, WeightOnlyGroupwiseQuantMatmulPlugin, WeightOnlyQuantMatmulPlugin
+from ..targets import (
+    Fp8RowwiseGemmPlugin,
+    GemmPlugin,
+    GPTAttentionPlugin,
+    QuantizePerTokenPlugin,
+    RmsnormQuantizationPlugin,
+    WeightOnlyGroupwiseQuantMatmulPlugin,
+    WeightOnlyQuantMatmulPlugin,
+)
 from .call_function import CallFunction
+
+
+class Fp8RowwiseGemm(CallFunction):
+    """A plugin specialization representing a gemm plugin node.
+
+    Attributes:
+        this (Node): The first input node
+        other (Node): The second input node (expected to be a weight tensor)
+        token_scaling (Node): The token scaling node
+        channel_scaling (Node): The channel scaling node
+    """
+
+    this: Node
+    other: Node
+    token_scaling: Node
+    channel_scaling: Node
+
+    @property
+    def target(self) -> Fp8RowwiseGemmPlugin:
+        assert isinstance(t := super().target, Fp8RowwiseGemmPlugin)
+        return t
+
+    @classmethod
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
+        return ()
+
+    @classmethod
+    def validate_node(cls, node: Node) -> bool:
+        return isinstance(node.target, Fp8RowwiseGemmPlugin)
 
 
 class Gemm(CallFunction):
@@ -69,6 +106,62 @@ class GPTAttention(CallFunction):
     @classmethod
     def validate_node(cls, node: Node) -> bool:
         return isinstance(node.target, GPTAttentionPlugin)
+
+
+class QuantizePerToken(CallFunction):
+    """A plugin specialization representing a quantize per token plugin node.
+
+    Attributes:
+        this (Node): The first input node
+        clamp_val (Node): The clamp value node
+    """
+
+    this: Node
+    clamp_val: Node
+
+    @property
+    def target(self) -> QuantizePerTokenPlugin:
+        assert isinstance(t := super().target, QuantizePerTokenPlugin)
+        return t
+
+    @classmethod
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
+        return ()
+
+    @classmethod
+    def validate_node(cls, node: Node) -> bool:
+        return isinstance(node.target, QuantizePerTokenPlugin)
+
+
+class RmsnormQuantization(CallFunction):
+    """A plugin specialization representing a rmsnorm quantization plugin node.
+
+    Attributes:
+        this (Node): The first input node
+        weight (Node): The second input node (expected to be a weight tensor)
+        bias (Node): The third input node (expected to be a bias tensor)
+        scale (Node): The fourth input node (expected to be a scale tensor)
+        clamp_val (Node | None): The fifth input node (expected to be a clamp value tensor)
+    """
+
+    this: Node
+    weight: Node
+    bias: Node
+    scale: Node
+    clamp_val: Node | None = None
+
+    @property
+    def target(self) -> RmsnormQuantizationPlugin:
+        assert isinstance(t := super().target, RmsnormQuantizationPlugin)
+        return t
+
+    @classmethod
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
+        return ()
+
+    @classmethod
+    def validate_node(cls, node: Node) -> bool:
+        return isinstance(node.target, RmsnormQuantizationPlugin)
 
 
 class WeightOnlyQuantMatmul(CallFunction):

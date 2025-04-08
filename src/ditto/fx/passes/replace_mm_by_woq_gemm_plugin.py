@@ -20,11 +20,11 @@ from tensorrt_llm.quantization import QuantAlgo
 from torch.fx import Node
 from transformers.utils.quantization_config import QuantizationMethod
 
-from ...quantization import inference_trtllm_quant_algo
 from ...types import DataType
 from ..nodes import GetAttr
 from ..subgraphs import Linear
 from ..targets import WeightOnlyGroupwiseQuantMatmulPlugin, WeightOnlyQuantMatmulPlugin
+from ..targets.weightonly_quantmatmul_plugin import WeightTypeId
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
@@ -40,7 +40,7 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (linear := Linear.configure_from(node))
-            and linear.activation_quant_scale is None
+            and linear.activation_quantization is None
             and (dequantize := linear.weight_dequantize_node) is not None
             and (unpacked_weight := GetAttr.specialize_from(dequantize.qweight))
             and (scale := GetAttr.specialize_from(dequantize.scale))
@@ -73,22 +73,26 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
             dequantize.target.bits,
             dequantize.target.global_quant_config.hf_quant_method,
             model_dtype=self.model_dtype,
+            per_group=dequantize.target.group_size is not None,
         )
         with node.graph.inserting_before(unpacked_weight.node):
-            postprocessed_qweight = GetAttr.create(node.graph, unpacked_weight.name, postprocessed_qweight_tensor)
+            postprocessed_qweight = GetAttr.create(
+                node.graph, f"{unpacked_weight.name}_postprocessed", postprocessed_qweight_tensor
+            )
 
         plugin_inputs: list[Node] = [linear.input_node, postprocessed_qweight.node, scale.node]
 
         if zeros := GetAttr.specialize_from(dequantize.zeros) if dequantize.zeros is not None else None:
             postprocessed_zeros_tensor = postprocess_zeros_for_trtllm(
                 zeros.tensor,
-                dequantize.target.bits,
                 dequantize.target.global_quant_config.hf_quant_method,
                 scale=scale.tensor,
                 model_dtype=self.model_dtype,
             )
             with node.graph.inserting_before(zeros.node):
-                postprocessed_zeros = GetAttr.create(node.graph, zeros.name, postprocessed_zeros_tensor)
+                postprocessed_zeros = GetAttr.create(
+                    node.graph, f"{zeros.name}_postprocessed", postprocessed_zeros_tensor
+                )
                 plugin_inputs.append(postprocessed_zeros.node)
 
         with node.graph.inserting_before(node):
@@ -106,9 +110,10 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
                     group_size=dequantize.target.group_size,
                 )
             else:
+                assert len(plugin_inputs) == 3, "Zero point is not supported for weight-only quantization"
                 plugin = WeightOnlyQuantMatmulPlugin(
                     type_id=DataType(dequantize.target.dtype).to(trt.DataType),
-                    weight_type_id=DataType(postprocessed_qweight_tensor.dtype).to(trt.DataType),
+                    weight_type_id=WeightTypeId.INT8 if dequantize.target.bits == 8 else WeightTypeId.INT4,
                 )
 
             plugin_node = node.graph.call_function(plugin, tuple(plugin_inputs))
@@ -142,6 +147,7 @@ def postprocess_qweight_for_trtllm(
     quant_method: QuantizationMethod,
     *,
     model_dtype: torch.dtype,
+    per_group: bool = False,
 ) -> torch.Tensor:
     """Postprocess the quantized weight tensor for TensorRT-LLM.
 
@@ -150,19 +156,20 @@ def postprocess_qweight_for_trtllm(
         bits (int): The number of bits used for quantization
         quant_method (QuantizationMethod): The quantization method used
         model_dtype (torch.dtype): The model data type.
+        per_group (bool): Whether the quantization is per group. Defaults to False.
 
     Returns:
         torch.Tensor: The postprocessed weight tensor for TensorRT-LLM
     """
-    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
+    assert bits in (4, 8), "Only 4-bit or 8-bit quantization is supported for Weight-Only Quantization of TensorRT-LLM"
+    if quant_method in (QuantizationMethod.AWQ, QuantizationMethod.GPTQ, QuantizationMethod.COMPRESSED_TENSORS):
         assert qweight.dtype in (torch.uint8, torch.int8), f"Unsupported tensor dtype: {qweight.dtype=}"
-        assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
         if bits == 4:
             qweight = (qweight[:, 1::2] * 16 + qweight[:, ::2]).view(torch.int8)
         weight_dtype = torch.int8 if bits == 8 else torch.quint4x2
-        qweight = torch.ops.trtllm.preprocess_weights_for_mixed_gemm(qweight, weight_dtype, torch.float16).view(
-            model_dtype
-        )
+        qweight = torch.ops.trtllm.preprocess_weights_for_mixed_gemm(qweight, weight_dtype, torch.float16)
+        if per_group:
+            qweight = qweight.view(model_dtype)
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
 
@@ -171,7 +178,6 @@ def postprocess_qweight_for_trtllm(
 
 def postprocess_zeros_for_trtllm(
     zeros: torch.Tensor,
-    bits: int,
     quant_method: QuantizationMethod,
     *,
     scale: torch.Tensor,
@@ -181,7 +187,6 @@ def postprocess_zeros_for_trtllm(
 
     Args:
         zeros (torch.Tensor): The quantized zero point tensor
-        bits (int): The number of bits used for quantization
         quant_method (QuantizationMethod): The quantization method used
         scale (torch.Tensor): The scale tensor
         model_dtype (torch.dtype): The model data type
@@ -189,11 +194,37 @@ def postprocess_zeros_for_trtllm(
     Returns:
         torch.Tensor: The postprocessed zero point tensor for TensorRT-LLM
     """
-    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
-        assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
+    if quant_method in (QuantizationMethod.AWQ, QuantizationMethod.COMPRESSED_TENSORS, QuantizationMethod.GPTQ):
         zeros = zeros * scale
         zeros = zeros.to(model_dtype)
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
 
     return zeros
+
+
+def inference_trtllm_quant_algo(
+    bits: int, compute_dtype: torch.dtype, *, hf_quant_method: QuantizationMethod
+) -> QuantAlgo:
+    """Infer the quantization algorithm for TensorRT-LLM .
+
+    Args:
+        bits (int): The number of bits used for quantization
+        compute_dtype (torch.dtype): The compute data type
+        hf_quant_method (QuantizationMethod): The quantization method used by the Hugging Face model
+
+    Returns:
+        QuantAlgo: The quantization algorithm for TensorRT-LLM
+    """
+    assert bits in (4, 8), "Only 4-bit and 8-bit quantization is supported for TensorRT-LLM"
+    if hf_quant_method in (QuantizationMethod.AWQ, QuantizationMethod.COMPRESSED_TENSORS, QuantizationMethod.GPTQ):
+        quant_algo: str = f"W{bits}A{compute_dtype.itemsize * 8}"
+        if hf_quant_method == QuantizationMethod.GPTQ:
+            quant_algo = f"{quant_algo}_GPTQ"
+        elif hf_quant_method == QuantizationMethod.AWQ:
+            quant_algo = f"{quant_algo}_AWQ"
+    else:
+        raise RuntimeError(f"Unsupported quantization method: {hf_quant_method}")
+
+    assert quant_algo in QuantAlgo, f"Unsupported quantization algorithm: {quant_algo}"
+    return QuantAlgo[quant_algo]

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Iterable
+from collections.abc import Generator, Iterable
 from typing import TYPE_CHECKING, TypeVar, cast, overload
 from weakref import WeakKeyDictionary
 
@@ -368,3 +368,22 @@ def find_nearest(
         else:
             queue.extend((next_node, depth + 1) for next_node in next_nodes)
     return None
+
+
+def attr_name_generator(graph_module: GraphModule, basename: str) -> Generator[str, None, None]:
+    """Generate unique names for GetAttr nodes in a graph module.
+
+    GetAttr nodes are used to register tensors in a graph module. So, it needs unique names.
+
+    Args:
+        graph_module (GraphModule): The graph module to generate names for
+        basename (str): The base name for the generated names
+    """
+    if not hasattr(graph_module, basename):
+        yield basename
+
+    idx = 1
+    while True:
+        if not hasattr(graph_module, f"{basename}_{idx}"):
+            yield f"{basename}_{idx}"
+        idx += 1

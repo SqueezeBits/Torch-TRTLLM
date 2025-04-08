@@ -19,7 +19,7 @@ cd Torch-TRTLLM
 ```
 Then, run the following command to create an environment with dependencies installed.
 ```
-conda create -f conda/environment.yml
+conda env create --file conda/environment.yml
 ```
 Finally, install Ditto.
 ```
@@ -135,58 +135,57 @@ We do not support building a tensor-parallelized LoRA-enabled engine yet, but we
 
 #### Full Usage
 ```
- Usage: ditto build [OPTIONS] MODEL_ID                                                                                                                                     
-                                                                                                                                                                           
- Build a TensorRT-LLM engine from a pretrained model.                                                                                                                      
-                                                                                                                                                                           
-╭─ Arguments ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ *    model_id      TEXT  A pretrained model name or path. [default: None] [required]                                                                                    │
-╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─ Options ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ --add-output                                                                 TEXT                             List of node names to add as output. See docs/DEBUG.md    │
-│                                                                                                               for details.                                              │
-│                                                                                                               [default: <class 'list'>]                                 │
-│ --peft-ids                        -p                                         TEXT                             List of LoRA adapter IDs to apply to the model.           │
-│                                                                                                               [default: <class 'list'>]                                 │
-│ --output-dir                      -o                                         TEXT                             Path to the output directory. If not specified,           │
-│                                                                                                               `./engines/<model_id>` will be used.                      │
-│ --dtype                                                                      [auto|float32|float16|bfloat16]  Data type to use for the model. Defaults to `auto`.       │
-│                                                                                                               [default: auto]                                           │
-│ --verbose-failure                     --no-verbose-failure                                                    Show local variable values on failure.                    │
-│                                                                                                               [default: no-verbose-failure]                             │
-│ --trust-remote-code                   --no-trust-remote-code                                                  Trust remote code from Hugging Face Hub.                  │
-│                                                                                                               [default: no-trust-remote-code]                           │
-│ --run-matmuls-in-fp32                 --no-run-matmuls-in-fp32                                                Run matmuls in fp32. [default: no-run-matmuls-in-fp32]    │
-│ --run-activations-in-model-dtype      --no-run-activations-in-model-dtype                                     Run activations in model dtype.                           │
-│                                                                                                               [default: run-activations-in-model-dtype]                 │
-│ --max-batch-size                                                             INTEGER                          Maximum number of requests that the engine can schedule.  │
-│                                                                                                               [default: 2048]                                           │
-│ --max-seq-len                                                                INTEGER                          Maximum total length of one request, including prompt and │
-│                                                                                                               generated output.                                         │
-│                                                                                                               [default: None]                                           │
-│ --max-num-tokens                                                             INTEGER                          Maximum number of batched input tokens after padding is   │
-│                                                                                                               removed in each batch.                                    │
-│                                                                                                               [default: 8192]                                           │
-│ --opt-num-tokens                                                             INTEGER                          Optimal number of batched input tokens after padding is   │
-│                                                                                                               removed in each batch.                                    │
-│                                                                                                               [default: None]                                           │
-│ --max-beam-width                                                             INTEGER                          Maximum number of beams for beam search decoding.         │
-│                                                                                                               [default: 1]                                              │
-│ --tp-size                                                                    INTEGER RANGE [x>=1]             N-way tensor parallelism size. [default: 1]               │
-│ --logits-dtype                                                               [float32|float16|bfloat16]       Data type of logits. Defaults to `float32`.               │
-│                                                                                                               [default: float32]                                        │
-│ --gather-context-logits               --no-gather-context-logits                                              Enable gathering context logits.                          │
-│                                                                                                               [default: no-gather-context-logits]                       │
-│ --gather-generation-logits            --no-gather-generation-logits                                           Enable gathering generation logits.                       │
-│                                                                                                               [default: no-gather-generation-logits]                    │
-│ --gather-all-logits                   --no-gather-all-logits                                                  Equivalent to `--gather-context-logits                    │
-│                                                                                                               --gather-generation-logits`.                              │
-│                                                                                                               [default: no-gather-all-logits]                           │
-│ --run-routers-in-model-dtype          --no-run-routers-in-model-dtype                                         Run linear layers for routers in MoE models in model      │
-│                                                                                                               dtype instead of FP32.                                    |
-│                                                                                                               [default: no-run-routers-in-model-dtype]                  │
-│ --help                            -h                                                                          Show this message and exit.                               │
-╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ Usage: ditto build [OPTIONS] MODEL_ID
+
+ Build a TensorRT-LLM engine from a pretrained model.
+
+╭─ Arguments ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ *    model_id      TEXT  A pretrained model name or path. [default: None] [required]                                                                                            │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ --add-output                                                                 TEXT                             List of node names to add as output. See docs/DEBUG.md for        │
+│                                                                                                               details.                                                          │
+│                                                                                                               [default: <class 'list'>]                                         │
+│ --peft-ids                        -p                                         TEXT                             List of LoRA adapter IDs to apply to the model.                   │
+│                                                                                                               [default: <class 'list'>]                                         │
+│ --output-dir                      -o                                         TEXT                             Path to the output directory. If not specified,                   │
+│                                                                                                               `./engines/<model_id>` will be used.                              │
+│ --dtype                                                                      [auto|float32|float16|bfloat16]  Data type to use for the model. Defaults to `auto`.               │
+│                                                                                                               [default: auto]                                                   │
+│ --verbose-failure                     --no-verbose-failure                                                    Show local variable values on failure.                            │
+│                                                                                                               [default: no-verbose-failure]                                     │
+│ --trust-remote-code                   --no-trust-remote-code                                                  Trust remote code from Hugging Face Hub.                          │
+│                                                                                                               [default: no-trust-remote-code]                                   │
+│ --run-matmuls-in-fp32                 --no-run-matmuls-in-fp32                                                Run matmuls in fp32. [default: no-run-matmuls-in-fp32]            │
+│ --run-activations-in-model-dtype      --no-run-activations-in-model-dtype                                     Run activations in model dtype.                                   │
+│                                                                                                               [default: run-activations-in-model-dtype]                         │
+│ --max-batch-size                                                             INTEGER                          Maximum number of requests that the engine can schedule.          │
+│                                                                                                               [default: 2048]                                                   │
+│ --max-seq-len                                                                INTEGER                          Maximum total length of one request, including prompt and         │
+│                                                                                                               generated output.                                                 │
+│                                                                                                               [default: None]                                                   │
+│ --max-num-tokens                                                             INTEGER                          Maximum number of batched input tokens after padding is removed   │
+│                                                                                                               in each batch.                                                    │
+│                                                                                                               [default: 8192]                                                   │
+│ --opt-num-tokens                                                             INTEGER                          Optimal number of batched input tokens after padding is removed   │
+│                                                                                                               in each batch.                                                    │
+│                                                                                                               [default: None]                                                   │
+│ --max-beam-width                                                             INTEGER                          Maximum number of beams for beam search decoding. [default: 1]    │
+│ --pp-size                                                                    INTEGER RANGE [x>=1]             N-way pipeline parallelism size. [default: 1]                     │
+│ --tp-size                                                                    INTEGER RANGE [x>=1]             N-way tensor parallelism size. [default: 1]                       │
+│ --logits-dtype                                                               [float32|float16|bfloat16]       Data type of logits. Defaults to `float32`. [default: float32]    │
+│ --gather-context-logits               --no-gather-context-logits                                              Enable gathering context logits.                                  │
+│                                                                                                               [default: no-gather-context-logits]                               │
+│ --gather-generation-logits            --no-gather-generation-logits                                           Enable gathering generation logits.                               │
+│                                                                                                               [default: no-gather-generation-logits]                            │
+│ --gather-all-logits                   --no-gather-all-logits                                                  Equivalent to `--gather-context-logits                            │
+│                                                                                                               --gather-generation-logits`.                                      │
+│                                                                                                               [default: no-gather-all-logits]                                   │
+│ --run-routers-in-model-dtype          --no-run-routers-in-model-dtype                                         Run linear layers for routers in MoE models in model dtype        │
+│                                                                                                               instead of FP32.                                                  │
+│                                                                                                               [default: no-run-routers-in-model-dtype]                          │
+│ --help                            -h                                                                          Show this message and exit.                                       │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 

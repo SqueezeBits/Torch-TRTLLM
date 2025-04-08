@@ -204,10 +204,9 @@ class DataType:
         Raises:
             AssertionError: If a mapping for the given type pair is already defined.
         """
-        assert type_pair not in cls.MAPPING, (
-            f"{cls.__name__}[{type_pair[0]}, {type_pair[1]}] is already defined with "
-            f"mapping {cls.MAPPING[type_pair]}"
-        )
+        assert (
+            type_pair not in cls.MAPPING
+        ), f"{cls.__name__}[{type_pair[0]}, {type_pair[1]}] is already defined with mapping {cls.MAPPING[type_pair]}"
         cls.MAPPING[type_pair] = mapping
 
 
@@ -279,10 +278,33 @@ def literal_to_torch_mapping() -> dict[DTypeLiteral, torch.dtype]:
         "bfloat16": torch.bfloat16,
         "float32": torch.float32,
         "int8": torch.int8,
+        "uint8": torch.uint8,
         "int32": torch.int32,
         "int64": torch.int64,
         "bool": torch.bool,
         "fp8": torch.float8_e4m3fn,
+    }
+
+
+@DataType.define_from
+def trt_to_literal_mapping() -> dict[trt.DataType, DTypeLiteral]:
+    """Create `trt.DataType` to `DTypeLiteral` compatibility map.
+
+    * All TensorRT data types can be mapped to a PyTorch data type.
+
+    Returns:
+        dict[trt.DataType, torch.dtype]: the compatibility map.
+    """
+    return {
+        trt.DataType.BF16: "bfloat16",
+        trt.DataType.BOOL: "bool",
+        trt.DataType.FLOAT: "float32",
+        trt.DataType.FP8: "fp8",
+        trt.DataType.HALF: "float16",
+        trt.DataType.INT32: "int32",
+        trt.DataType.INT64: "int64",
+        trt.DataType.INT8: "int8",
+        trt.DataType.UINT8: "uint8",
     }
 
 

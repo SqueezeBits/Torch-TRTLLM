@@ -19,8 +19,9 @@ from tensorrt_llm.functional import AllReduceConfig, AllReduceFusionOp, AllReduc
 from torch.fx import Graph, GraphModule, Node
 
 from ...configs import TRTLLMMapping
+from ...constants import INPUT_IDS
 from ...types import DataType
-from ..nodes import Embedding, Expand, GetAttr, Permute, Reshape, Slice
+from ..nodes import Expand, GetAttr, Permute, Reshape, Slice
 from ..subgraphs import FusedLinear, Linear
 from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs
 from ..utils import forget_all_descendant_fake_tensors, get_val
@@ -78,15 +79,22 @@ class ParallelizeLinear(GraphOptimizationPass):
 
         if overall_modified:
             # resolve reformatting nodes
-            embedding: Embedding | None = None
             for node in graph.nodes:
-                if node.meta.get("tp_type", TensorParallelType.NONE) == TensorParallelType.NONE:
-                    embedding = embedding or Embedding.specialize_from(node)
-                    continue
-                parallelize_reformat(node, self.mapping)
+                if node.meta.get("tp_type", TensorParallelType.NONE) != TensorParallelType.NONE:
+                    parallelize_reformat(node, self.mapping)
 
-            assert embedding is not None, "embedding node not found"
-            forget_all_descendant_fake_tensors(embedding.node)
+            assert (
+                len(
+                    input_ids := [
+                        placeholder
+                        for placeholder in graph.find_nodes(op="placeholder")
+                        if placeholder.name == INPUT_IDS
+                    ]
+                )
+                == 1
+            ), "input_ids placeholder not found"
+            for user in input_ids[0].users:
+                forget_all_descendant_fake_tensors(user)
 
         return PassResult(
             graph_module=graph_module, modified=overall_modified, require_fake_tensor_prop=overall_modified

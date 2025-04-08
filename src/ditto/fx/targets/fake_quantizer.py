@@ -13,10 +13,22 @@
 # limitations under the License.
 
 import torch
+from pydantic import Field
 
-from ...quantization import GlobalQuantConfig, QuantizeAlgorithm, QuantizeMode
+from ...quantization import GlobalQuantConfig, QuantizeMode, QuantizeType
 from ...types import StrictlyTyped
 from .fake_tensor_mode import is_in_fake_tensor_mode
+
+
+class ActivationQuantization(StrictlyTyped):
+    """Activation quantization."""
+
+    quant_mode: QuantizeMode
+    bits: int
+    type: QuantizeType
+    scale: torch.Tensor | None = Field(default=None, exclude=True)
+    zero_point: torch.Tensor | None = Field(default=None, exclude=True)
+    dynamic: bool = False
 
 
 class Quantizer(StrictlyTyped):
@@ -83,7 +95,6 @@ class Dequantizer(StrictlyTyped):
         output_shape (torch.Size): Shape of the output tensor
         bits (int): Number of bits for quantization
         mode (QuantizeMode): Mode of quantization
-        algorithm (QuantizeAlgorithm): Algorithm of quantization. Defaults to PTQ.
         group_size (int | None): Size of quantization groups. Defaults to None.
     """
 
@@ -92,7 +103,6 @@ class Dequantizer(StrictlyTyped):
     output_shape: torch.Size
     bits: int
     mode: QuantizeMode
-    algorithm: QuantizeAlgorithm = QuantizeAlgorithm.PTQ
     group_size: int | None = None
 
     @property

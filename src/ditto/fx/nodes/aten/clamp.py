@@ -32,8 +32,8 @@ class ClampScalar(FinalATenOp):
     """
 
     this: Node
-    min: Number | None
-    max: Number | None
+    min: Number | None = None
+    max: Number | None = None
 
 
 @ATenOp.register(torch.ops.aten.clamp.Tensor)
@@ -47,5 +47,5 @@ class ClampTensor(FinalATenOp):
     """
 
     this: Node
-    min: Node | None
-    max: Node | None
+    min: Node | None = None
+    max: Node | None = None

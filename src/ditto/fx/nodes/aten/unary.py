@@ -14,9 +14,10 @@
 
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 
+import torch
 from torch.fx.node import Node
 
-from .aten_op import ATenOp
+from .aten_op import ATenOp, FinalATenOp
 
 
 class Unary(ATenOp):
@@ -27,3 +28,42 @@ class Unary(ATenOp):
     """
 
     this: Node
+
+
+@Unary.register(torch.ops.aten.amin.default)
+class AMin(Unary, FinalATenOp):
+    """The final specialization of `torch.ops.aten.amin.default`.
+
+    Attributes:
+        dim (list[int]): The dimensions to reduce.
+        keepdim (bool): Whether to keep the reduced dimensions.
+    """
+
+    dim: list[int]
+    keepdim: bool = False
+
+
+@Unary.register(torch.ops.aten.amax.default)
+class AMax(Unary, FinalATenOp):
+    """The final specialization of `torch.ops.aten.amax.default`.
+
+    Attributes:
+        dim (list[int]): The dimensions to reduce.
+        keepdim (bool): Whether to keep the reduced dimensions.
+    """
+
+    dim: list[int]
+    keepdim: bool = False
+
+
+@Unary.register(torch.ops.aten.aminmax.default)
+class AMinMax(Unary, FinalATenOp):
+    """The final specialization of `torch.ops.aten.aminmax.default`.
+
+    Attributes:
+        dim (int | None): The dimension to reduce.
+        keepdim (bool): Whether to keep the reduced dimension.
+    """
+
+    dim: int | None = None
+    keepdim: bool = False

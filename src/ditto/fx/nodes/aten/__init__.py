@@ -73,6 +73,7 @@ from .index import Index
 from .index_put import IndexPut
 from .index_select_node import IndexSelect
 from .mm import BMM, MM
+from .normalization import NativeLayerNorm
 from .reduction import MeanDim, Reduction, SumDimIntList
 from .reformatting import (
     Expand,
@@ -89,7 +90,7 @@ from .softmax import SafeSoftmax, Softmax, SoftmaxDefault
 from .split import Split, SplitDefault, SplitSizes, SplitTensor, SplitWithSizes
 from .sym_size import SymSizeInt
 from .topk import TopK
-from .unary import Unary
+from .unary import AMax, AMin, AMinMax, Unary
 from .unary_elementwise import (
     Neg,
     Sqrt,

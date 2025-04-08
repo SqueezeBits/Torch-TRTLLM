@@ -64,9 +64,11 @@ from .passes import (
     PopLoraPlugins,
     PropagateTensorParallelism,
     ReplaceMMByFp8GemmPlugin,
+    ReplaceMMByFp8RowwiseGemmPlugin,
     ReplaceMMByGemmPlugin,
     ReplaceMMByWoQGemmPlugin,
     ReplaceMoEByMoEPlugin,
+    ReplaceRmsNormByFp8RmsNormPlugin,
     ReplaceSDPAByGPTAttentionPlugin,
     ReplaceTopkByTopkLastDimPlugin,
     ReplaceViewByReshape,
@@ -126,6 +128,7 @@ def get_optimization_transform(
     model_config: TRTLLMModelConfig,
     dtype: torch.dtype,
     *,
+    global_quant_config: GlobalQuantConfig | None = None,
     skipped_optimizers: list[PassName] | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
@@ -137,6 +140,7 @@ def get_optimization_transform(
         argument_hint (TRTLLMArgumentHint): the type hints for TRTLLM inputs
         model_config (TRTLLMModelConfig): Model configurations
         dtype (torch.dtype): the data type for the plugins
+        global_quant_config (GlobalQuantConfig | None, optional): Global quantization configuration. Defaults to None.
         skipped_optimizers (list[PassName] | None, optional): the names of optimization passes to skip.
             Defaults to None.
         run_matmuls_in_fp32 (bool, optional): whether to run all matrix multiplications in FP32.
@@ -154,6 +158,7 @@ def get_optimization_transform(
             argument_hint=argument_hint,
             model_config=model_config,
             dtype=dtype,
+            global_quant_config=global_quant_config,
             skipped_optimizers=skipped_optimizers,
             run_matmuls_in_fp32=run_matmuls_in_fp32,
             run_activations_in_model_dtype=run_activations_in_model_dtype,
@@ -239,6 +244,7 @@ def get_trtllm_conversion_transform(
     model_config: TRTLLMModelConfig,
     dtype: torch.dtype,
     *,
+    global_quant_config: GlobalQuantConfig | None = None,
     skipped_optimizers: list[PassName] | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
@@ -250,6 +256,7 @@ def get_trtllm_conversion_transform(
         argument_hint (TRTLLMArgumentHint): Type hints for TRTLLM inputs
         model_config (TRTLLMModelConfig): Model configurations
         dtype (torch.dtype): Data type for plugins
+        global_quant_config (GlobalQuantConfig | None, optional): Global quantization configuration. Defaults to None.
         skipped_optimizers (list[PassName] | None, optional): Names of optimization passes to skip. Defaults to None.
         run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
         run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
@@ -282,8 +289,10 @@ def get_trtllm_conversion_transform(
         IndexLayers,
         BindUnmatchedLoraProtos,
         PopLoraPlugins(argument_hint=argument_hint),
+        ReplaceRmsNormByFp8RmsNormPlugin(model_dtype=dtype, global_quant_config=global_quant_config),
         ReplaceMMByWoQGemmPlugin(model_dtype=dtype),
         ReplaceMMByFp8GemmPlugin,
+        ReplaceMMByFp8RowwiseGemmPlugin(model_dtype=dtype),
         ReplaceMMByGemmPlugin,
         CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]
