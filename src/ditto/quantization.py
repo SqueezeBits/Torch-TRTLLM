@@ -16,7 +16,6 @@ from enum import Enum, auto
 
 import torch
 from auto_gptq.nn_modules.qlinear import qlinear_cuda_old
-from compressed_tensors.config import CompressionFormat
 from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy, QuantizationType
 from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
@@ -106,42 +105,6 @@ class QuantizeMode(Enum):
         raise NotImplementedError(f"Unsupported quantization strategy: {quant_strategy}")
 
 
-class QuantizeAlgorithm(Enum):
-    """Quantization algorithm.
-
-    Attributes:
-        PTQ (auto): Post-training quantization.
-        GPTQ (auto): GPTQ quantization.
-        AWQ (auto): AWQ quantization.
-        SMOOTHQUANT (auto): SmoothQuant quantization.
-    """
-
-    PTQ = auto()
-    GPTQ = auto()
-    AWQ = auto()
-    SMOOTHQUANT = auto()
-
-    @classmethod
-    def from_hf_quant_method(cls, hf_quant_method: QuantizationMethod) -> "QuantizeAlgorithm":
-        """Convert Hugging Face quantization method to Ditto quantization algorithm.
-
-        Args:
-            hf_quant_method (QuantizationMethod): The Hugging Face quantization method
-
-        Returns:
-            Self: The Ditto quantization algorithm
-        """
-        if hf_quant_method == QuantizationMethod.GPTQ:
-            return cls.GPTQ
-        if hf_quant_method == QuantizationMethod.AWQ:
-            return cls.AWQ
-        if hf_quant_method == QuantizationMethod.COMPRESSED_TENSORS:
-            # Note: only support PTQ for compressed tensors currently
-            return cls.PTQ
-
-        raise NotImplementedError(f"Unsupported quantization method: {hf_quant_method}")
-
-
 class QuantScheme(StrictlyTyped):
     """Quantization scheme.
 
@@ -195,6 +158,7 @@ class GlobalQuantConfig(StrictlyTyped):
     quant_configs: list[TargetQuantConfig] = []
 
     @classmethod
+    # pylint: disable-next=too-many-branches
     def create_from(cls, pretrained_config: PretrainedConfig) -> Self | None:
         """Create a GlobalQuantConfig from a pretrained config.
 
@@ -264,29 +228,65 @@ class GlobalQuantConfig(StrictlyTyped):
             assert config.targets == [
                 "Linear"
             ], f'Unsupported targets: {config.targets=}. Currently, only a single "Linear" target is supported.'
-            assert quantization_config.quantization_config.format in (
-                CompressionFormat.float_quantized.value,
-                CompressionFormat.naive_quantized.value,
-            ), f"Unsupported compressed tensors format: {quantization_config.quantization_config.format}"
-            assert (
-                config.input_activations is not None
-                and config.input_activations.strategy is not None
-                and config.input_activations.num_bits == 8
-                and config.weights is not None
-                and config.weights.strategy is not None
-                and config.weights.num_bits == 8
-                and (config.input_activations.strategy, config.weights.strategy)
-                in (
-                    (QuantizationStrategy.TENSOR, QuantizationStrategy.TENSOR),
-                    (QuantizationStrategy.TOKEN, QuantizationStrategy.CHANNEL),
+
+            input_quant_scheme: QuantScheme | None = None
+            if config.input_activations is not None:
+                assert (
+                    config.input_activations.strategy is not None
+                    and config.input_activations.num_bits in (8, 16)
+                    and config.input_activations.strategy in (QuantizationStrategy.TENSOR, QuantizationStrategy.TOKEN)
+                ), f"Unsupported input quantization scheme: {config.input_activations}"
+                input_quant_scheme = QuantScheme(
+                    bits=config.input_activations.num_bits,
+                    mode=QuantizeMode.from_quant_strategy(config.input_activations.strategy),
+                    type=QuantizeType.from_quant_type(config.input_activations.type),
+                    dynamic=config.input_activations.dynamic,
                 )
-            ), "Currently, 8-bit per-tensor quantization or dynamic quantization is supported"
-            trtllm_quant_algo = (
-                QuantAlgo.FP8
-                if (config.input_activations.strategy, config.weights.strategy)
-                == (QuantizationStrategy.TENSOR, QuantizationStrategy.TENSOR)
-                else QuantAlgo.FP8_PER_CHANNEL_PER_TOKEN
-            )
+            weight_quant_scheme: QuantScheme | None = None
+            if config.weights is not None:
+                assert (
+                    config.weights.strategy is not None
+                    and config.weights.num_bits in (4, 8)
+                    and config.weights.strategy
+                    in (QuantizationStrategy.TENSOR, QuantizationStrategy.CHANNEL, QuantizationStrategy.GROUP)
+                ), f"Unsupported weight quantization scheme: {config.weights}"
+                weight_quant_scheme = QuantScheme(
+                    bits=config.weights.num_bits,
+                    mode=QuantizeMode.from_quant_strategy(config.weights.strategy),
+                    type=QuantizeType.from_quant_type(config.weights.type),
+                    group_size=config.weights.group_size,
+                    has_zero_point=not config.weights.symmetric,
+                    dynamic=config.weights.dynamic,
+                )
+
+            assert weight_quant_scheme is not None, "Weight quantization scheme is required"
+
+            if input_quant_scheme is None:
+                if weight_quant_scheme.type == QuantizeType.INT:
+                    trtllm_quant_algo = QuantAlgo.W8A16 if weight_quant_scheme.bits == 8 else QuantAlgo.W4A16
+                else:
+                    raise NotImplementedError(f"Unsupported weight-only quantization type: {weight_quant_scheme.type=}")
+            else:
+                assert (
+                    quantize_type := input_quant_scheme.type
+                ) == weight_quant_scheme.type, "input and weight quantization type must be the same"
+                if quantize_type == QuantizeType.FLOAT:
+                    if (input_quant_scheme.mode, weight_quant_scheme.mode) == (
+                        QuantizeMode.PER_TENSOR,
+                        QuantizeMode.PER_TENSOR,
+                    ):
+                        trtllm_quant_algo = QuantAlgo.FP8
+                    elif (input_quant_scheme.mode, weight_quant_scheme.mode) == (
+                        QuantizeMode.PER_TOKEN,
+                        QuantizeMode.PER_CHANNEL,
+                    ):
+                        trtllm_quant_algo = QuantAlgo.FP8_PER_CHANNEL_PER_TOKEN
+                    else:
+                        raise NotImplementedError(
+                            f"Unsupported quantization mode: {input_quant_scheme.mode}, {weight_quant_scheme.mode}"
+                        )
+                else:
+                    raise NotImplementedError(f"Unsupported input/weight quantization type: {quantize_type=}")
             return cls(
                 hf_quant_method=quantization_config.quantization_config.quant_method,
                 trtllm_quant_algo=trtllm_quant_algo,
@@ -294,49 +294,13 @@ class GlobalQuantConfig(StrictlyTyped):
                 quant_configs=[
                     TargetQuantConfig(
                         target=torch.ops.aten.mm.default,
-                        input_quant_scheme=QuantScheme(
-                            bits=config.input_activations.num_bits,
-                            mode=QuantizeMode.from_quant_strategy(config.input_activations.strategy),
-                            type=QuantizeType.from_quant_type(config.input_activations.type),
-                            dynamic=config.input_activations.dynamic,
-                        ),
-                        weight_quant_scheme=QuantScheme(
-                            bits=config.weights.num_bits,
-                            mode=QuantizeMode.from_quant_strategy(config.weights.strategy),
-                            type=QuantizeType.from_quant_type(config.weights.type),
-                            dynamic=config.weights.dynamic,
-                        ),
+                        input_quant_scheme=input_quant_scheme,
+                        weight_quant_scheme=weight_quant_scheme,
                     ),
                 ],
             )
 
         raise RuntimeError(f"Unsupported quantization algorithm: {quantization_config}")
-
-
-def inference_trtllm_quant_algo(
-    bits: int, compute_dtype: torch.dtype, *, hf_quant_method: QuantizationMethod
-) -> QuantAlgo:
-    """Infer the quantization algorithm for TensorRT-LLM .
-
-    Args:
-        bits (int): The number of bits used for quantization
-        compute_dtype (torch.dtype): The compute data type
-        hf_quant_method (QuantizationMethod): The quantization method used by the Hugging Face model
-
-    Returns:
-        QuantAlgo: The quantization algorithm for TensorRT-LLM
-    """
-    assert bits in (4, 8), "Only 4-bit and 8-bit quantization is supported for TensorRT-LLM"
-    quant_algo: str = f"W{bits}A{compute_dtype.itemsize * 8}"
-    if hf_quant_method == QuantizationMethod.GPTQ:
-        quant_algo = f"{quant_algo}_GPTQ"
-    elif hf_quant_method == QuantizationMethod.AWQ:
-        quant_algo = f"{quant_algo}_AWQ"
-    else:
-        raise RuntimeError(f"Unsupported quantization method: {hf_quant_method}")
-
-    assert quant_algo in QuantAlgo, f"Unsupported quantization algorithm: {quant_algo}"
-    return QuantAlgo[quant_algo]
 
 
 def resolve_qlinear_device_map(model: torch.nn.Module) -> None:

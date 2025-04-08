@@ -94,7 +94,6 @@ def are_fusible(dequantizes: list[Dequantize]) -> bool:
         all(dequantizes[0].target.bits == dequantize.target.bits for dequantize in dequantizes[1:])
         and all(dequantizes[0].target.mode == dequantize.target.mode for dequantize in dequantizes[1:])
         and dequantizes[0].target.mode in (QuantizeMode.PER_TENSOR, QuantizeMode.PER_GROUP, QuantizeMode.PER_CHANNEL)
-        and all(dequantizes[0].target.algorithm == dequantize.target.algorithm for dequantize in dequantizes[1:])
         and (qweight_nodes := [dequantize.qweight for dequantize in dequantizes])
         and (scale_nodes := [dequantize.scale for dequantize in dequantizes])
     ):
