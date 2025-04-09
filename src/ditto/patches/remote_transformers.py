@@ -242,7 +242,7 @@ def patched_moe_gate_forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         )
 
     ### select top-k experts
-    if self.topk_method == "gready":
+    if self.topk_method == "greedy":
         topk_weight, topk_idx = torch.topk(
             scores, k=self.top_k, dim=-1, sorted=False
         )
