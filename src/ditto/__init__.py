@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+__version__ = "0.2.0"
+
 # Note: logging must be imported first to set up the loguru logging.
 from . import logging, constants, patches  # noqa: I001
 from .fx import PretrainedConfigGenerationError, generate_trtllm_engine_config

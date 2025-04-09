@@ -78,3 +78,18 @@ class SplitTensor(Split, FinalATenOp):
     this: Node
     split_size: SymbolicInteger
     dim: int = 0
+
+
+@Split.register(torch.ops.aten.split_with_sizes.default)
+class SplitWithSizes(Split, FinalATenOp):
+    """ATen split operation that splits tensor into chunks of specified sizes.
+
+    Attributes:
+        this (Node): The input tensor node to split
+        split_size (list[SymbolicInteger]): List of sizes for each split chunk
+        dim (int): Dimension along which to split the tensor, defaults to 0
+    """
+
+    this: Node
+    split_size: list[SymbolicInteger]
+    dim: int = 0

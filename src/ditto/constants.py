@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import os
 from typing import Literal
 
@@ -58,7 +59,7 @@ try:
         if DEBUG_ARTIFACTS_DIR is not None:
             DEFAULT_TRT_PROFILING_VERBOSITY = trt.ProfilingVerbosity.DETAILED
             logger.info(
-                "Automatically setting 'DEFAULT_TRT_PROFILING_VERBOSITY' to 'DETAILED' as 'DEBUG_ARTIFACT_DIR' is set."
+                "Automatically setting 'DEFAULT_TRT_PROFILING_VERBOSITY' to 'DETAILED' as 'DEBUG_ARTIFACTS_DIR' is set."
             )
 except KeyError as e:
     raise ValueError(
@@ -89,3 +90,14 @@ If this value is negative, all matmul siblings will be fused.
 
 PEFT_ADAPTER_PREFIX: str = "adapter"
 """The predefined prefix for the PEFT adapters."""
+
+LOG_LEVEL_LITERAL_MAP: dict[str, int] = {
+    "CRITICAL": logging.CRITICAL,
+    "FATAL": logging.FATAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+    "NOTSET": logging.NOTSET,
+}
+"""A map from the log level literal to the log level value."""

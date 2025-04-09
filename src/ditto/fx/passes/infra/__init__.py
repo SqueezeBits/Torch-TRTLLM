@@ -24,3 +24,4 @@ from .node_wise_pass import (
 from .pass_manager import PassManager
 from .pass_result import PassResult
 from .stack_trace import propagate_metadata_from
+from .utils import get_pretrained_config

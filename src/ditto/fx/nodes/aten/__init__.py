@@ -23,6 +23,7 @@ from .activations import (
     Tanh,
 )
 from .addmm import AddMM
+from .arange import ArangeStartStep
 from .aten_op import ATenOp
 from .binary import Binary
 from .binary_elementwise import (
@@ -42,6 +43,8 @@ from .binary_elementwise import (
     DivTensor,
     DivTensorScalar,
     DivTensorTensor,
+    EqScalar,
+    EqTensor,
     Mul,
     MulDefault,
     MulScalar,
@@ -62,12 +65,15 @@ from .binary_elementwise import (
     SubTensorScalar,
     SubTensorTensor,
 )
+from .clamp import ClampScalar, ClampTensor
 from .combine import Cat, Combine, Stack
 from .copy_like import Clone, ToCopy
 from .embedding import Embedding
 from .index import Index
+from .index_put import IndexPut
 from .index_select_node import IndexSelect
 from .mm import BMM, MM
+from .normalization import NativeLayerNorm
 from .reduction import MeanDim, Reduction, SumDimIntList
 from .reformatting import (
     Expand,
@@ -78,13 +84,16 @@ from .reformatting import (
     Unsqueeze,
     View,
 )
+from .select import SelectInt
 from .slice import Slice
 from .softmax import SafeSoftmax, Softmax, SoftmaxDefault
-from .split import Split, SplitDefault, SplitSizes, SplitTensor
+from .split import Split, SplitDefault, SplitSizes, SplitTensor, SplitWithSizes
 from .sym_size import SymSizeInt
-from .unary import Unary
+from .topk import TopK
+from .unary import AMax, AMin, AMinMax, Unary
 from .unary_elementwise import (
     Neg,
     Sqrt,
     UnaryElementwise,
 )
+from .where import Where

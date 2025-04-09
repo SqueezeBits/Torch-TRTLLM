@@ -40,7 +40,7 @@ from .debug import (
     open_debug_artifact,
     save_for_debug,
 )
-from .fx.targets import Plugin
+from .fx.targets import Plugin, Quantizer
 from .fx.utils import find_output_node, get_tensor_metadata
 from .types import DataType
 
@@ -125,7 +125,7 @@ class TRTLLMInterpreter(TRTInterpreter):
         assert self._cur_node is not None
         converter_packet = (
             DYNAMO_CONVERTERS.get_unvalidated(type(target))
-            if isinstance(target, Plugin)
+            if isinstance(target, Plugin | Quantizer)
             else DYNAMO_CONVERTERS.get(self._cur_node)
         )
         if converter_packet is None:

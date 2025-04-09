@@ -14,15 +14,14 @@
 
 from loguru import logger
 from torch.fx import Node
-from transformers import PretrainedConfig
 
-from ...types import verify
+from ..nodes import Rope
 from ..subgraphs import RoPESubgraph
 from ..targets import (
     FAKE_ROPE_TARGETS,
     ROPEConfig,
 )
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, get_pretrained_config
 
 
 class WrapRoPESubgraphs(NodewiseOptimizationPass):
@@ -41,17 +40,9 @@ class WrapRoPESubgraphs(NodewiseOptimizationPass):
         graph = node.graph
         rope_target = FAKE_ROPE_TARGETS[rope.position_embedding_type]
         with graph.inserting_before(rope.out.node):
-            wrapped_rope = graph.call_function(rope_target, (rope.x, rope.cos, rope.sin))
+            wrapped_rope = Rope.create_with_target(graph, rope_target, rope.x, rope.cos, rope.sin).node
 
-        pretrained_config: PretrainedConfig | None = (
-            verify(
-                graph_module.meta.get("pretrained_config"),
-                as_type=PretrainedConfig,
-            )
-            if (graph_module := graph.owning_module)
-            else None
-        )
-
+        pretrained_config = get_pretrained_config(graph)
         if not self.has_warned_missing_pretrained_config and pretrained_config is None:
             logger.warning("No pretrained config found in graph module meta data. Default RoPE config will be used.")
             self.has_warned_missing_pretrained_config = True

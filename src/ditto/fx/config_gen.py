@@ -21,12 +21,17 @@ from ..configs import (
     TRTLLMEngineConfig,
     TRTLLMLoraConfig,
     TRTLLMMapping,
+    TRTLLMMoEConfig,
     TRTLLMPretrainedConfig,
+    TRTLLMQuantConfig,
 )
 from ..literals import DTypeLiteral
-from ..types import verify
+from ..quantization import GlobalQuantConfig
+from ..types import DataType, verify
+from .metadata_keys import LINEAR_TYPE, MOE_CONFIG
+from .nodes import Fp8RowwiseGemm, RmsnormQuantization, WeightOnlyGroupwiseQuantMatmul, WeightOnlyQuantMatmul
 from .subgraphs import Linear, TokenEmbedding
-from .targets import GPTAttentionPlugin
+from .targets import GPTAttentionPlugin, MixtureOfExpertsPlugin
 
 
 class PretrainedConfigGenerationError(RuntimeError):
@@ -38,6 +43,7 @@ def generate_trtllm_engine_config(
     build_config: TRTLLMBuildConfig,
     mapping: TRTLLMMapping,
     *,
+    global_quant_config: GlobalQuantConfig | None = None,
     architecture: str | None = None,
 ) -> TRTLLMEngineConfig:
     """Generate TRTLLM engine configuration.
@@ -46,7 +52,8 @@ def generate_trtllm_engine_config(
         graph_module (GraphModule): The graph module to process.
         build_config (TRTLLMBuildConfig): The build configuration.
         mapping (TRTLLMMapping): The mapping configuration.
-        architecture (str | None): The architecture name, optional.
+        global_quant_config (GlobalQuantConfig | None): The global quantization configuration. Defaults to None.
+        architecture (str | None): The architecture name, optional. Defaults to None.
 
     Returns:
         TRTLLMEngineConfig: The generated engine configuration.
@@ -54,10 +61,38 @@ def generate_trtllm_engine_config(
     if (lora_config := graph_module.meta.pop("lora_config", None)) is not None:
         build_config.lora_config = TRTLLMLoraConfig.model_validate(lora_config)
         build_config.plugin_config.lora_plugin = "auto"
+    if graph_module.meta.get(MOE_CONFIG, None) is not None:
+        build_config.plugin_config.moe_plugin = "auto"
+
+    build_config.plugin_config.fp8_rowwise_gemm_plugin = (
+        DataType(fp8_rowwise_gemm.target.type_id).to(str)  # type: ignore[assignment]
+        if (fp8_rowwise_gemm := Fp8RowwiseGemm.find_in(graph_module.graph))
+        else None
+    )
+    build_config.plugin_config.weight_only_groupwise_quant_matmul_plugin = (
+        DataType(woq_group_mm.target.type_id).to(str)  # type: ignore[assignment]
+        if (woq_group_mm := WeightOnlyGroupwiseQuantMatmul.find_in(graph_module.graph))
+        else None
+    )
+    build_config.plugin_config.weight_only_quant_matmul_plugin = (
+        DataType(woq_mm.target.type_id).to(str)  # type: ignore[assignment]
+        if (woq_mm := WeightOnlyQuantMatmul.find_in(graph_module.graph))
+        else None
+    )
+    build_config.plugin_config.rmsnorm_quantization_plugin = (
+        DataType(rms_quant.target.type_id).to(str)  # type: ignore[assignment]
+        if (rms_quant := RmsnormQuantization.find_in(graph_module.graph))
+        else None
+    )
+    build_config.plugin_config.quantize_per_token_plugin = build_config.plugin_config.quantize_tensor_plugin = (
+        build_config.plugin_config.fp8_rowwise_gemm_plugin is not None
+    )
+
     return TRTLLMEngineConfig(
         pretrained_config=generate_trtllm_pretrained_config(
             graph_module,
             mapping,
+            global_quant_config=global_quant_config,
             architecture=architecture,
         ),
         build_config=build_config,
@@ -68,6 +103,7 @@ def generate_trtllm_pretrained_config(
     graph_module: GraphModule,
     mapping: TRTLLMMapping,
     *,
+    global_quant_config: GlobalQuantConfig | None = None,
     architecture: str | None = None,
 ) -> TRTLLMPretrainedConfig:
     """Generate TRTLLMPretrainedConfig from graph module.
@@ -75,6 +111,7 @@ def generate_trtllm_pretrained_config(
     Args:
         graph_module (GraphModule): The graph module to generate the pretrained config from.
         mapping (TRTLLMMapping): The tensor parallel mapping to use for the pretrained config.
+        global_quant_config (GlobalQuantConfig | None): The global quantization configuration. Defaults to None.
         architecture (str | None, optional): The architecture to use for the pretrained config. Defaults to None.
 
     Returns:
@@ -86,14 +123,17 @@ def generate_trtllm_pretrained_config(
         architecture=architecture or "UnknownLanguageModel",
         vocab_size=vocab_size,
         hidden_size=hidden_size,
-        intermediate_size=get_intermediate_size(graph_module),
+        intermediate_size=get_intermediate_size(graph_module, mapping),
         mapping=mapping,
     )
+    pretrained_config.quantization = TRTLLMQuantConfig.create_from(global_quant_config) if global_quant_config else None
     if "qwen" in pretrained_config.architecture.lower() and isinstance(
         hf_config := graph_module.meta.get("pretrained_config"), PretrainedConfig
     ):
         # pylint: disable-next=unsupported-assignment-operation
         pretrained_config.extra_fields["qwen_type"] = hf_config.model_type
+    if (moe_config := graph_module.meta.pop(MOE_CONFIG, None)) is not None:
+        pretrained_config.moe = TRTLLMMoEConfig.model_validate(moe_config)
     return pretrained_config
 
 
@@ -131,11 +171,12 @@ def collect_gpt_attention_plugins(graph: Graph) -> list[GPTAttentionPlugin]:
     return sorted(plugins, key=lambda plugin: plugin.layer_idx)
 
 
-def get_intermediate_size(graph_module: GraphModule) -> int:
+def get_intermediate_size(graph_module: GraphModule, mapping: TRTLLMMapping) -> int:
     """Get intermediate size from the graph module.
 
     Args:
-        graph_module (GraphModule): The graph module to process.
+        graph_module (GraphModule): The graph module to process
+        mapping (TRTLLMMapping): The tensor parallel mapping configuration
 
     Returns:
         int: The intermediate size.
@@ -144,11 +185,18 @@ def get_intermediate_size(graph_module: GraphModule) -> int:
         PretrainedConfigGenerationError: If no or multiple intermediate sizes are found.
     """
     values: set[int] = set()
+    values_of_shared_experts: set[int] = set()
+    values_of_experts: set[int] = set()
     for node in graph_module.graph.nodes:
         if (linear := Linear.configure_from(node)) and linear.lora_prefix == "mlp_4h_to_h":
-            values.add(linear.in_features)
+            if linear.mm.meta.get(LINEAR_TYPE) == "shared_expert":
+                values_of_shared_experts.add(linear.in_features)
+            else:
+                values.add(linear.in_features)
+        if isinstance(node.target, MixtureOfExpertsPlugin):
+            values_of_experts.add(node.target.expert_inter_size * mapping.tp_size)
 
-    if len(values) == 0:
+    if not (values := values or values_of_shared_experts or values_of_experts):
         raise PretrainedConfigGenerationError("No intermediate size found in graph module")
 
     if len(values) > 1:
@@ -250,7 +298,7 @@ def infer_pretrained_config(
     if plugin_idx != plugin.layer_idx:
         raise PretrainedConfigGenerationError(f"Expected layer_idx={plugin_idx} but got {plugin.layer_idx=}")
 
-    if (dtype := verify(trt_dtype_to_str(plugin.type_id), as_type=DTypeLiteral)) is None:
+    if (dtype := verify(trt_dtype_to_str(plugin.type_id), as_type=DTypeLiteral)) is None:  # type: ignore[arg-type]
         raise PretrainedConfigGenerationError(f"Found GPT attention plugin with invalid type_id={plugin.type_id}.")
 
     return TRTLLMPretrainedConfig(
@@ -258,11 +306,9 @@ def infer_pretrained_config(
         dtype=dtype,
         vocab_size=vocab_size,
         hidden_size=hidden_size,
-        num_hidden_layers=num_hidden_layers,
+        num_hidden_layers=num_hidden_layers * mapping.pp_size,
         num_attention_heads=plugin.num_heads * mapping.tp_size,
         num_key_value_heads=plugin.num_kv_heads * mapping.tp_size,
         intermediate_size=intermediate_size,
         mapping=mapping,
-        # TODO: fill in appropriate values in the quantization when quantization are supported.
-        # quantization=TRTLLMQuantConfig(...),
     )

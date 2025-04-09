@@ -145,7 +145,7 @@ class Plugin(StrictlyTyped, ABC):
         self,
         *args: Any,
         **kwargs: Any,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple[torch.Tensor, ...]:
         """Apply plugin operation to input tensors.
 
         This method is only required for fake tensor mode.
@@ -155,7 +155,7 @@ class Plugin(StrictlyTyped, ABC):
             **kwargs (Any): Keyword arguments
 
         Returns:
-            torch.Tensor: Output tensor
+            torch.Tensor | tuple[torch.Tensor, ...]: Output tensor(s)
         """
 
 

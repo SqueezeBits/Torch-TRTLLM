@@ -14,6 +14,8 @@
 
 from .allgather_plugin import AllGatherPlugin
 from .allreduce_plugin import AllReducePlugin, AllReducePluginInputs
+from .fake_quantizer import ActivationQuantization, Dequantizer, Quantizer
+from .fp8_rowwise_gemm_plugin import Fp8RowwiseGemmPlugin
 from .gemm_plugin import (
     GemmPlugin,
 )
@@ -29,5 +31,20 @@ from .lora_plugin import (
     LoraPluginInputs,
     LoraProto,
 )
+from .mixture_of_experts_plugin import (
+    MixtureOfExpertsPlugin,
+    MixtureOfExpertsPluginInputs,
+    get_moe_activation_type,
+    get_moe_normalization_mode,
+)
 from .plugin import Plugin
+from .quantize_per_token import QuantizePerTokenPlugin
+from .recv_plugin import RecvPlugin
+from .rmsnorm_quantization_plugin import RmsnormQuantizationPlugin
 from .rope import FAKE_ROPE_TARGETS
+from .send_plugin import SendPlugin
+from .topk_last_dim_plugin import TopkLastDimPlugin
+from .weightonly_quantmatmul_plugin import (
+    WeightOnlyGroupwiseQuantMatmulPlugin,
+    WeightOnlyQuantMatmulPlugin,
+)

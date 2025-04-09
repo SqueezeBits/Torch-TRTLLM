@@ -8,6 +8,7 @@ declare SKIP_DITTO_BUILD=false
 declare SKIP_DITTO_RUN=false
 declare SKIP_NATIVE_BUILD=false
 declare SKIP_NATIVE_RUN=false
+declare PRINT_OUTPUT=false
 declare DEBUG_MODE=false
 declare VERBOSE_MODE=false
 declare PROMPT="Hey, are you conscious?"
@@ -20,6 +21,11 @@ declare RERUN_DITTO=false
 declare REBUILD_NATIVE=false
 declare RERUN_NATIVE=false
 declare TP_SIZE=1
+declare PP_SIZE=1
+declare CKPT_ARGS=""
+declare BUILD_ARGS=""
+declare CLEANUP_CKPT=false
+declare CLEANUP_ENGINE=false
 
 # Global variables for engine and artifact directories
 declare DITTO_ENGINE_DIR=""
@@ -70,8 +76,8 @@ print_help() {
     echo "  [PEFT_ID1 PEFT_ID2 ...]  Optional PEFT model identifiers to apply"
     echo
     echo "Options:"
-    echo "  -h, --help              Show this help message and exit"
-    echo "  -v, --verbose           Show all terminal outputs"
+    echo "  -h, --help             Show this help message and exit"
+    echo "  -v, --verbose          Show all terminal outputs"
     echo "  -d, --debug            Enable debug mode"
     echo "  --prompt TEXT          Input prompt (default: \"Hey, are you conscious?\")"
     echo "  --trtllm-repo PATH     Path to TensorRT-LLM repository"
@@ -79,6 +85,7 @@ print_help() {
     echo "  --dtype DTYPE          Data type for model conversion (default: auto)"
     echo "  --model-type TYPE      Model type for finding convert_checkpoint.py (default: auto-detected)"
     echo "  --tp-size SIZE         Tensor parallel size (default: 1)"
+    echo "  --pp-size SIZE         Pipeline parallel size (default: 1)"
     echo "  --trust-remote-code    Trust remote code when loading models from Hugging Face"
     echo
     echo "  --skip                 Equivalent to --skip-build --skip-run"
@@ -90,6 +97,7 @@ print_help() {
     echo "  --skip-native          Equivalent to --skip-native-build --skip-native-run"
     echo "  --skip-native-build    Skip building native TensorRT-LLM engine"
     echo "  --skip-native-run      Skip running native TensorRT-LLM engine"
+    echo "  --print-output         Print output of Ditto and TensorRT-LLM engines"
     echo
     echo "  --redo                 Equivalent to --rebuild --rerun"
     echo "  --rebuild              Equivalent to --rebuild-ditto --rebuild-native"
@@ -100,6 +108,13 @@ print_help() {
     echo "  --redo-native          Equivalent to --rebuild-native --rerun-native"
     echo "  --rebuild-native       Rebuild native TensorRT-LLM engine even if it already exists"
     echo "  --rerun-native         Run native TensorRT-LLM engine even if output files exist"
+    echo
+    echo "  --ckpt-args            Additional arguments to pass to the checkpoint conversion script"
+    echo "  --build-args           Additional arguments to pass to the engine build script"
+    echo
+    echo "  --cleanup              Equivalent to --cleanup-ckpt --cleanup-engine"
+    echo "  --cleanup-ckpt         Cleanup checkpoint directory after comparison"
+    echo "  --cleanup-engine       Cleanup engine directory after comparison"
     echo
     echo "[Example: Simply run meta-llama/Llama-2-7b-chat-hf]"
     echo "  $0 meta-llama/Llama-2-7b-chat-hf"
@@ -182,6 +197,10 @@ parse_args() {
                 SKIP_NATIVE_RUN=true
                 shift
                 ;;
+            --print-output)
+                PRINT_OUTPUT=true
+                shift
+                ;;
             -d|--debug)
                 DEBUG_MODE=true
                 shift
@@ -260,6 +279,35 @@ parse_args() {
                     exit 1
                 fi
                 shift 2
+                ;;
+            --pp-size)
+                PP_SIZE="$2"
+                if ! [[ "$PP_SIZE" =~ ^0*[1-9][0-9]*$ ]]; then
+                    echo "Error: PP_SIZE must be a positive integer."
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --ckpt-args)
+                CKPT_ARGS="$2"
+                shift 2
+                ;;
+            --build-args)
+                BUILD_ARGS="$2"
+                shift 2
+                ;;
+            --cleanup)
+                CLEANUP_CKPT=true
+                CLEANUP_ENGINE=true
+                shift
+                ;;
+            --cleanup-ckpt)
+                CLEANUP_CKPT=true
+                shift
+                ;;
+            --cleanup-engine)
+                CLEANUP_ENGINE=true
+                shift
                 ;;
             -*)
                 echo "Error: Unrecognized option: $1"
@@ -367,6 +415,10 @@ append_option_suffix() {
         dir="${dir}_tp${TP_SIZE}"
     fi
 
+    if [ "$PP_SIZE" -gt 1 ]; then
+        dir="${dir}_pp${PP_SIZE}"
+    fi
+
     echo "$dir"
 }
 
@@ -415,6 +467,7 @@ ditto_build() {
         --output-dir $DITTO_ENGINE_DIR \
         --dtype $DTYPE \
         --tp-size $TP_SIZE \
+        --pp-size $PP_SIZE \
         $(build_peft_args "${peft_ids[@]}")"
 
     if [ "$TRUST_REMOTE_CODE" = true ]; then
@@ -438,8 +491,8 @@ run_engine() {
         --input_text \"$PROMPT\" \
         --max_output_len 100"
     
-    if [ "$TP_SIZE" -gt 1 ]; then
-        base_cmd="mpirun -n $TP_SIZE $base_cmd"
+    if [ $((TP_SIZE * PP_SIZE)) -gt 1 ]; then
+        base_cmd="mpirun -n $((TP_SIZE * PP_SIZE)) $base_cmd"
     fi
 
     # Only run if output file doesn't exist or is empty or rerun flag is true
@@ -448,6 +501,10 @@ run_engine() {
     if [ "$rerun" = true ] || [ ! -f "$OUTPUT_FILE" ] || [ ! -s "$OUTPUT_FILE" ]; then
         rich_execute "$base_cmd" "$RUN_FILE" "run $engine_type engine"
         extract_output "$RUN_FILE" "$OUTPUT_FILE"
+        if [ "$PRINT_OUTPUT" = true ]; then
+            echo "Output of $engine_type engine:"
+            cat "$OUTPUT_FILE"
+        fi
     else
         echo "Skip running $engine_type engine as output file already exists at $OUTPUT_FILE"
     fi
@@ -463,6 +520,10 @@ run_engine() {
         if [ "$rerun" = true ] || [ ! -f "$OUTPUT_FILE" ] || [ ! -s "$OUTPUT_FILE" ]; then
             rich_execute "$cmd" "$RUN_FILE" "run $engine_type engine with task_uid $task_uid"
             extract_output "$RUN_FILE" "$OUTPUT_FILE"
+            if [ "$PRINT_OUTPUT" = true ]; then
+                echo "Output of $engine_type engine with task_uid $task_uid:"
+                cat "$OUTPUT_FILE"
+            fi
         else
             echo "Skip running $engine_type engine with task_uid $task_uid as output file already exists at $OUTPUT_FILE"
         fi
@@ -504,10 +565,11 @@ native_build() {
             AVAILABLE_MODEL_TYPES=$(find "${TRTLLM_REPO}/examples" -type f -name convert_checkpoint.py | xargs -n1 dirname | xargs -n1 basename)
 
             # Convert model_id to lowercase for case-insensitive matching
-            model_id_lower=$(echo "$model_id" | tr '[:upper:]' '[:lower:]')
+            model_id_lower=$(echo "$model_id" | tr '[:upper:]' '[:lower:]' | tr '-' '_')
 
             # Try to match each available model type
             for type in $AVAILABLE_MODEL_TYPES; do
+                type=$(echo "$type" | tr '-' '_')
                 if [[ $model_id_lower == *"$type"* ]]; then
                     MODEL_TYPE=$type
                     break
@@ -528,13 +590,16 @@ native_build() {
                 --model-dir $BASE_MODEL_DIR \
                 --output-model-dir $TRTLLM_CKPT_DIR \
                 --dtype $DTYPE \
-                --world-size $TP_SIZE"
+                --world-size $TP_SIZE \
+                $CKPT_ARGS"
         else
             local convert_cmd="python $convert_script \
                 --model_dir $BASE_MODEL_DIR \
                 --output_dir $TRTLLM_CKPT_DIR \
                 --dtype $DTYPE \
-                --tp_size $TP_SIZE"
+                --tp_size $TP_SIZE \
+                --pp_size $PP_SIZE \
+                $CKPT_ARGS"
         fi
 
         rich_execute "$convert_cmd" "$TRTLLM_CKPT_DIR/convert.log" "convert checkpoint"
@@ -544,7 +609,7 @@ native_build() {
 
     TRTLLM_BUILD_ARGS="--checkpoint_dir $TRTLLM_CKPT_DIR \
         --output_dir $TRTLLM_ENGINE_DIR \
-        --gemm_plugin auto"
+        $BUILD_ARGS"
 
     if [ "$DEBUG_MODE" = true ]; then
         TRTLLM_BUILD_ARGS="$TRTLLM_BUILD_ARGS \
@@ -568,6 +633,9 @@ native_build() {
     local build_cmd="$TRTLLM_BUILD_SCRIPT $TRTLLM_BUILD_ARGS"
 
     DEBUG_ARTIFACTS_DIR=$TRTLLM_ARTIFACTS_DIR rich_execute "$build_cmd" "$TRTLLM_ENGINE_DIR/build.log" "build native TensorRT-LLM engine"
+    if [ "$CLEANUP_CKPT" = true ]; then
+        rm -r $TRTLLM_CKPT_DIR
+    fi
 }
 
 # Compare outputs between two files and print result
@@ -638,6 +706,10 @@ compare_outputs() {
             all_succeeded=1
         fi
     done
+
+    if [ "$CLEANUP_ENGINE" = true ]; then
+        rm -r $TRTLLM_ENGINE_DIR -r $DITTO_ENGINE_DIR
+    fi
 
     return $all_succeeded
 }

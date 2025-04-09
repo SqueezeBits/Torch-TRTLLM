@@ -17,7 +17,7 @@ from abc import ABC, abstractmethod
 from torch.fx import Graph, Node
 from typing_extensions import Self
 
-from ...types import NodeCriterion, StrictlyTyped
+from ...types import StrictlyTyped
 from ..nodes.node_specialization import NodeSpecialization
 
 
@@ -49,46 +49,6 @@ class Subgraph(StrictlyTyped, ABC):
         Returns:
             Self | None: The subgraph configuration if found, None otherwise
         """
-
-    @classmethod
-    def find_nearest(
-        cls,
-        from_node: Node,
-        follow_parent: bool = True,
-        follow_first_only: bool = True,
-        break_if: NodeCriterion | None = None,
-    ) -> Self | None:
-        """Find the nearest occurrence of the subgraph by traversing the node's ancestors or descendants.
-
-        Performs a breadth-first search through either ancestor nodes or descendant nodes and finds
-        the first subgraph that matches the pattern, which will be the closest to the given node
-        in terms of graph traversal depth.
-
-        Args:
-            from_node (Node): Starting node to search from
-            follow_parent (bool): If True, search through ancestor nodes. If False, search through
-                descendant nodes. Defaults to True.
-            follow_first_only (bool): If True, only follow the first node in the parent or child
-                list. If False, follow all nodes in the list. Defaults to True.
-            break_if (NodeCriterion | None): If provided, stop searching if the node matches the criterion
-
-        Returns:
-            Self | None: The nearest matching subgraph if one exists, None otherwise
-        """
-        queue = [from_node]
-        while queue:
-            node = queue.pop(0)
-            if subgraph := cls.configure_from(node):
-                return subgraph
-            if break_if is not None and break_if(node):
-                break
-            if not (next_nodes := list(node.all_input_nodes if follow_parent else node.users)):
-                continue
-            if follow_first_only:
-                queue.append(next_nodes[0])
-            else:
-                queue.extend(next_nodes)
-        return None
 
     @classmethod
     def find_last(cls, graph: Graph) -> Self | None:

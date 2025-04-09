@@ -6,7 +6,7 @@
 [![transformers](https://img.shields.io/badge/transformers-%3E%3D4.38.2-yellow)](https://github.com/huggingface/transformers)
 [![tensorrt-llm](https://img.shields.io/badge/tensorrt--llm-0.16.0-green)](https://github.com/NVIDIA/TensorRT-LLM)
 [![torch-tensorrt](https://img.shields.io/badge/torch--tensorrt-2.5.0-lightgreen)](https://github.com/pytorch/TensorRT)
-[![version](https://img.shields.io/badge/version-0.1.0-purple)](#)
+[![version](https://img.shields.io/badge/version-0.2.0-purple)](#)
 [![license](https://img.shields.io/badge/license-Apache%202-red)](./LICENSE)
 
 <div align="left">
@@ -22,6 +22,7 @@ Ditto is an open-source framework that enables **direct conversion of HuggingFac
 ## Latest News
 - [2025/02] Blog post introducing Ditto is published! [[Blog](https://blog.squeezebits.com/the-missing-piece-of-tensorrtllm-42462)]
 - [2025/02] Ditto 0.1.0 released!
+- [2025/04] Ditto 0.2.0 released with new features - MoE, Quantization
 
 ## Getting Started
 * [Installation](docs/GUIDE.md#a-installation)
@@ -187,20 +188,24 @@ Performance benchmarks were conducted using [TensorRT-LLM gptManagerBenchmark](h
 - Helium1-2B
 - Sky-T1-32B
 - SmolLM2-1.7B
+- Mixtral-8x7B
+- Qwen-MoE
+- DeepSeek-V1, V2
 - and many others that we haven't tested yet
 
 ### Features
 - Multi LoRA
-- Tensor Parallelism
+- Tensor Parallelism / Pipeline Parallelism
+- Mixture of Experts
+- Quantization - Weight-only & FP8 ([AutoAWQ](https://github.com/casper-hansen/AutoAWQ), [AutoGPTQ](https://github.com/AutoGPTQ/AutoGPTQ), [Compressed Tensors](https://github.com/neuralmagic/compressed-tensors))
 
 ## What's Next?
 Below features are planned to be supported in Ditto in the near future. Feel free to reach out if you have any questions or suggestions.
-- Quantization
-- MoE
+- Additional Quantization Support
+- Expert Parallelism
 - Multimodal
 - Speculative Decoding
 - Prefix Caching
-- Pipeline Parallelism
 - State Space Model
 - Encode-Decoder Model
 

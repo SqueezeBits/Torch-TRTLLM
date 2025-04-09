@@ -17,8 +17,11 @@ from .fused_linear import FusedLinear
 from .gated_mlp import GatedMLP
 from .linear import Linear
 from .lora import Lora, LoraProto, MultiLora
+from .moe import MoESubgraph
 from .path import TrailingReformatPath
+from .rmsnorm import RmsNormSubgraph
 from .rope import RoPESubgraph
 from .sdpa import ScaledDotProductAttentionSubgraph
 from .subgraph import Subgraph
 from .token_embedding import TokenEmbedding
+from .topk import TopK

@@ -12,10 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+ACTIVATION_QUANTIZATION = "activation_quantization"
 FREE_LORA_PROTO = "free_lora_proto"
 LORA_PREFIX = "lora_prefix"
 LAYER_INDEX = "layer_index"
 LORA_PROTOS = "lora_protos"
+LINEAR_TYPE = "linear_type"
+MOE_CONFIG = "moe_config"
 ORIGINAL_TARGET = "original_target"
 STACK_TRACE = "stack_trace"
 TENSOR_META = "tensor_meta"

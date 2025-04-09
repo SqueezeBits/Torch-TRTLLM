@@ -18,12 +18,15 @@ from collections.abc import Callable
 from typing import Any
 
 from pydantic import Field, computed_field, model_serializer, model_validator
+from tensorrt_llm.quantization import QuantAlgo
 from typing_extensions import Self
 
-from ...literals import DTypeLiteral, QuantAlgoLiteral
+from ...literals import DTypeLiteral
+from ...quantization import GlobalQuantConfig
 from ...types import StrictlyTyped
 
 
+# pylint: disable=too-many-public-methods
 class TRTLLMMapping(StrictlyTyped):
     """Minimal set of properties for initializing `trtllm.Mapping`.
 
@@ -36,7 +39,7 @@ class TRTLLMMapping(StrictlyTyped):
         pp_size (int): Size of pipeline parallel dimension. Defaults to 1.
         moe_tp_size (int): Size of MoE tensor parallel dimension. Defaults to 0.
         moe_ep_size (int): Size of MoE expert parallel dimension. Defaults to 0.
-        rank (int): Current process rank. Defaults to 0.
+        rank (int | None): Current process rank. Defaults to None.
     """
 
     @computed_field
@@ -55,7 +58,7 @@ class TRTLLMMapping(StrictlyTyped):
     pp_size: int = Field(default=1, ge=1)
     moe_tp_size: int = Field(default=0)
     moe_ep_size: int = Field(default=0)
-    rank: int = Field(default=0, exclude=True)
+    rank: int | None = Field(default=None, exclude=True, validate_default=False)
 
     @property
     def cp_groups(self) -> list[list[int]]:
@@ -142,6 +145,8 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             int: Current process's checkpoint parallel rank
         """
+        if self.rank is None:
+            return 0
         return self.rank % (self.tp_size * self.cp_size) // self.tp_size
 
     @property
@@ -151,6 +156,8 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             int: Current process's tensor parallel rank
         """
+        if self.rank is None:
+            return 0
         return self.rank % self.tp_size
 
     @property
@@ -160,7 +167,37 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             int: Current process's pipeline parallel rank
         """
+        if self.rank is None:
+            return 0
         return self.rank // (self.tp_size * self.cp_size)
+
+    @property
+    def prev_pp_rank(self) -> int:
+        """Get the previous pipeline parallel rank.
+
+        Returns:
+            int: Current process's previous pipeline parallel rank
+        """
+        if self.rank is None:
+            return 0
+        prev_pp_rank = self.rank - self.tp_size * self.cp_size
+        if prev_pp_rank < 0:
+            prev_pp_rank = prev_pp_rank + self.world_size
+        return prev_pp_rank
+
+    @property
+    def next_pp_rank(self) -> int:
+        """Get the next pipeline parallel rank.
+
+        Returns:
+            int: Current process's next pipeline parallel rank
+        """
+        if self.rank is None:
+            return 0
+        next_pp_rank = self.rank + self.tp_size * self.cp_size
+        if next_pp_rank >= self.world_size:
+            next_pp_rank = next_pp_rank - self.world_size
+        return next_pp_rank
 
     @property
     def moe_tp_rank(self) -> int:
@@ -169,6 +206,8 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             int: Current process's MoE tensor parallel rank
         """
+        if self.rank is None:
+            return 0
         return self.tp_rank // self.moe_ep_size
 
     @property
@@ -178,6 +217,8 @@ class TRTLLMMapping(StrictlyTyped):
         Returns:
             int: Current process's MoE expert parallel rank
         """
+        if self.rank is None:
+            return 0
         return self.tp_rank % self.moe_ep_size
 
     @property
@@ -270,46 +311,126 @@ class TRTLLMMapping(StrictlyTyped):
         )
         assert not (self.moe_ep_size != 1 and self.cp_size > 1), "CP don't support MoE tp/ep yet"
 
+        if self.rank is not None:
+            assert self.rank >= 0, f"rank must be non-negative, but got {self.rank=} < 0"
+            assert (
+                self.rank < self.world_size
+            ), f"rank must be lower than world_size, but got {self.rank=} >= {self.world_size=}"
+
         return self
 
-    def copy_with_rank(self, rank: int) -> Self:
-        """Create a copy of configuration with new rank.
+    def is_first_pp_rank(self) -> bool:
+        """Check if the pp rank of this instance is the first pp rank.
 
-        Args:
-            rank (int): New process rank
+        If the rank is not valid, it assumes to be the first pp rank.
 
         Returns:
-            Self: New configuration instance with specified rank
-
-        Raises:
-            AssertionError: If rank is invalid
+            bool: True if the pp rank is 0, False otherwise
         """
-        assert rank < self.world_size, f"rank must be lower than world_size, but got {rank} >= {self.world_size}"
-        return self.__class__(**self.model_dump(), rank=rank)
+        if self.rank is None:
+            return True
+        return self.pp_rank == 0
+
+    def is_last_pp_rank(self) -> bool:
+        """Check if the pp rank of this instance is the last pp rank.
+
+        If the rank is not valid, it assumes to be the last pp rank.
+
+        Returns:
+            bool: True if the pp rank is the last pp rank, False otherwise
+        """
+        if self.rank is None:
+            return True
+        return self.pp_rank == self.pp_size - 1
+
+    def get_pp_layers(self, num_decoder_layers: int) -> list[int]:
+        """Get the decoder layers' indices to be parallelized for the current pipeline rank.
+
+        Args:
+            num_decoder_layers (int): Total number of decoder layers
+
+        Returns:
+            list[int]: List of layers to be parallelized for the current pipeline rank
+        """
+        num_layers_per_pipeline_stage = num_decoder_layers // self.pp_size
+        return list(
+            range(self.pp_rank * num_layers_per_pipeline_stage, (self.pp_rank + 1) * num_layers_per_pipeline_stage)
+        )
 
 
 class TRTLLMQuantConfig(StrictlyTyped):
     """Configuration for model quantization in TRT-LLM.
 
     Attributes:
-        quant_algo (QuantAlgoLiteral | None): Quantization algorithm. Defaults to None.
-        kv_cache_quant_algo (QuantAlgoLiteral | None): KV cache quantization algorithm. Defaults to None.
-        group_size (int): Size of quantization groups. Defaults to 128.
-        smoothquant_val (float): SmoothQuant alpha parameter. Defaults to 0.5.
+        quant_algo (QuantAlgo | None): Quantization algorithm. Defaults to None.
+        kv_cache_quant_algo (QuantAlgo | None): KV cache quantization algorithm. Defaults to None.
+        group_size (int | None): Size of quantization groups. Defaults to None.
+        smoothquant_val (float | None): SmoothQuant alpha parameter. Defaults to None.
         clamp_val (list[float] | None): Min/max clamp values for SmoothQuant. Defaults to None.
         has_zero_point (bool): Whether quantization includes zero point. Defaults to False.
         pre_quant_scale (bool): Whether to apply scaling before quantization. Defaults to False.
         exclude_modules (list[str] | None): Module names to exclude from quantization. Defaults to None.
     """
 
-    quant_algo: QuantAlgoLiteral | None = None
-    kv_cache_quant_algo: QuantAlgoLiteral | None = None
-    group_size: int = 128
-    smoothquant_val: float = 0.5
+    quant_algo: QuantAlgo | None = None
+    kv_cache_quant_algo: QuantAlgo | None = None
+    group_size: int | None = None
+    smoothquant_val: float | None = None
     clamp_val: list[float] | None = Field(default=None, min_length=2, max_length=2)
-    has_zero_point: bool = False
+    has_zero_point: bool | None = None
     pre_quant_scale: bool = False
     exclude_modules: list[str] | None = None
+
+    @classmethod
+    def create_from(cls, global_quant_config: GlobalQuantConfig) -> Self:
+        """Create a TRTLLMQuantConfig from a GlobalQuantConfig.
+
+        Args:
+            global_quant_config (GlobalQuantConfig): The global quantization configuration
+
+        Returns:
+            Self: The created TRTLLMQuantConfig
+        """
+        if not global_quant_config.quant_configs:
+            return cls()
+
+        return cls(
+            quant_algo=global_quant_config.trtllm_quant_algo,
+            kv_cache_quant_algo=global_quant_config.trtllm_kv_cache_quant_algo,
+            group_size=global_quant_config.quant_configs[0].weight_quant_scheme.group_size
+            if global_quant_config.quant_configs[0].weight_quant_scheme is not None
+            else None,
+            clamp_val=global_quant_config.clamp_val,
+            has_zero_point=global_quant_config.quant_configs[0].weight_quant_scheme.has_zero_point
+            if global_quant_config.quant_configs[0].weight_quant_scheme is not None
+            else None,
+        )
+
+
+class TRTLLMMoEConfig(StrictlyTyped):
+    """Configuration for MoE models in TRT-LLM.
+
+    Attributes:
+        num_experts (int): Number of experts in the model.
+        shared_expert_intermediate_size (int): Size of shared expert intermediate layer.
+        top_k (int): Number of experts to route each token to.
+        normalization_mode (int): Mode for normalizing expert routing weights.
+        sparse_mixer_epsilon (float): Small constant for numerical stability in routing.
+        tp_mode (int): Tensor parallelism mode for MoE.
+        device_limited_n_group (int): Number of groups for device-limited MoE.
+        device_limited_topk_group (int): Top-k value for device-limited MoE groups.
+        device_limited_routed_scaling_factor (float): Scaling factor for device-limited routing.
+    """
+
+    num_experts: int = 0
+    shared_expert_intermediate_size: int = 0
+    top_k: int = 0
+    normalization_mode: int = 0
+    sparse_mixer_epsilon: float = 0.01
+    tp_mode: int = 0
+    device_limited_n_group: int = 0
+    device_limited_topk_group: int = 0
+    device_limited_routed_scaling_factor: float = 1.0
 
 
 class TRTLLMPretrainedConfig(StrictlyTyped):
@@ -326,6 +447,7 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
         intermediate_size (int): Size of intermediate layers
         mapping (TRTLLMMapping): Parallel mapping configuration. Defaults to TRTLLMMapping().
         quantization (TRTLLMQuantConfig | None): Quantization configuration. Defaults to None.
+        moe (TRTLLMMoEConfig | None): MoE configuration. Defaults to None.
         extra_fields (dict[str, Any]): Additional configuration fields. Defaults to empty dict.
     """
 
@@ -339,6 +461,7 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
     intermediate_size: int
     mapping: TRTLLMMapping = Field(default_factory=TRTLLMMapping)
     quantization: TRTLLMQuantConfig | None = None
+    moe: TRTLLMMoEConfig | None = Field(default=None, exclude=lambda v: v is None)
     extra_fields: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
     @model_serializer(mode="wrap")

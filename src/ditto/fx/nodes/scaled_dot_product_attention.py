@@ -35,23 +35,22 @@ class ScaledDotProductAttention(FinalCallFunction):
         query (Node): The query tensor node in the attention computation.
         key (Node): The key tensor node in the attention computation.
         value (Node): The value tensor node in the attention computation.
+        scale (float): An optional scaling factor for the dot-product attention.
         attn_mask (Node | None): The attention mask node, if any. Defaults to None.
         dropout_p (float): The dropout probability applied during attention computation.
             Defaults to 0.0.
         is_causal (bool): Whether the attention is causal (e.g., masking future tokens).
             Defaults to False.
-        scale (float | None): An optional scaling factor for the dot-product attention.
-            Defaults to None.
         enable_gqa (bool): Whether to enable grouped-query attention (GQA). Defaults to False.
     """
 
     query: Node
     key: Node
     value: Node
+    scale: float
     attn_mask: Node | None = None
     dropout_p: float = 0.0
     is_causal: bool = False
-    scale: float | None = None
     enable_gqa: bool = False
 
     @classmethod
@@ -60,20 +59,28 @@ class ScaledDotProductAttention(FinalCallFunction):
         return (torch._C._nn.scaled_dot_product_attention,)
 
     @property
-    def is_eligible_for_gpt_attention_plugin(self) -> bool:
+    def default_scale(self) -> float | None:
+        """Get the default scaling factor for the attention scores.
+
+        Returns:
+            float | None: The default scaling factor if head size can be determined,
+                         None otherwise.
+        """
+        head_size = q.shape[-1] if (q := get_tensor_metadata(self.query)) else None
+        return None if head_size is None else 1 / math.sqrt(head_size)
+
+    def is_eligible_for_gpt_attention_plugin(self, is_mla_enabled: bool = False) -> bool:
         """Check if the operation is eligible for the GPT attention plugin.
 
         Evaluates the compatibility of the scaled dot-product attention operation with
         the GPT attention plugin. This includes checks for default parameter values
         and specific scale settings.
         """
-        head_size = q.shape[-1] if (q := get_tensor_metadata(self.query)) else None
-        default_scale = None if head_size is None else 1 / math.sqrt(head_size)
         for name, field in self.model_fields.items():
             if field.is_required():
                 continue
             if (value := getattr(self, name)) != (default_value := field.get_default()):
-                if name == "scale" and default_scale and math.isclose(value, default_scale):
+                if is_mla_enabled:
                     continue
                 logger.warning(
                     f"Cannot support the non-default '{name}={value}' provided to `F.scaled_dot_product_attention` "

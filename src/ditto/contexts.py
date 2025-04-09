@@ -28,6 +28,8 @@ from peft import PeftModel
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import log as symbolic_shape_logger
 
+from .constants import LOG_LEVEL_LITERAL_MAP
+from .literals import LogLevelLiteral
 from .types import verify
 
 
@@ -160,3 +162,23 @@ def temporary_random_seed(*seeds: int | str | bytes | None) -> Generator[None, N
         yield None
     finally:
         random.setstate(original_seed)
+
+
+@contextlib.contextmanager
+def set_logger_level(logger_name: str, log_level: LogLevelLiteral) -> Generator[None, None, None]:
+    """Context manager that temporarily sets a logger's level.
+
+    While active, sets the specified logger to the given log level.
+    The original log level is restored on exit.
+
+    Args:
+        logger_name (str): The name of the logger to modify
+        log_level (LogLevelLiteral): The log level to temporarily set.
+    """
+    internal_logger = logging.getLogger(logger_name)
+    original_level = internal_logger.level
+    internal_logger.setLevel(LOG_LEVEL_LITERAL_MAP[log_level])
+    try:
+        yield None
+    finally:
+        internal_logger.setLevel(original_level)

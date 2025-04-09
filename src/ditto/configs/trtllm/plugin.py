@@ -24,24 +24,41 @@ class TRTLLMPluginConfig(StrictlyTyped):
     """Plugin configuration for TRT-LLM.
 
     Attributes:
-        gpt_attention_plugin: Plugin flag for GPT attention.
-        gemm_plugin: Plugin flag for GEMM.
-        lora_plugin: Plugin flag for LoRA.
-        mamba_conv1d_plugin: Plugin flag for Mamba Conv1D.
-        nccl_plugin: Plugin flag for NCCL.
-        context_fmha: Whether to use context FMHA.
-        paged_kv_cache: Whether to use paged KV cache.
-        remove_input_padding: Whether to remove input padding.
-        tokens_per_block: Number of tokens per block.
-        use_paged_context_fmha: Whether to use paged context FMHA.
-        paged_state: Whether to use paged state.
+        gpt_attention_plugin (PluginFlag): Plugin flag for GPT attention. Default is "auto".
+        gemm_plugin (PluginFlag): Plugin flag for GEMM. Default is "auto".
+        lora_plugin (PluginFlag): Plugin flag for LoRA. Default is None.
+        mamba_conv1d_plugin (PluginFlag): Plugin flag for Mamba Conv1D. Default is "auto".
+        nccl_plugin (PluginFlag): Plugin flag for NCCL. Default is None.
+        fp8_rowwise_gemm_plugin (PluginFlag): Plugin flag for FP8 rowwise GEMM. Default is None.
+        weight_only_groupwise_quant_matmul_plugin (PluginFlag): Plugin flag for weight-only groupwise quant matmul.
+            Default is None.
+        weight_only_quant_matmul_plugin (PluginFlag): Plugin flag for weight-only quant GEMM. Default is None.
+        rmsnorm_quantization_plugin (PluginFlag): Plugin flag for RMSNorm quantization. Default is None.
+        quantize_per_token_plugin (bool): Whether to use per-token quantization. Default is False.
+        quantize_tensor_plugin (bool): Whether to use tensor quantization. Default is False.
+        context_fmha (bool): Whether to use context FMHA. Default is True.
+        paged_kv_cache (bool): Whether to use paged KV cache. Default is True.
+        remove_input_padding (bool): Whether to remove input padding. Default is True.
+        tokens_per_block (int): Number of tokens per block. Default is 64.
+        use_paged_context_fmha (bool): Whether to use paged context FMHA. Default is False.
+        paged_state (bool): Whether to use paged state. Default is False.
     """
 
     gpt_attention_plugin: PluginFlag = "auto"
     gemm_plugin: PluginFlag = "auto"
     lora_plugin: PluginFlag = None
+    moe_plugin: PluginFlag = None
     mamba_conv1d_plugin: PluginFlag = "auto"
     nccl_plugin: PluginFlag = None
+    fp8_rowwise_gemm_plugin: PluginFlag = None
+    weight_only_groupwise_quant_matmul_plugin: PluginFlag = None
+    weight_only_quant_matmul_plugin: PluginFlag = None
+    smooth_quant_plugins: bool = False
+    smooth_quant_gemm_plugin: PluginFlag = None
+    layernorm_quantization_plugin: PluginFlag = None
+    rmsnorm_quantization_plugin: PluginFlag = None
+    quantize_per_token_plugin: bool = False
+    quantize_tensor_plugin: bool = False
     context_fmha: bool = True
     paged_kv_cache: bool = True
     remove_input_padding: bool = True

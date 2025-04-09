@@ -23,6 +23,7 @@ DTypeLiteral = Literal[
     "bfloat16",
     "float32",
     "int8",
+    "uint8",
     "int32",
     "int64",
     "bool",
@@ -32,6 +33,17 @@ DTypeLiteral = Literal[
 which is used by the function `str_dtype_to_trt` in the same file."""
 
 KVCacheTypeLiteral = Literal["CONTINUOUS", "DISABLED", "PAGED"]
+
+LinearTypeLiteral = Literal[
+    "router",
+    "shared_expert",
+    "shared_expert_gate",
+    "mla_kv_a_proj",
+    "mla_kv_b_proj",
+    "mla_q_a_proj",
+    "mla_q_b_proj",
+    "mla_o_proj",
+]
 
 LoraCheckpointLiteral = Literal["hf", "nemo"]
 
@@ -62,7 +74,9 @@ PassName = Literal[
     "AddTRTLLMInputs",
     "BindUnmatchedLoraProtos",
     "CanonicalizeCopy",
+    "CanonicalizeMoEAllReduces",
     "CastMMToFP32",
+    "CastRouterToFP32",
     "ConstantFolding",
     "DecomposeAddMM",
     "DeferCast",
@@ -82,23 +96,37 @@ PassName = Literal[
     "FuseConsecutiveSliceConcat",
     "FuseConsecutiveSplitConcat",
     "FuseConsecutiveToCopys",
+    "FuseDequantizes",
     "FuseGatedMLPProjections",
+    "FuseMLAQKVProjections",
     "FuseQKVProjections",
     "FuseReciprocalMul",
     "HerdConstantsToTheRight",
     "IndexLayers",
     "InsertGatherLastTokenIds",
+    "MarkRouters",
+    "OverrideMulScalarTypePromotion",
     "ParallelizeLinear",
+    "ParallelizePipeline",
     "PopLoraPlugins",
     "PropagateTensorParallelism",
+    "ReplaceMoEByMoEPlugin",
+    "ReplaceMMByFp8GemmPlugin",
+    "ReplaceMMByFp8RowwiseGemmPlugin",
     "ReplaceMMByGemmPlugin",
+    "ReplaceMMByWoQGemmPlugin",
+    "ReplaceRmsNormByFp8RmsNormPlugin",
     "ReplaceSDPAByGPTAttentionPlugin",
+    "ReplaceTopkByTopkLastDimPlugin",
     "ReplaceViewByReshape",
     "ResetCodeGen",
+    "ResolveDynamicReshape",
     "RewriteFloatingPointLiteralsAsNodes",
     "RewriteReshapeAsUnsqueeze",
     "RewriteSplitAsSlices",
+    "StashActQuantSubgraphs",
     "StashLoraSubgraphs",
+    "WrapWeightDequantSubgraphs",
     "WrapRoPESubgraphs",
     "WrapSDPASubgraphs",
 ]
@@ -106,18 +134,12 @@ PassName = Literal[
 
 PluginFlag = Literal["auto", "float16", "bfloat16", "fp8", None]
 
-QuantAlgoLiteral = Literal[
-    "W8A16",
-    "W4A16",
-    "W4A16_AWQ",
-    "W4A8_AWQ",
-    "W4A16_GPTQ",
-    "W8A8_SQ_PER_CHANNEL",
-    "W8A8_SQ_PER_TENSOR_PLUGIN",
-    "W8A8_SQ_PER_CHANNEL_PER_TOKEN_PLUGIN",
-    "W8A8_SQ_PER_CHANNEL_PER_TENSOR_PLUGIN",
-    "W8A8_SQ_PER_TENSOR_PER_TOKEN_PLUGIN",
-    "FP8",
-    "FP8_PER_CHANNEL_PER_TOKEN",
-    "INT8",
+LogLevelLiteral = Literal[
+    "CRITICAL",
+    "FATAL",
+    "ERROR",
+    "WARNING",
+    "INFO",
+    "DEBUG",
+    "NOTSET",
 ]

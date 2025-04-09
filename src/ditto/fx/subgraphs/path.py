@@ -14,7 +14,7 @@
 
 # pyright: reportAttributeAccessIssue=false, reportReturnType=false, reportArgumentType=false
 import sys
-from typing import TypeVar
+from typing import TypeVar, overload
 
 import torch
 from torch._ops import OpOverload
@@ -22,8 +22,7 @@ from torch.fx import Node
 from typing_extensions import Self
 
 from ...types import NodeCriterion
-from ..nodes import NodeSpecialization
-from ..utils import get_tensor_metadata
+from ..utils import NodeType, SubgraphType, get_tensor_metadata
 from .subgraph import Subgraph
 
 
@@ -99,10 +98,6 @@ def get_parents(node: Node) -> list[Node]:
         list[Node]: A list of parent nodes.
     """
     return [n for n in node.all_input_nodes if n.target is not torch.ops.aten.sym_size.int]
-
-
-# pylint: disable-next=invalid-name
-NodeType = TypeVar("NodeType", bound=NodeSpecialization)
 
 
 class TrailingReformatPath(Path):
@@ -186,6 +181,7 @@ class TrailingReformatPath(Path):
         return bottom_ishape.numel() // top_ishape.numel()
 
     @classmethod
+    @overload
     def traceback(
         cls,
         node_type: type[NodeType],
@@ -193,18 +189,83 @@ class TrailingReformatPath(Path):
         *,
         break_if: NodeCriterion = lambda _: False,
     ) -> NodeType | None:
+        ...
+
+    @classmethod
+    @overload
+    def traceback(
+        cls,
+        node_type: type[SubgraphType],
+        node: Node,
+        *,
+        break_if: NodeCriterion = lambda _: False,
+    ) -> SubgraphType | None:
+        ...
+
+    @classmethod
+    def traceback(
+        cls,
+        node_type: type[NodeType] | type[SubgraphType],
+        node: Node,
+        *,
+        break_if: NodeCriterion = lambda _: False,
+    ) -> NodeType | SubgraphType | None:
         """Traceback to find a specific node type in the trailing reformat path.
 
         Args:
-            node_type (type[NodeType]): The type of node to search for.
+            node_type (type[NodeType] | type[Subgraph]): The type of node or subgraph to search for.
             node (Node): The starting node for the traceback.
             break_if (NodeCriterion, optional): A function to determine when to stop tracing.
                 Defaults to a lambda that always returns False.
 
         Returns:
-            NodeType | None: The specialized node of the given type, or None if not found.
+            NodeType | Subgraph | None: The specialized node/subgraph of the given type, or None if not found.
         """
+        if issubclass(node_type, Subgraph):
+            return node_type.configure_from(TrailingReformatPath.configure_from(node, break_if=break_if).top)
         return node_type.specialize_from(TrailingReformatPath.configure_from(node, break_if=break_if).top)
+
+    @classmethod
+    def get_parents(cls, node: Node) -> list[Node]:
+        """Get parent nodes, skipping over reformat operations.
+
+        This method recursively traverses up the graph to find parent nodes, skipping over any
+        reformat operations (like transpose, reshape, etc) to find the true parent computation nodes.
+
+        Args:
+            node (Node): The node to get parents for.
+
+        Returns:
+            list[Node]: List of parent nodes, excluding reformat operations.
+        """
+        results = []
+        for parent in get_parents(node):
+            if parent.target not in cls.get_reformat_targets():
+                results.append(parent)
+            else:
+                results.extend(cls.get_parents(parent))
+        return results
+
+    @classmethod
+    def get_users(cls, node: Node) -> list[Node]:
+        """Get user nodes, skipping over reformat operations.
+
+        This method recursively traverses down the graph to find user nodes, skipping over any
+        reformat operations (like transpose, reshape, etc) to find the true user computation nodes.
+
+        Args:
+            node (Node): The node to get users for.
+
+        Returns:
+            list[Node]: List of user nodes, excluding reformat operations.
+        """
+        results = []
+        for user in node.users:
+            if user.target not in cls.get_reformat_targets():
+                results.append(user)
+            else:
+                results.extend(cls.get_users(user))
+        return results
 
 
 T = TypeVar("T")

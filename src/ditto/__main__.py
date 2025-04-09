@@ -31,7 +31,6 @@ from transformers import (
 from typer import Argument, Option, Typer
 
 from .api import trtllm_build
-from .configs import TRTLLMMapping
 from .constants import DEFAULT_DEVICE
 from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
 from .literals import DTypeLiteral
@@ -168,6 +167,7 @@ def build(
         int | None, Option(help="Optimal number of batched input tokens after padding is removed in each batch.")
     ] = None,
     max_beam_width: Annotated[int, Option(help="Maximum number of beams for beam search decoding.")] = 1,
+    pp_size: Annotated[int, Option(help="N-way pipeline parallelism size.", min=1)] = 1,
     tp_size: Annotated[int, Option(help="N-way tensor parallelism size.", min=1)] = 1,
     logits_dtype: Annotated[
         DTypeLiteral,
@@ -181,9 +181,14 @@ def build(
     gather_all_logits: Annotated[
         bool, Option(help="Equivalent to `--gather-context-logits --gather-generation-logits`.")
     ] = False,
+    run_routers_in_model_dtype: Annotated[
+        bool, Option(help="Run linear layers for routers in MoE models in model dtype instead of FP32.")
+    ] = False,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
-    assert not (tp_size > 1 and peft_ids), "Tensor parallelism with LoRA is currently not supported"
+    assert not (
+        (tp_size > 1 or pp_size > 1) and peft_ids
+    ), "Tensor Parallelism or Pipeline Parallelism with LoRA is currently not supported"
     if gather_all_logits:
         gather_context_logits = gather_generation_logits = True
     output_dir = resolve_output_dir(output_dir, model_id)
@@ -211,7 +216,6 @@ def build(
     trtllm_build(
         model,
         output_dir,
-        mapping=TRTLLMMapping(tp_size=tp_size),
         run_matmuls_in_fp32=run_matmuls_in_fp32,
         run_activations_in_model_dtype=run_activations_in_model_dtype,
         debug_node_names=add_output,
@@ -220,9 +224,12 @@ def build(
         max_num_tokens=max_num_tokens,
         opt_num_tokens=opt_num_tokens,
         max_beam_width=max_beam_width,
+        pp_size=pp_size,
+        tp_size=tp_size,
         logits_dtype=logits_dtype,
         gather_context_logits=gather_context_logits,
         gather_generation_logits=gather_generation_logits,
+        run_routers_in_model_dtype=run_routers_in_model_dtype,
     )
     minutes, seconds = divmod(int(time.perf_counter() - start_time), 60)
     logger.info(f"Build completed in {minutes:02d}:{seconds:02d}")

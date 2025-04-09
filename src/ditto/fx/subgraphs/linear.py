@@ -20,13 +20,31 @@ from torch._subclasses import FakeTensor
 from torch.fx import Node
 from typing_extensions import Self
 
-from ...literals import LoraPluginInputPrefix
+from ...literals import LinearTypeLiteral, LoraPluginInputPrefix
 from ...types import verify
-from ..metadata_keys import FREE_LORA_PROTO, LAYER_INDEX, LORA_PREFIX, LORA_PROTOS
-from ..nodes import MM, AddTensorTensor, Gemm, Reshape
-from ..targets import LoraProto
+from ..metadata_keys import (
+    ACTIVATION_QUANTIZATION,
+    FREE_LORA_PROTO,
+    LAYER_INDEX,
+    LINEAR_TYPE,
+    LORA_PREFIX,
+    LORA_PROTOS,
+)
+from ..nodes import (
+    MM,
+    AddTensorTensor,
+    Dequantize,
+    Fp8RowwiseGemm,
+    Gemm,
+    Reshape,
+    WeightOnlyGroupwiseQuantMatmul,
+    WeightOnlyQuantMatmul,
+)
+from ..targets import ActivationQuantization, LoraProto
 from ..utils import get_val
 from .subgraph import Subgraph
+
+MMType = MM | Fp8RowwiseGemm | Gemm | WeightOnlyGroupwiseQuantMatmul | WeightOnlyQuantMatmul
 
 
 # pylint: disable-next=too-many-public-methods
@@ -44,7 +62,7 @@ class Linear(Subgraph):
         add (AddTensor | None): The bias addition operation node, if present
     """
 
-    mm: MM | Gemm
+    mm: MMType
     add: AddTensorTensor | None
 
     @property
@@ -63,7 +81,7 @@ class Linear(Subgraph):
         """Whether the weight is transposed."""
         if isinstance(self.mm, Gemm):
             return self.mm.target.transb == 1
-        return False
+        return isinstance(self.mm, Fp8RowwiseGemm)
 
     @property
     def weight_in_features_dim(self) -> Literal[0, 1]:
@@ -139,7 +157,13 @@ class Linear(Subgraph):
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
         if not (
-            (mm := MM.specialize_from(node) or Gemm.specialize_from(node))
+            (
+                mm := MM.specialize_from(node)
+                or Fp8RowwiseGemm.specialize_from(node)
+                or Gemm.specialize_from(node)
+                or WeightOnlyGroupwiseQuantMatmul.specialize_from(node)
+                or WeightOnlyQuantMatmul.specialize_from(node)
+            )
             and (input_node := get_val(mm.this, torch.Tensor)) is not None
             and (weight := get_val(mm.other, torch.Tensor)) is not None
             and input_node.ndim == 2
@@ -209,4 +233,40 @@ class Linear(Subgraph):
     @property
     def lora_prefix(self) -> LoraPluginInputPrefix | None:
         """The LoRA prefix associated with this linear layer."""
-        return verify(self.mm.meta.get(LORA_PREFIX), as_type=LoraPluginInputPrefix)
+        return verify(self.mm.meta.get(LORA_PREFIX), as_type=LoraPluginInputPrefix)  # type: ignore[arg-type]
+
+    @property
+    def weight_dequantize_node(self) -> Dequantize | None:
+        """The weight dequantization node associated with this linear layer."""
+        return Dequantize.specialize_from(self.mm.other)
+
+    @property
+    def activation_quantization(self) -> ActivationQuantization | None:
+        """The activation quantization associated with this linear layer."""
+        return verify(self.mm.meta.get(ACTIVATION_QUANTIZATION, None), as_type=ActivationQuantization)
+
+    @activation_quantization.setter
+    def activation_quantization(self, value: ActivationQuantization) -> None:
+        """Set the activation quantization for this linear layer."""
+        assert ACTIVATION_QUANTIZATION not in self.mm.meta, f"Activation quantization already set for {self.mm}"
+        self.mm.meta[ACTIVATION_QUANTIZATION] = value
+
+    def mark_linear_type_as(self, linear_type: LinearTypeLiteral) -> None:
+        """Mark the linear type of this linear layer if it is a part of a MoE layer."""
+        self.mm.meta[LINEAR_TYPE] = linear_type
+
+    @property
+    def exclude_from_tp(self) -> bool:
+        """Whether to exclude this linear layer from tensor parallelism."""
+        if not (linear_type := verify(self.mm.meta.get(LINEAR_TYPE, None), as_type=LinearTypeLiteral)):  # type: ignore
+            return False
+        # pylint: disable=R0801
+        return linear_type in [
+            "router",
+            "shared_expert_gate",
+            "mla_kv_a_proj",
+            "mla_kv_b_proj",
+            "mla_q_a_proj",
+            "mla_q_b_proj",
+            "mla_o_proj",
+        ]

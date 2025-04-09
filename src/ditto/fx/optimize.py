@@ -22,12 +22,15 @@ from ..arguments import TRTLLMArgumentHint
 from ..configs import TRTLLMModelConfig
 from ..constants import FX_TRANSFORM_MAXIMUM_ITERATION
 from ..literals import PassName
+from ..quantization import GlobalQuantConfig
 from .passes import (
     AddTRTLLMInputs,
     BindUnmatchedLoraProtos,
     CanonicalizeCopy,
+    CanonicalizeMoEAllReduces,
     CastMMToFP32,
     CastOutputLogits,
+    CastRouterToFP32,
     ConstantFolding,
     DecomposeAddMM,
     DeferCast,
@@ -46,27 +49,77 @@ from .passes import (
     FuseConsecutiveSliceConcat,
     FuseConsecutiveSplitConcat,
     FuseConsecutiveToCopys,
+    FuseDequantizes,
     FuseGatedMLPProjections,
+    FuseMLAQKVProjections,
     FuseQKVProjections,
     FuseReciprocalMul,
     HerdConstantsToTheRight,
     IndexLayers,
     InsertGatherLastTokenIds,
+    MarkMLALinears,
+    MarkMoELinears,
+    OverrideMulScalarTypePromotion,
+    ParallelizeLinear,
     PopLoraPlugins,
+    PropagateTensorParallelism,
+    ReplaceMMByFp8GemmPlugin,
+    ReplaceMMByFp8RowwiseGemmPlugin,
     ReplaceMMByGemmPlugin,
+    ReplaceMMByWoQGemmPlugin,
+    ReplaceMoEByMoEPlugin,
+    ReplaceRmsNormByFp8RmsNormPlugin,
     ReplaceSDPAByGPTAttentionPlugin,
+    ReplaceTopkByTopkLastDimPlugin,
     ReplaceViewByReshape,
+    ResolveDynamicReshape,
     RewriteFloatingPointLiteralsAsNodes,
     RewriteIndexAsSingleSlice,
     RewritePowAsMul,
     RewriteReshapeAsUnsqueeze,
     RewriteSplitAsSlices,
+    StashActQuantSubgraphs,
     StashLoraSubgraphs,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
+    WrapWeightDequantSubgraphs,
 )
 from .passes.defer_unsqueeze import SwapUnsqueezeWithSymSizeInt
 from .passes.infra import GraphOptimizationPass, PassManager
+
+
+def get_preoptimization_transform(
+    argument_hint: TRTLLMArgumentHint,
+    global_quant_config: GlobalQuantConfig | None,
+    dtype: torch.dtype,
+) -> Callable[[GraphModule], GraphModule]:
+    """Get the pre-optimization transform.
+
+    Args:
+        argument_hint (TRTLLMArgumentHint): the type hints for TRTLLM inputs
+        global_quant_config (GlobalQuantConfig | None): the global quantization configuration
+        dtype (torch.dtype): the data type for the plugins
+
+    Returns:
+        Callable[[GraphModule], GraphModule]: the pre-optimization transform
+    """
+    mark_linears_for_tp = [MarkMoELinears, MarkMLALinears]
+
+    return get_transform(
+        WrapWeightDequantSubgraphs(global_quant_config=global_quant_config, dtype=dtype),
+        StashActQuantSubgraphs(global_quant_config=global_quant_config),
+        StashLoraSubgraphs(),
+        ConstantFolding(),
+        AddTRTLLMInputs(argument_hint=argument_hint),
+        ResolveDynamicReshape(),
+        EliminateCommonExpressions(),
+        *[mark_linear(mapping=argument_hint.mapping) for mark_linear in mark_linears_for_tp],
+        PropagateTensorParallelism(mapping=argument_hint.mapping),
+        ParallelizeLinear(mapping=argument_hint.mapping),
+        CanonicalizeMoEAllReduces(mapping=argument_hint.mapping),
+        steps=1,
+        warn_on_partial_convergence=False,
+    )
 
 
 # pylint: disable=duplicate-code
@@ -75,9 +128,11 @@ def get_optimization_transform(
     model_config: TRTLLMModelConfig,
     dtype: torch.dtype,
     *,
+    global_quant_config: GlobalQuantConfig | None = None,
     skipped_optimizers: list[PassName] | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
+    run_routers_in_model_dtype: bool = False,
 ) -> Callable[[GraphModule], GraphModule]:
     """Optimize the given graph module inplace.
 
@@ -85,12 +140,15 @@ def get_optimization_transform(
         argument_hint (TRTLLMArgumentHint): the type hints for TRTLLM inputs
         model_config (TRTLLMModelConfig): Model configurations
         dtype (torch.dtype): the data type for the plugins
+        global_quant_config (GlobalQuantConfig | None, optional): Global quantization configuration. Defaults to None.
         skipped_optimizers (list[PassName] | None, optional): the names of optimization passes to skip.
             Defaults to None.
         run_matmuls_in_fp32 (bool, optional): whether to run all matrix multiplications in FP32.
             Defaults to False.
         run_activations_in_model_dtype (bool, optional): whether to run all activations (a.k.a. non-linearities) in
             the given `dtype`. Defaults to True.
+        run_routers_in_model_dtype (bool, optional): whether to run linear layers for routers in MoE models in model
+            dtype instead of FP32. Defaults to False.
 
     Returns:
         Callable[[GraphModule], GraphModule]: the function that applies FX optimization passes to the given graph module
@@ -100,9 +158,11 @@ def get_optimization_transform(
             argument_hint=argument_hint,
             model_config=model_config,
             dtype=dtype,
+            global_quant_config=global_quant_config,
             skipped_optimizers=skipped_optimizers,
             run_matmuls_in_fp32=run_matmuls_in_fp32,
             run_activations_in_model_dtype=run_activations_in_model_dtype,
+            run_routers_in_model_dtype=run_routers_in_model_dtype,
         ),
         get_level2_transform(skipped_optimizers),
         ConstantFolding().as_transform(),
@@ -158,6 +218,7 @@ LEVEL2_PASSES: tuple[type[GraphOptimizationPass], ...] = (
     RewritePowAsMul,
     RewriteFloatingPointLiteralsAsNodes,
     RewriteReshapeAsUnsqueeze,
+    ResolveDynamicReshape,
 )
 
 
@@ -183,9 +244,11 @@ def get_trtllm_conversion_transform(
     model_config: TRTLLMModelConfig,
     dtype: torch.dtype,
     *,
+    global_quant_config: GlobalQuantConfig | None = None,
     skipped_optimizers: list[PassName] | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
+    run_routers_in_model_dtype: bool = False,
 ) -> Callable[[GraphModule], GraphModule]:
     """Create a transform that converts a graph module to TensorRT-LLM compatible format.
 
@@ -193,25 +256,43 @@ def get_trtllm_conversion_transform(
         argument_hint (TRTLLMArgumentHint): Type hints for TRTLLM inputs
         model_config (TRTLLMModelConfig): Model configurations
         dtype (torch.dtype): Data type for plugins
+        global_quant_config (GlobalQuantConfig | None, optional): Global quantization configuration. Defaults to None.
         skipped_optimizers (list[PassName] | None, optional): Names of optimization passes to skip. Defaults to None.
         run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
         run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
+        run_routers_in_model_dtype (bool, optional): Whether to run linear layers for routers in MoE models in model
+            dtype instead of FP32. Defaults to False.
 
     Returns:
         Callable[[GraphModule], GraphModule]: A function that applies TRT-LLM conversion passes to a graph module
     """
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
-        AddTRTLLMInputs(argument_hint=argument_hint),
         *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
-        StashLoraSubgraphs,
+        OverrideMulScalarTypePromotion,
+        CastRouterToFP32,
+        ReplaceMoEByMoEPlugin(
+            dtype=dtype,
+            tp_size=argument_hint.mapping.tp_size,
+            tp_rank=argument_hint.mapping.tp_rank,
+        ),
+        ReplaceTopkByTopkLastDimPlugin,
         FuseQKVProjections,
+        FuseMLAQKVProjections,
         FuseGatedMLPProjections,
+        FuseDequantizes,
         WrapRoPESubgraphs,
         RewriteIndexAsSingleSlice,
-        ReplaceSDPAByGPTAttentionPlugin(dtype=dtype),
+        ReplaceSDPAByGPTAttentionPlugin(
+            dtype=dtype,
+            mapping=argument_hint.mapping,
+        ),
         IndexLayers,
         BindUnmatchedLoraProtos,
         PopLoraPlugins(argument_hint=argument_hint),
+        ReplaceRmsNormByFp8RmsNormPlugin(model_dtype=dtype, global_quant_config=global_quant_config),
+        ReplaceMMByWoQGemmPlugin(model_dtype=dtype),
+        ReplaceMMByFp8GemmPlugin,
+        ReplaceMMByFp8RowwiseGemmPlugin(model_dtype=dtype),
         ReplaceMMByGemmPlugin,
         CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]
@@ -221,6 +302,10 @@ def get_trtllm_conversion_transform(
 
     if run_activations_in_model_dtype:
         passes.append(FixActivationPrecision(dtype=dtype))
+
+    if run_routers_in_model_dtype:
+        skipped_optimizers = skipped_optimizers or []
+        skipped_optimizers.append("CastRouterToFP32")
 
     return get_transform(
         *passes,
@@ -293,7 +378,7 @@ def get_transform(
             pass_name := type(fx_pass).__name__ if isinstance(fx_pass, GraphOptimizationPass) else fx_pass.__name__
         ) in skipped_optimizers:
             logger.info(f"Skipping FX optimization pass {pass_name}")
-            _ = skipped_optimizers.pop(skipped_optimizers.index(pass_name))
+            _ = skipped_optimizers.pop(skipped_optimizers.index(pass_name))  # type: ignore[arg-type]
             continue
         pass_manager.add_pass(fx_pass)
 

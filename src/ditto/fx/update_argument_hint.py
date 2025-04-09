@@ -19,18 +19,21 @@ from torch.fx import GraphModule
 from ..arguments import TRTLLMArgumentHint
 from ..constants import INPUT_IDS, INPUT_IDS_UNSQUEEZE_DIM
 from ..contexts import detailed_sym_node_str
+from .subgraphs import TokenEmbedding
 from .utils import get_tensor_metadata
 
 
 def update_argument_hint(
     argument_hint: TRTLLMArgumentHint,
     graph_module: GraphModule,
+    dtype: torch.dtype,
 ) -> None:
     """Update the argument hint from graph module.
 
     Args:
         argument_hint (TRTLLMArgumentHint): The argument hint to update
         graph_module (GraphModule): The graph module to update the argument hint
+        dtype (torch.dtype): The data type of the model
     """
     match_input_ids_dynamic_dims(argument_hint, graph_module)
     argument_hint.num_attn_layers = len(
@@ -39,6 +42,8 @@ def update_argument_hint(
             target=torch._C._nn.scaled_dot_product_attention,
         ),
     )
+    argument_hint.hidden_size = get_hidden_size(graph_module)
+    argument_hint.hidden_dtype = dtype
 
 
 def match_input_ids_dynamic_dims(argument_hint: TRTLLMArgumentHint, graph_module: GraphModule) -> None:
@@ -73,3 +78,18 @@ def get_input_ids_dynamic_dim(graph_module: GraphModule) -> torch.SymInt | None:
     ):
         return sym_int
     return None
+
+
+def get_hidden_size(graph_module: GraphModule) -> int:
+    """Get the hidden size of the model.
+
+    Args:
+        graph_module (GraphModule): The graph module to get the hidden size
+
+    Returns:
+        int: The hidden size of the model
+    """
+    for node in graph_module.graph.nodes:
+        if token_embedding := TokenEmbedding.configure_from(node):
+            return token_embedding.hidden_size
+    raise ValueError("Failed to find hidden size in the graph module")

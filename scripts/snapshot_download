@@ -33,7 +33,8 @@ def get_snapshot_dir(model_id: str) -> str:
         return model_id
 
     org, model = model_id.split("/")
-    snapshot_dir = f"{default_cache_path}/models--{org}--{model}/snapshots"
+    hub_path = os.getenv("HF_HUB_CACHE") or default_cache_path
+    snapshot_dir = f"{hub_path}/models--{org}--{model}/snapshots"
     if not (os.path.isdir(snapshot_dir) and (hashes := get_hashes(snapshot_dir))):
         try:
             _ = AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True)
