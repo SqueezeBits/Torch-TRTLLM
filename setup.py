@@ -27,10 +27,17 @@ def install_torch_tensorrt_with_no_deps() -> None:
         raise SystemError("Failed to install torch-tensorrt")
 
 
+def install_autoawq() -> None:
+    """autoawq package needs to have pre-installed torch at v0.2.8."""
+    if pip.main(["install", "autoawq"]):
+        raise SystemError("Failed to install autoawq")
+
+
 class Develop(develop):
     def run(self) -> None:
         develop.run(self)
         install_torch_tensorrt_with_no_deps()
+        install_autoawq()
 
 
 class EditableWheel(editable_wheel):
@@ -43,6 +50,7 @@ class Install(install):
     def run(self) -> None:
         install.run(self)
         install_torch_tensorrt_with_no_deps()
+        install_autoawq()
 
 
 setuptools.setup(
