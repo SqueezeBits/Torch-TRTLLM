@@ -132,6 +132,7 @@ def get_optimization_transform(
     skipped_optimizers: list[PassName] | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
+    use_paged_context_fmha: bool = True,
     run_routers_in_model_dtype: bool = False,
 ) -> Callable[[GraphModule], GraphModule]:
     """Optimize the given graph module inplace.
@@ -147,6 +148,7 @@ def get_optimization_transform(
             Defaults to False.
         run_activations_in_model_dtype (bool, optional): whether to run all activations (a.k.a. non-linearities) in
             the given `dtype`. Defaults to True.
+        use_paged_context_fmha (bool, optional): whether to use paged context FMHA. Defaults to True.
         run_routers_in_model_dtype (bool, optional): whether to run linear layers for routers in MoE models in model
             dtype instead of FP32. Defaults to False.
 
@@ -162,6 +164,7 @@ def get_optimization_transform(
             skipped_optimizers=skipped_optimizers,
             run_matmuls_in_fp32=run_matmuls_in_fp32,
             run_activations_in_model_dtype=run_activations_in_model_dtype,
+            use_paged_context_fmha=use_paged_context_fmha,
             run_routers_in_model_dtype=run_routers_in_model_dtype,
         ),
         get_level2_transform(skipped_optimizers),
@@ -248,6 +251,7 @@ def get_trtllm_conversion_transform(
     skipped_optimizers: list[PassName] | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
+    use_paged_context_fmha: bool = True,
     run_routers_in_model_dtype: bool = False,
 ) -> Callable[[GraphModule], GraphModule]:
     """Create a transform that converts a graph module to TensorRT-LLM compatible format.
@@ -260,6 +264,7 @@ def get_trtllm_conversion_transform(
         skipped_optimizers (list[PassName] | None, optional): Names of optimization passes to skip. Defaults to None.
         run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
         run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
+        use_paged_context_fmha (bool, optional): Whether to use paged context FMHA. Defaults to True.
         run_routers_in_model_dtype (bool, optional): Whether to run linear layers for routers in MoE models in model
             dtype instead of FP32. Defaults to False.
 
@@ -285,6 +290,7 @@ def get_trtllm_conversion_transform(
         ReplaceSDPAByGPTAttentionPlugin(
             dtype=dtype,
             mapping=argument_hint.mapping,
+            use_paged_context_fmha=use_paged_context_fmha,
         ),
         IndexLayers,
         BindUnmatchedLoraProtos,
