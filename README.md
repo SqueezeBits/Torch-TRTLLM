@@ -2,9 +2,7 @@
 
 <img src="./docs/assets/ditto_logo.png" alt="Ditto logo" width="200" />
 
-[![pytorch](https://img.shields.io/badge/pytorch-%3E%3D2.5%2C%3C2.6-blue)](https://github.com/pytorch/pytorch)
-[![transformers](https://img.shields.io/badge/transformers-%3E%3D4.38.2-yellow)](https://github.com/huggingface/transformers)
-[![tensorrt-llm](https://img.shields.io/badge/tensorrt--llm-0.16.0-green)](https://github.com/NVIDIA/TensorRT-LLM)
+[![tensorrt-llm](https://img.shields.io/badge/tensorrt--llm-0.17.0.post1-green)](https://github.com/NVIDIA/TensorRT-LLM)
 [![torch-tensorrt](https://img.shields.io/badge/torch--tensorrt-2.5.0-lightgreen)](https://github.com/pytorch/TensorRT)
 [![version](https://img.shields.io/badge/version-0.2.1-purple)](#)
 [![license](https://img.shields.io/badge/license-Apache%202-red)](./LICENSE)
@@ -37,7 +35,7 @@ Ditto is an open-source framework that enables **direct conversion of HuggingFac
   ```
 - Enables conversion of novel model architectures into TensorRT engines, including models that are not supported in TensorRT-LLM due to the absence of checkpoint conversion scripts.
     - For example, as of the publication date of this document (February 10, 2025), [Helium](https://huggingface.co/kyutai/helium-1-preview-2b) is supported in Ditto, while it is not in TensorRT-LLM. (Note that you need to re-install transformers nightly-build after installing Ditto as `pip install git+https://github.com/huggingface/transformers.git`)
-- Directly converts quantized HuggingFace models. ([Future Work](#whats-next))
+- Directly converts quantized HuggingFace models.
 
 ## Benchmarks
 

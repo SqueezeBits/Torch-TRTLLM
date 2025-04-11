@@ -60,7 +60,7 @@ with warnings.catch_warnings():
                 Self: The new instance.
             """
             # pylint: disable-next=no-member
-            type_arg = get_args(cls.__orig_bases__[0])[0]  # noqa: N806
+            type_arg = get_args(cls.__orig_bases__[0])[0]  # type: ignore[attr-defined]
             return cls.model_validate(
                 {name.lower(): ((bitmask >> flag.value) & 1) for name, flag in type_arg.__members__.items()}
             )
@@ -75,7 +75,7 @@ with warnings.catch_warnings():
             flags = 0
             data = self.model_dump()
             # pylint: disable-next=no-member
-            type_arg = get_args(type(self).__orig_bases__[0])[0]  # noqa: N806
+            type_arg = get_args(type(self).__orig_bases__[0])[0]  # type: ignore[attr-defined]
             for name, flag in type_arg.__members__.items():
                 assert (key := name.lower()) in data, f"No such {key=} in {data=}"
                 if data[name.lower()]:
@@ -87,7 +87,6 @@ with warnings.catch_warnings():
 
         Attributes:
             fp16 (bool): Whether to use fp16. Defaults to False.
-            bf16 (bool): Whether to use bf16. Defaults to False.
             int8 (bool): Whether to use int8. Defaults to False.
             debug (bool): Whether to use debug. Defaults to False.
             gpu_fallback (bool): Whether to use gpu fallback. Defaults to False.
@@ -104,6 +103,7 @@ with warnings.catch_warnings():
             exclude_lean_runtime (bool): Whether to exclude lean runtime. Defaults to False.
             fp8 (bool): Whether to use fp8. Defaults to False.
             error_on_timing_cache_miss (bool): Whether to use error on timing cache miss. Defaults to False.
+            bf16 (bool): Whether to use bf16. Defaults to False.
             disable_compilation_cache (bool): Whether to disable compilation cache. Defaults to False.
             weightless (bool): Whether to use weightless. Defaults to False.
             strip_plan (bool): Whether to strip plan. Defaults to False.
@@ -116,7 +116,6 @@ with warnings.catch_warnings():
         """
 
         fp16: bool = False
-        bf16: bool = False
         int8: bool = False
         debug: bool = False
         gpu_fallback: bool = False
@@ -133,6 +132,7 @@ with warnings.catch_warnings():
         exclude_lean_runtime: bool = False
         fp8: bool = False
         error_on_timing_cache_miss: bool = False
+        bf16: bool = False
         disable_compilation_cache: bool = False
         weightless: bool = False
         strip_plan: bool = False
@@ -142,6 +142,8 @@ with warnings.catch_warnings():
         refit_individual: bool = False
         strict_nans: bool = False
         monitor_memory: bool = False
+        fp4: bool = False
+        editable_timing_cache: bool = False
 
         @property
         def enabled_precisions(self) -> set[dtype]:
