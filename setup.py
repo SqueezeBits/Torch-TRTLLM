@@ -17,6 +17,7 @@
 import pip
 import setuptools
 from setuptools.command.develop import develop
+from setuptools.command.editable_wheel import editable_wheel
 from setuptools.command.install import install
 
 
@@ -32,6 +33,12 @@ class Develop(develop):
         install_torch_tensorrt_with_no_deps()
 
 
+class EditableWheel(editable_wheel):
+    def run(self) -> None:
+        super().run()
+        install_torch_tensorrt_with_no_deps()
+
+
 class Install(install):
     def run(self) -> None:
         install.run(self)
@@ -42,5 +49,6 @@ setuptools.setup(
     cmdclass={
         "develop": Develop,
         "install": Install,
+        "editable_wheel": EditableWheel,
     },
 )

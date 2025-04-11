@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "pip"]
+requires = ["setuptools>=64.0", "pip"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -44,7 +44,7 @@ dependencies = [
     "tensorrt-cu12-libs==10.7.0",
     "loguru",
     "typer",
-    "autoawq",
+    "autoawq @ git+https://github.com/casper-hansen/AutoAWQ.git@710fe050a938fb73e08d0882245a212389605a90",
     "auto-gptq",
     "compressed-tensors",
 ]
