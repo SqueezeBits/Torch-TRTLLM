@@ -285,6 +285,7 @@ def get_trtllm_conversion_transform(
         ReplaceSDPAByGPTAttentionPlugin(
             dtype=dtype,
             mapping=argument_hint.mapping,
+            plugin_config=model_config.plugin_config,
         ),
         IndexLayers,
         BindUnmatchedLoraProtos,

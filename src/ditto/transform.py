@@ -67,10 +67,10 @@ def transform(
         skipped_optimizers (list[PassName] | None, optional): List of optimizer passes to skip. Defaults to None.
         run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
         run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
-        extra_passes (list[Callable[[GraphModule], GraphModule]] | None, optional): Additional transformation passes to
-            apply. Defaults to None.
         run_routers_in_model_dtype (bool, optional): Whether to run linear layers for routers in MoE models in model
             dtype instead of FP32. Defaults to False.
+        extra_passes (list[Callable[[GraphModule], GraphModule]] | None, optional): Additional transformation passes to
+            apply. Defaults to None.
 
     Returns:
         Generator[tuple[int, GraphModule], None, None]: A generator of tuples containing the rank and the transformed
