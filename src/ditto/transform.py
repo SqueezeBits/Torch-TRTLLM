@@ -53,6 +53,7 @@ def transform(
     skipped_optimizers: list[PassName] | None = None,
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
+    use_paged_context_fmha: bool = True,
     run_routers_in_model_dtype: bool = False,
     extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
 ) -> Generator[tuple[int, GraphModule], None, None]:
@@ -67,10 +68,11 @@ def transform(
         skipped_optimizers (list[PassName] | None, optional): List of optimizer passes to skip. Defaults to None.
         run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
         run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
-        extra_passes (list[Callable[[GraphModule], GraphModule]] | None, optional): Additional transformation passes to
-            apply. Defaults to None.
+        use_paged_context_fmha (bool, optional): Whether to use paged context FMHA. Defaults to True.
         run_routers_in_model_dtype (bool, optional): Whether to run linear layers for routers in MoE models in model
             dtype instead of FP32. Defaults to False.
+        extra_passes (list[Callable[[GraphModule], GraphModule]] | None, optional): Additional transformation passes to
+            apply. Defaults to None.
 
     Returns:
         Generator[tuple[int, GraphModule], None, None]: A generator of tuples containing the rank and the transformed
@@ -122,6 +124,7 @@ def transform(
                     skipped_optimizers=skipped_optimizers,
                     run_matmuls_in_fp32=run_matmuls_in_fp32,
                     run_activations_in_model_dtype=run_activations_in_model_dtype,
+                    use_paged_context_fmha=use_paged_context_fmha,
                     run_routers_in_model_dtype=run_routers_in_model_dtype,
                 ),
                 *(extra_passes or []),

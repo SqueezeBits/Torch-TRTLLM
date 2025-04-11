@@ -54,10 +54,13 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
 
     Attributes:
         dtype (torch.dtype): The data type of the input tensor
+        mapping (TRTLLMMapping): The mapping of the model
+        use_paged_context_fmha (bool): Whether to use paged context FMHA
     """
 
     dtype: torch.dtype
     mapping: TRTLLMMapping = Field(frozen=True)
+    use_paged_context_fmha: bool
 
     # pylint: disable-next=too-many-locals,too-many-statements
     def call(self, graph_module: GraphModule) -> PassResult:
@@ -134,6 +137,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 tp_rank=self.mapping.tp_rank,
                 type_id=DataType(self.dtype).to(trt.DataType),
                 q_scaling=sdpa.default_scale / sdpa.scale,
+                use_paged_context_fmha=self.use_paged_context_fmha,
                 is_mla_enabled=isinstance(attn, MLA),
                 q_lora_rank=q_lora_rank,
                 kv_lora_rank=kv_lora_rank,
