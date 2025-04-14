@@ -72,6 +72,7 @@ class TRTLLMPluginConfig(StrictlyTyped):
         dtype: torch.dtype,
         world_size: int = 1,
         *,
+        tokens_per_block: int = 64,
         use_paged_context_fmha: bool = True,
     ) -> Self:
         """Create a plugin configuration from a given dtype and world size.
@@ -79,7 +80,8 @@ class TRTLLMPluginConfig(StrictlyTyped):
         Args:
             dtype: The dtype to create the plugin configuration for.
             world_size: The world size to create the plugin configuration for.
-            use_paged_context_fmha: Whether to use paged context FMHA.
+            tokens_per_block: The number of tokens per block to create the plugin configuration for. Default is 64.
+            use_paged_context_fmha: Whether to use paged context FMHA. Default is True.
 
         Returns:
             The plugin configuration.
@@ -89,6 +91,7 @@ class TRTLLMPluginConfig(StrictlyTyped):
             gpt_attention_plugin=plugin_flag,
             gemm_plugin=plugin_flag,
             nccl_plugin=plugin_flag if world_size > 1 else None,
+            tokens_per_block=tokens_per_block,
             use_paged_context_fmha=use_paged_context_fmha,
         )
 

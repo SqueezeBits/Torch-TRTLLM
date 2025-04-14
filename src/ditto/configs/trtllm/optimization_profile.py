@@ -114,6 +114,11 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
                 f"max_input_len ({max_input_len}) is larger than max_seq_len ({max_seq_len}), using max_seq_len"
             )
             max_input_len = max_seq_len
+        if plugin_config.context_fmha and max_num_tokens < plugin_config.tokens_per_block:
+            raise ValueError(
+                f"When context_fmha is enabled, max_num_tokens ({max_num_tokens}) should be at least "
+                f"tokens_per_block ({plugin_config.tokens_per_block})"
+            )
         if opt_num_tokens is None:
             opt_num_tokens = min(max_num_tokens, max_batch_size * max_beam_width)
             logger.debug(f"opt_num_tokens is not set, specifying to {opt_num_tokens}")
