@@ -18,8 +18,8 @@ import torch
 from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
 from torch.fx import Node
-from transformers.utils.quantization_config import QuantizationMethod
 
+from ...literals import HFQuantizeMethod
 from ...types import DataType
 from ..nodes import GetAttr
 from ..subgraphs import Linear
@@ -144,7 +144,7 @@ def get_weightonly_groupwise_quant_algo(
 def postprocess_qweight_for_trtllm(
     qweight: torch.Tensor,
     bits: int,
-    quant_method: QuantizationMethod,
+    quant_method: HFQuantizeMethod,
     *,
     model_dtype: torch.dtype,
     per_group: bool = False,
@@ -154,7 +154,7 @@ def postprocess_qweight_for_trtllm(
     Args:
         qweight (torch.Tensor): The quantized weight tensor
         bits (int): The number of bits used for quantization
-        quant_method (QuantizationMethod): The quantization method used
+        quant_method (HFQuantizeMethod): The quantization method used
         model_dtype (torch.dtype): The model data type.
         per_group (bool): Whether the quantization is per group. Defaults to False.
 
@@ -162,7 +162,7 @@ def postprocess_qweight_for_trtllm(
         torch.Tensor: The postprocessed weight tensor for TensorRT-LLM
     """
     assert bits in (4, 8), "Only 4-bit or 8-bit quantization is supported for Weight-Only Quantization of TensorRT-LLM"
-    if quant_method in (QuantizationMethod.AWQ, QuantizationMethod.GPTQ, QuantizationMethod.COMPRESSED_TENSORS):
+    if quant_method in ("awq", "gptq", "compressed-tensors"):
         assert qweight.dtype in (torch.uint8, torch.int8), f"Unsupported tensor dtype: {qweight.dtype=}"
         if bits == 4:
             qweight = (qweight[:, 1::2] * 16 + qweight[:, ::2]).view(torch.int8)
@@ -178,7 +178,7 @@ def postprocess_qweight_for_trtllm(
 
 def postprocess_zeros_for_trtllm(
     zeros: torch.Tensor,
-    quant_method: QuantizationMethod,
+    quant_method: HFQuantizeMethod,
     *,
     scale: torch.Tensor,
     model_dtype: torch.dtype,
@@ -187,14 +187,14 @@ def postprocess_zeros_for_trtllm(
 
     Args:
         zeros (torch.Tensor): The quantized zero point tensor
-        quant_method (QuantizationMethod): The quantization method used
+        quant_method (HFQuantizeMethod): The quantization method used
         scale (torch.Tensor): The scale tensor
         model_dtype (torch.dtype): The model data type
 
     Returns:
         torch.Tensor: The postprocessed zero point tensor for TensorRT-LLM
     """
-    if quant_method in (QuantizationMethod.AWQ, QuantizationMethod.COMPRESSED_TENSORS, QuantizationMethod.GPTQ):
+    if quant_method in ("awq", "compressed-tensors", "gptq"):
         zeros = zeros * scale
         zeros = zeros.to(model_dtype)
     else:
@@ -204,24 +204,24 @@ def postprocess_zeros_for_trtllm(
 
 
 def inference_trtllm_quant_algo(
-    bits: int, compute_dtype: torch.dtype, *, hf_quant_method: QuantizationMethod
+    bits: int, compute_dtype: torch.dtype, *, hf_quant_method: HFQuantizeMethod
 ) -> QuantAlgo:
     """Infer the quantization algorithm for TensorRT-LLM .
 
     Args:
         bits (int): The number of bits used for quantization
         compute_dtype (torch.dtype): The compute data type
-        hf_quant_method (QuantizationMethod): The quantization method used by the Hugging Face model
+        hf_quant_method (HFQuantizeMethod): The quantization method used by the Hugging Face model
 
     Returns:
         QuantAlgo: The quantization algorithm for TensorRT-LLM
     """
     assert bits in (4, 8), "Only 4-bit and 8-bit quantization is supported for TensorRT-LLM"
-    if hf_quant_method in (QuantizationMethod.AWQ, QuantizationMethod.COMPRESSED_TENSORS, QuantizationMethod.GPTQ):
+    if hf_quant_method in ("awq", "compressed-tensors", "gptq"):
         quant_algo: str = f"W{bits}A{compute_dtype.itemsize * 8}"
-        if hf_quant_method == QuantizationMethod.GPTQ:
+        if hf_quant_method == "gptq":
             quant_algo = f"{quant_algo}_GPTQ"
-        elif hf_quant_method == QuantizationMethod.AWQ:
+        elif hf_quant_method == "awq":
             quant_algo = f"{quant_algo}_AWQ"
     else:
         raise RuntimeError(f"Unsupported quantization method: {hf_quant_method}")

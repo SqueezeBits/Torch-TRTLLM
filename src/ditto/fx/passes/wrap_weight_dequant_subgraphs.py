@@ -17,9 +17,9 @@ import torch
 from compressed_tensors.compressors.quantized_compressors.pack_quantized import unpack_from_int32
 from tensorrt_llm.quantization.functional import unpack_int32_into_int8
 from torch.fx import Node
-from transformers.utils.quantization_config import QuantizationMethod
 from typing_extensions import Self
 
+from ...literals import HFQuantizeMethod
 from ...quantization import GlobalQuantConfig, QuantizeMode, QuantScheme
 from ...types import StrictlyTyped
 from ..nodes import MM, GetAttr, MulTensorTensor, Permute
@@ -126,14 +126,14 @@ class TrailingDequantizePath(StrictlyTyped):
 
     @classmethod
     def configure_from(
-        cls, node: Node, weight_quant_scheme: QuantScheme, quant_method: QuantizationMethod
+        cls, node: Node, weight_quant_scheme: QuantScheme, quant_method: HFQuantizeMethod
     ) -> Self | None:
         """Configure the trailing dequantize path from a node.
 
         Args:
             node (Node): The node to configure the trailing dequantize path from
             weight_quant_scheme (QuantScheme): The weight quantization scheme
-            quant_method (QuantizationMethod): The quantization method used to quantize the weight
+            quant_method (HFQuantizeMethod): The quantization method used to quantize the weight
 
         Returns:
             Self | None: The trailing dequantize path or None if no such path is found
@@ -225,15 +225,13 @@ def get_ancestors_with_maxdepth_to_root(node: Node) -> dict[Node, int]:
     return {node: memo[node] for node in sorted(memo, reverse=True)}
 
 
-def get_group_size(
-    scale_shape: torch.Size, org_weight_shape: torch.Size, quant_method: QuantizationMethod
-) -> int | None:
+def get_group_size(scale_shape: torch.Size, org_weight_shape: torch.Size, quant_method: HFQuantizeMethod) -> int | None:
     """Get the group size for the quantized weight.
 
     Args:
         scale_shape (torch.Size): The shape of the scale tensor
         org_weight_shape (torch.Size): The shape of the original weight
-        quant_method (QuantizationMethod): The quantization method used to quantize the weight
+        quant_method (HFQuantizeMethod): The quantization method used to quantize the weight
 
     Returns:
         int | None: The group size for the quantized weight or None if no such group size is found
@@ -243,7 +241,7 @@ def get_group_size(
         raise ValueError(f"Expected 0, 1, or 2 dimensions, got {ndim} for scale tensor when getting group size.")
 
     if ndim == 2:
-        dim_size_for_group = scale_shape[1] if quant_method == QuantizationMethod.COMPRESSED_TENSORS else scale_shape[0]
+        dim_size_for_group = scale_shape[1] if quant_method == "compressed-tensors" else scale_shape[0]
         if dim_size_for_group != 1:
             group_size = int(org_weight_shape[0] / dim_size_for_group)
             return group_size
@@ -252,19 +250,19 @@ def get_group_size(
 
 
 def get_quantize_mode(
-    scale_shape: torch.Size, org_weight_shape: torch.Size, quant_method: QuantizationMethod
+    scale_shape: torch.Size, org_weight_shape: torch.Size, quant_method: HFQuantizeMethod
 ) -> QuantizeMode:
     """Get the quantize mode for the quantized weight.
 
     Args:
         scale_shape (torch.Size): The shape of the scale tensor
         org_weight_shape (torch.Size): The shape of the original weight
-        quant_method (QuantizationMethod): The quantization method used to quantize the weight
+        quant_method (HFQuantizeMethod): The quantization method used to quantize the weight
     """
     ndim = len(scale_shape)
     if ndim in (0, 1):
         return QuantizeMode.PER_TENSOR
-    if ndim == 2 and scale_shape[1 if quant_method == QuantizationMethod.COMPRESSED_TENSORS else 0] == 1:
+    if ndim == 2 and scale_shape[1 if quant_method == "compressed-tensors" else 0] == 1:
         return QuantizeMode.PER_CHANNEL
 
     raise RuntimeError(f"Could not infer a quantization mode for {scale_shape=} and {org_weight_shape=}.")
@@ -275,7 +273,7 @@ def find_qweight_and_zero_node(
     nodes: list[Node],
     org_weight_shape: torch.Size,
     weight_quant_scheme: QuantScheme,
-    quant_method: QuantizationMethod,
+    quant_method: HFQuantizeMethod,
     *,
     group_size: int | None = None,
 ) -> tuple[GetAttr, GetAttr | None]:
@@ -285,15 +283,15 @@ def find_qweight_and_zero_node(
         nodes (list[Node]): The nodes to find the qweight and zero node from
         org_weight_shape (torch.Size): The shape of the original weight
         weight_quant_scheme (QuantScheme): The weight quantization scheme
-        quant_method (QuantizationMethod): The quantization method used to quantize the weight
+        quant_method (HFQuantizeMethod): The quantization method used to quantize the weight
         group_size (int | None, optional): The group size for the quantized weight. Defaults to None.
 
     Returns:
         tuple[GetAttr, GetAttr | None]: The qweight and zero node for the quantized weight
     """
-    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
+    if quant_method in ("gptq", "awq"):
         assert group_size is not None, "Group size is required for GPTQ and AWQ."
-        expected_equal_dim = 1 if quant_method == QuantizationMethod.GPTQ else 0
+        expected_equal_dim = 1 if quant_method == "gptq" else 0
         for node in nodes:
             assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
             shape = node_val.shape
@@ -320,7 +318,7 @@ def find_qweight_and_zero_node(
 
         return qweight, zero
 
-    if quant_method == QuantizationMethod.COMPRESSED_TENSORS:
+    if quant_method == "compressed-tensors":
         if weight_quant_scheme.bits == 4:  # Note: weight is expected to be packed and it might have zero point
             for node in nodes:
                 assert isinstance(node_val := get_val(node), torch.Tensor), "not found tensor value from the node"
@@ -363,7 +361,7 @@ def find_qweight_and_zero_node(
     raise NotImplementedError(f"Quantization for {quant_method} is not implemented yet.")
 
 
-def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: QuantizationMethod) -> torch.Tensor:
+def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: HFQuantizeMethod) -> torch.Tensor:
     """Unpack the quantized weight tensor from int32 to int8 or uint8.
 
     if the weight is already unpacked, it will return the original tensor.
@@ -371,30 +369,30 @@ def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: QuantizationM
     Args:
         qweight (torch.Tensor): The quantized weight tensor
         bits (int): The number of bits used for quantization
-        quant_method (QuantizationMethod): The quantization method used
+        quant_method (HFQuantizeMethod): The quantization method used
 
     Returns:
         torch.Tensor: The unpacked weight tensor
     """
     assert bits in (4, 8), f"Unsupported bits: {bits=}"
-    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ):
+    if quant_method in ("gptq", "awq"):
         if bits == 4:
             qweight = unpack_int32_into_int8(
-                qweight if quant_method is QuantizationMethod.AWQ else qweight.T,
-                quant_method is QuantizationMethod.AWQ,
+                qweight if quant_method == "awq" else qweight.T,
+                quant_method == "awq",
             )
-            qweight = qweight.T if quant_method is QuantizationMethod.GPTQ else qweight
+            qweight = qweight.T if quant_method == "gptq" else qweight
             qweight = qweight - 8
             qweight[qweight < 0] += 16
             qweight = qweight.view(torch.uint8).contiguous()
         else:
             qweight = (
                 qweight.T.contiguous().view(torch.uint8).T.contiguous()
-                if quant_method is QuantizationMethod.GPTQ
+                if quant_method == "gptq"
                 else qweight.view(torch.uint8).contiguous()
             )
             qweight = (qweight - 128).to(torch.int8)
-    elif quant_method == QuantizationMethod.COMPRESSED_TENSORS:
+    elif quant_method == "compressed-tensors":
         if qweight.dtype == torch.int32:
             original_shape = torch.Size([qweight.shape[0], qweight.shape[1] * (32 // bits)])
             qweight = unpack_from_int32(qweight, bits, original_shape)
@@ -409,27 +407,27 @@ def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: QuantizationM
     return qweight
 
 
-def unpack_zeros(zeros: torch.Tensor, bits: int, quant_method: QuantizationMethod) -> torch.Tensor:
+def unpack_zeros(zeros: torch.Tensor, bits: int, quant_method: HFQuantizeMethod) -> torch.Tensor:
     """Unpack the quantized zero point tensor.
 
     Args:
         zeros (torch.Tensor): The quantized zero point tensor
         bits (int): The number of bits used for quantization
-        quant_method (QuantizationMethod): The quantization method used
+        quant_method (HFQuantizeMethod): The quantization method used
 
     Returns:
         torch.Tensor: The unpacked zero point tensor
     """
-    if quant_method in (QuantizationMethod.GPTQ, QuantizationMethod.AWQ, QuantizationMethod.COMPRESSED_TENSORS):
+    if quant_method in ("gptq", "awq", "compressed-tensors"):
         assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
         if bits == 4:
             zeros = unpack_int32_into_int8(
-                zeros.T if quant_method is QuantizationMethod.COMPRESSED_TENSORS else zeros,
-                quant_method is QuantizationMethod.AWQ,
+                zeros.T if quant_method == "compressed-tensors" else zeros,
+                quant_method == "awq",
             )
         else:
             zeros = zeros.view(torch.int8)
-        zeros = -zeros + 2 ** (bits - 1) - 1 * (quant_method is QuantizationMethod.GPTQ)
+        zeros = -zeros + 2 ** (bits - 1) - 1 * (quant_method == "gptq")
     else:
         raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
 

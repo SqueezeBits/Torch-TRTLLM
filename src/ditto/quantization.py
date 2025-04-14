@@ -26,10 +26,10 @@ from transformers.utils.quantization_config import (
     CompressedTensorsConfig,
     GPTQConfig,
     QuantizationConfigMixin,
-    QuantizationMethod,
 )
 from typing_extensions import Self
 
+from .literals import HFQuantizeMethod
 from .types import StrictlyTyped
 
 
@@ -143,7 +143,7 @@ class GlobalQuantConfig(StrictlyTyped):
     """Global quantization configuration.
 
     Attributes:
-        hf_quant_method (QuantizationMethod): The quantization method used by the Hugging Face model
+        hf_quant_method (HFQuantizeMethod): The quantization method used by the Hugging Face model
         trtllm_quant_algo (QuantAlgo): The quantization algorithm used by TRT-LLM
         trtllm_kv_cache_quant_algo (QuantAlgo | None): The quantization algorithm used by TRT-LLM for the KV cache.
             Defaults to None.
@@ -151,7 +151,7 @@ class GlobalQuantConfig(StrictlyTyped):
         quant_configs (list[TargetQuantConfig]): The quantization schemes for the target operators.
     """
 
-    hf_quant_method: QuantizationMethod
+    hf_quant_method: HFQuantizeMethod
     trtllm_quant_algo: QuantAlgo
     trtllm_kv_cache_quant_algo: QuantAlgo | None = None
     clamp_val: list[float] | None = None
@@ -179,7 +179,7 @@ class GlobalQuantConfig(StrictlyTyped):
             if quantization_config.bits not in (4, 8):
                 raise ValueError(f"Unsupported GPTQ bits: {quantization_config.bits=}")
             return cls(
-                hf_quant_method=quantization_config.quant_method,
+                hf_quant_method=quantization_config.quant_method.value,
                 trtllm_quant_algo=QuantAlgo.W4A16_GPTQ if quantization_config.bits == 4 else QuantAlgo.W8A16_GPTQ,
                 quant_configs=[
                     TargetQuantConfig(
@@ -199,7 +199,7 @@ class GlobalQuantConfig(StrictlyTyped):
             if quantization_config.bits not in (4, 8):
                 raise ValueError(f"Unsupported AWQ bits: {quantization_config.bits=}")
             return cls(
-                hf_quant_method=quantization_config.quant_method,
+                hf_quant_method=quantization_config.quant_method.value,
                 trtllm_quant_algo=QuantAlgo.W4A16_AWQ if quantization_config.bits == 4 else QuantAlgo.W8A16,
                 quant_configs=[
                     TargetQuantConfig(

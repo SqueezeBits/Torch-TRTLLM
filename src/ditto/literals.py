@@ -143,3 +143,5 @@ LogLevelLiteral = Literal[
     "DEBUG",
     "NOTSET",
 ]
+
+HFQuantizeMethod = Literal["gptq", "awq", "compressed-tensors", "modelopt", None]
