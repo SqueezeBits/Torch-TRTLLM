@@ -181,6 +181,10 @@ def build(
     gather_all_logits: Annotated[
         bool, Option(help="Equivalent to `--gather-context-logits --gather-generation-logits`.")
     ] = False,
+    use_paged_context_fmha: Annotated[
+        bool,
+        Option(help="Use paged context FMHA. It allows advanced features like KV cache resue and chunked context."),
+    ] = True,
     run_routers_in_model_dtype: Annotated[
         bool, Option(help="Run linear layers for routers in MoE models in model dtype instead of FP32.")
     ] = False,
@@ -229,6 +233,7 @@ def build(
         logits_dtype=logits_dtype,
         gather_context_logits=gather_context_logits,
         gather_generation_logits=gather_generation_logits,
+        use_paged_context_fmha=use_paged_context_fmha,
         run_routers_in_model_dtype=run_routers_in_model_dtype,
     )
     minutes, seconds = divmod(int(time.perf_counter() - start_time), 60)

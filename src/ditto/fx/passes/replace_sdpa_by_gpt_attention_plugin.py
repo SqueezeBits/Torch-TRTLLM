@@ -21,7 +21,7 @@ from pydantic import Field
 from torch.fx import Graph, GraphModule, Node
 from typing_extensions import Self
 
-from ...configs import TRTLLMMapping
+from ...configs import TRTLLMMapping, TRTLLMPluginConfig
 from ...debug import save_for_debug
 from ...types import DataType, StrictlyTyped, SymbolicShape, expect_identical
 from ..nodes import (
@@ -54,10 +54,13 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
 
     Attributes:
         dtype (torch.dtype): The data type of the input tensor
+        mapping (TRTLLMMapping): The mapping of the model
+        plugin_config (TRTLLMPluginConfig): The plugin configuration
     """
 
     dtype: torch.dtype
     mapping: TRTLLMMapping = Field(frozen=True)
+    plugin_config: TRTLLMPluginConfig = Field(frozen=True)
 
     # pylint: disable-next=too-many-locals,too-many-statements
     def call(self, graph_module: GraphModule) -> PassResult:
@@ -134,6 +137,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 tp_rank=self.mapping.tp_rank,
                 type_id=DataType(self.dtype).to(trt.DataType),
                 q_scaling=sdpa.default_scale / sdpa.scale,
+                use_paged_context_fmha=self.plugin_config.use_paged_context_fmha,
                 is_mla_enabled=isinstance(attn, MLA),
                 q_lora_rank=q_lora_rank,
                 kv_lora_rank=kv_lora_rank,
