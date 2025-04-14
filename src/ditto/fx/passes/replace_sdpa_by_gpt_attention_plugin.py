@@ -135,6 +135,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 head_size=attn.embed_dim,
                 tp_size=self.mapping.tp_size,
                 tp_rank=self.mapping.tp_rank,
+                tokens_per_block=self.plugin_config.tokens_per_block,
                 type_id=DataType(self.dtype).to(trt.DataType),
                 q_scaling=sdpa.default_scale / sdpa.scale,
                 use_paged_context_fmha=self.plugin_config.use_paged_context_fmha,

@@ -181,6 +181,7 @@ def build(
     gather_all_logits: Annotated[
         bool, Option(help="Equivalent to `--gather-context-logits --gather-generation-logits`.")
     ] = False,
+    tokens_per_block: Annotated[int, Option(help="Number of tokens per block.")] = 64,
     use_paged_context_fmha: Annotated[
         bool,
         Option(help="Use paged context FMHA. It allows advanced features like KV cache resue and chunked context."),
@@ -233,6 +234,7 @@ def build(
         logits_dtype=logits_dtype,
         gather_context_logits=gather_context_logits,
         gather_generation_logits=gather_generation_logits,
+        tokens_per_block=tokens_per_block,
         use_paged_context_fmha=use_paged_context_fmha,
         run_routers_in_model_dtype=run_routers_in_model_dtype,
     )

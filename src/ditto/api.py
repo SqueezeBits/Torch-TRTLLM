@@ -68,6 +68,7 @@ def trtllm_build(
     logits_dtype: DTypeLiteral = "float32",
     gather_context_logits: bool = False,
     gather_generation_logits: bool = False,
+    tokens_per_block: int = 64,
     use_paged_context_fmha: bool = True,
     run_routers_in_model_dtype: bool = False,
 ) -> None:
@@ -97,6 +98,7 @@ def trtllm_build(
         logits_dtype (DTypeLiteral): Dtype of the output logits
         gather_context_logits (bool): Whether to gather context token logits for benchmark
         gather_generation_logits (bool): Whether to gather generation token logits for benchmark
+        tokens_per_block (int): Number of tokens per block for TensorRT engine
         use_paged_context_fmha (bool): Whether to use paged context FMHA
         run_routers_in_model_dtype (bool): Whether to run linear layers for routers in MoE models in model dtype
             instead of FP32.
@@ -105,6 +107,7 @@ def trtllm_build(
     plugin_config = TRTLLMPluginConfig.create_from(
         model.config.torch_dtype,
         mapping.world_size,
+        tokens_per_block=tokens_per_block,
         use_paged_context_fmha=use_paged_context_fmha,
     )
     profile_config = TRTLLMOptimizationProfileConfig.create_from(
