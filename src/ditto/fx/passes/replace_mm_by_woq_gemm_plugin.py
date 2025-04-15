@@ -16,10 +16,12 @@
 import tensorrt as trt
 import torch
 from loguru import logger
+from pydantic import Field
 from tensorrt_llm.quantization import QuantAlgo
 from torch.fx import Node
 
 from ...literals import HFQuantizeMethod
+from ...quantization import GlobalQuantConfig
 from ...types import DataType
 from ..nodes import GetAttr
 from ..subgraphs import Linear
@@ -36,19 +38,21 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
     """
 
     model_dtype: torch.dtype
+    global_quant_config: GlobalQuantConfig | None = Field(default=None, frozen=True)
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
-            (linear := Linear.configure_from(node))
+            self.global_quant_config is not None
+            and (linear := Linear.configure_from(node))
             and linear.activation_quantization is None
             and (dequantize := linear.weight_dequantize_node) is not None
-            and (unpacked_weight := GetAttr.specialize_from(dequantize.qweight))
+            and (unpacked_weight := GetAttr.specialize_from(dequantize.weight))
             and (scale := GetAttr.specialize_from(dequantize.scale))
             and (
                 local_trtllm_quant_algo := inference_trtllm_quant_algo(
-                    dequantize.target.bits,
-                    dequantize.target.dtype,
-                    hf_quant_method=dequantize.target.global_quant_config.hf_quant_method,
+                    dequantize.bits,
+                    self.model_dtype,
+                    hf_quant_method=self.global_quant_config.hf_quant_method,
                 )
             )
             in (
@@ -61,19 +65,19 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
         ):
             return {}
 
-        if dequantize.target.global_quant_config.trtllm_quant_algo != local_trtllm_quant_algo:
+        if self.global_quant_config.trtllm_quant_algo != local_trtllm_quant_algo:
             logger.warning(
                 f"The quantization algorithm of the dequantize node ({local_trtllm_quant_algo}) is different from "
-                f"the global quantization algorithm ({dequantize.target.global_quant_config.trtllm_quant_algo}). "
-                f"This is not expected and may lead to incorrect behavior."
+                f"the global quantization algorithm ({self.global_quant_config.trtllm_quant_algo}). "
+                "This is not expected and may lead to incorrect behavior."
             )
 
         postprocessed_qweight_tensor = postprocess_qweight_for_trtllm(
             unpacked_weight.tensor,
-            dequantize.target.bits,
-            dequantize.target.global_quant_config.hf_quant_method,
+            dequantize.bits,
+            self.global_quant_config.hf_quant_method,
             model_dtype=self.model_dtype,
-            per_group=dequantize.target.group_size is not None,
+            per_group=dequantize.group_size is not None,
         )
         with node.graph.inserting_before(unpacked_weight.node):
             postprocessed_qweight = GetAttr.create(
@@ -85,7 +89,7 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
         if zeros := GetAttr.specialize_from(dequantize.zeros) if dequantize.zeros is not None else None:
             postprocessed_zeros_tensor = postprocess_zeros_for_trtllm(
                 zeros.tensor,
-                dequantize.target.global_quant_config.hf_quant_method,
+                self.global_quant_config.hf_quant_method,
                 scale=scale.tensor,
                 model_dtype=self.model_dtype,
             )
@@ -97,23 +101,23 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
 
         with node.graph.inserting_before(node):
             plugin: WeightOnlyQuantMatmulPlugin | WeightOnlyGroupwiseQuantMatmulPlugin
-            if dequantize.target.group_size is not None:
+            if dequantize.group_size is not None:
                 plugin = WeightOnlyGroupwiseQuantMatmulPlugin(
-                    type_id=DataType(dequantize.target.dtype).to(trt.DataType),
+                    type_id=DataType(self.model_dtype).to(trt.DataType),
                     quant_algo=get_weightonly_groupwise_quant_algo(
                         False,
                         zeros is not None,
                         False,
                         local_trtllm_quant_algo == QuantAlgo.W4A8_AWQ,
-                        dequantize.target.bits == 8,
+                        dequantize.bits == 8,
                     ),
-                    group_size=dequantize.target.group_size,
+                    group_size=dequantize.group_size,
                 )
             else:
                 assert len(plugin_inputs) == 3, "Zero point is not supported for weight-only quantization"
                 plugin = WeightOnlyQuantMatmulPlugin(
-                    type_id=DataType(dequantize.target.dtype).to(trt.DataType),
-                    weight_type_id=WeightTypeId.INT8 if dequantize.target.bits == 8 else WeightTypeId.INT4,
+                    type_id=DataType(self.model_dtype).to(trt.DataType),
+                    weight_type_id=WeightTypeId.INT8 if dequantize.bits == 8 else WeightTypeId.INT4,
                 )
 
             plugin_node = node.graph.call_function(plugin, tuple(plugin_inputs))

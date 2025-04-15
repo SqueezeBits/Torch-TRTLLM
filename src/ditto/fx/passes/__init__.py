@@ -72,4 +72,3 @@ from .stash_act_quant_subgraphs import StashActQuantSubgraphs
 from .stash_lora_subgraphs import StashLoraSubgraphs
 from .wrap_rope_subgraphs import WrapRoPESubgraphs
 from .wrap_sdpa_subgraphs import WrapSDPASubgraphs
-from .wrap_weight_dequant_subgraphs import WrapWeightDequantSubgraphs

@@ -18,37 +18,35 @@ from typing import Any
 import torch
 from torch.fx import Node
 
-from ..targets import Dequantizer
 from .call_function import FinalCallFunction
 from .get_attr import GetAttr
 
 
 class Dequantize(FinalCallFunction):
-    """A representation of the dequantization operation.
+    """A representation of torch.ops.ditto.dequantize.default operation.
 
     Attributes:
-        qweight (Node): The quantized weight tensor node.
+        weight (Node): The unpacked weight tensor node.
         scale (Node): The scale tensor node.
-        zeros (Node | None): The zeros tensor node, if any. Defaults to None.
+        bits (int): The number of bits.
+        zeros (Node | None): The unpacked zeros tensor node, if any. Defaults to None.
+        group_size (int | None): The group size, if any. Defaults to None.
     """
 
-    qweight: Node
+    weight: Node
     scale: Node
-    zeros: Node | None
+    bits: int
+    zeros: Node | None = None
+    group_size: int | None = None
 
     @property
-    def target(self) -> Dequantizer:
-        assert isinstance(t := super().target, Dequantizer)
-        return t
-
-    @property
-    def qweight_tensor(self) -> torch.Tensor | None:
-        """Get the quantized weight tensor.
+    def weight_tensor(self) -> torch.Tensor | None:
+        """Get the unpacked weight tensor.
 
         Returns:
-            torch.Tensor | None: The quantized weight tensor or None if not found
+            torch.Tensor | None: The unpacked weight tensor or None if not found
         """
-        if attr := GetAttr.specialize_from(self.qweight):
+        if attr := GetAttr.specialize_from(self.weight):
             return attr.tensor
         return None
 
@@ -76,8 +74,4 @@ class Dequantize(FinalCallFunction):
 
     @classmethod
     def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
-        return ()
-
-    @classmethod
-    def validate_node(cls, node: Node) -> bool:
-        return isinstance(node.target, Dequantizer)
+        return (torch.ops.ditto.dequantize.default,)

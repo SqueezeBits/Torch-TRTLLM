@@ -16,9 +16,12 @@ from enum import Enum, auto
 
 import torch
 from auto_gptq.nn_modules.qlinear import qlinear_cuda_old
+from awq.modules.linear.gemm import WQLinear_GEMM
+from compressed_tensors.compressors.quantized_compressors.pack_quantized import unpack_from_int32
 from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy, QuantizationType
 from loguru import logger
 from tensorrt_llm.quantization import QuantAlgo
+from tensorrt_llm.quantization.functional import unpack_int32_into_int8
 from torch._ops import OpOverload
 from transformers import PretrainedConfig
 from transformers.utils.quantization_config import (
@@ -303,14 +306,112 @@ class GlobalQuantConfig(StrictlyTyped):
         raise RuntimeError(f"Unsupported quantization algorithm: {quantization_config}")
 
 
-def resolve_qlinear_device_map(model: torch.nn.Module) -> None:
-    """Resolve the device map for the QuantLinear module.
+def preprocess_qlinear_module(model: torch.nn.Module, global_quant_config: GlobalQuantConfig) -> None:
+    """Unpacking the packed weight and zeros of the QLinear modules.
 
     Args:
-        model (torch.nn.Module): The model to resolve the device map for
+        model (torch.nn.Module): The model to preprocess
+        global_quant_config (GlobalQuantConfig): The global quantization config
     """
-    # Note: This is a temporary solution to resolve PendingUnbackedSymbolNotFound error during the fake propagation.
     for _, module in model.named_modules():
-        if isinstance(module, qlinear_cuda_old.QuantLinear):
-            if module.wf.device != module.qzeros.device:
-                module.wf = module.wf.to(module.qzeros.device)
+        if isinstance(module, qlinear_cuda_old.QuantLinear | WQLinear_GEMM):
+            bits = module.bits if isinstance(module, qlinear_cuda_old.QuantLinear) else module.w_bit
+            module.register_buffer(
+                "unpacked_weight",
+                unpack_qweight(
+                    module.qweight,
+                    bits,
+                    global_quant_config.hf_quant_method,
+                ),
+            )
+            module.register_buffer(
+                "unpacked_zeros",
+                unpack_zeros(
+                    module.qzeros,
+                    bits,
+                    global_quant_config.hf_quant_method,
+                ),
+            )
+            if (
+                global_quant_config.quant_configs[0].weight_quant_scheme is not None
+                and global_quant_config.quant_configs[0].weight_quant_scheme.mode == QuantizeMode.UNKNOWN
+            ):
+                global_quant_config.quant_configs[0].weight_quant_scheme.mode = QuantizeMode.PER_GROUP
+        else:
+            pass
+
+
+def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: HFQuantizeMethod) -> torch.Tensor:
+    """Unpack the quantized weight tensor from int32 to int8 or uint8.
+
+    if the weight is already unpacked, it will return the original tensor.
+
+    Args:
+        qweight (torch.Tensor): The quantized weight tensor
+        bits (int): The number of bits used for quantization
+        quant_method (HFQuantizeMethod): The quantization method used
+
+    Returns:
+        torch.Tensor: The unpacked weight tensor
+    """
+    assert bits in (4, 8), f"Unsupported bits: {bits=}"
+    device = qweight.device
+    if quant_method in ("gptq", "awq"):
+        if bits == 4:
+            qweight = unpack_int32_into_int8(
+                qweight if quant_method == "awq" else qweight.T,
+                quant_method == "awq",
+            )
+            qweight = qweight.T if quant_method == "gptq" else qweight
+            qweight = qweight - 8
+            qweight[qweight < 0] += 16
+            qweight = qweight.view(torch.uint8).contiguous()
+        else:
+            qweight = (
+                qweight.T.contiguous().view(torch.uint8).T.contiguous()
+                if quant_method == "gptq"
+                else qweight.view(torch.uint8).contiguous()
+            )
+            qweight = (qweight - 128).to(torch.int8)
+    elif quant_method == "compressed-tensors":
+        if qweight.dtype == torch.int32:
+            original_shape = torch.Size([qweight.shape[0], qweight.shape[1] * (32 // bits)])
+            qweight = unpack_from_int32(qweight, bits, original_shape)
+
+            if bits == 4:
+                qweight[qweight < 0] += 16
+                qweight = qweight.view(torch.uint8).contiguous()
+    else:
+        raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
+
+    assert qweight.dtype.itemsize == 1, f"Wrong dtype of qweight: {qweight.dtype=}"
+    return qweight.to(device)
+
+
+def unpack_zeros(zeros: torch.Tensor, bits: int, quant_method: HFQuantizeMethod) -> torch.Tensor:
+    """Unpack the quantized zero point tensor.
+
+    Args:
+        zeros (torch.Tensor): The quantized zero point tensor
+        bits (int): The number of bits used for quantization
+        quant_method (HFQuantizeMethod): The quantization method used
+
+    Returns:
+        torch.Tensor: The unpacked zero point tensor
+    """
+    device = zeros.device
+    if quant_method in ("gptq", "awq", "compressed-tensors"):
+        assert bits in (4, 8), f"Unsupported GPTQ or AWQ bits: {bits=}"
+        if bits == 4:
+            zeros = unpack_int32_into_int8(
+                zeros.T if quant_method == "compressed-tensors" else zeros,
+                quant_method == "awq",
+            )
+        else:
+            zeros = zeros.view(torch.int8)
+        zeros = -zeros + 2 ** (bits - 1) - 1 * (quant_method == "gptq")
+    else:
+        raise NotImplementedError(f"Unsupported quantization method: {quant_method}")
+
+    assert zeros.dtype.itemsize == 1, f"Wrong dtype of zeros: {zeros.dtype=}"
+    return zeros.to(device)
