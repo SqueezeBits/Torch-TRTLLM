@@ -20,10 +20,11 @@ from awq.modules.linear.gemm import WQLinear_GEMM
 from compressed_tensors.compressors.quantized_compressors.pack_quantized import unpack_from_int32
 from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy, QuantizationType
 from loguru import logger
+from peft import PeftModel
 from tensorrt_llm.quantization import QuantAlgo
 from tensorrt_llm.quantization.functional import unpack_int32_into_int8
 from torch._ops import OpOverload
-from transformers import PretrainedConfig
+from transformers import PretrainedConfig, PreTrainedModel
 from transformers.utils.quantization_config import (
     AwqConfig,
     CompressedTensorsConfig,
@@ -306,7 +307,7 @@ class GlobalQuantConfig(StrictlyTyped):
         raise RuntimeError(f"Unsupported quantization algorithm: {quantization_config}")
 
 
-def preprocess_qlinear_module(model: torch.nn.Module, global_quant_config: GlobalQuantConfig) -> None:
+def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_config: GlobalQuantConfig) -> None:
     """Unpacking the packed weight and zeros of the QLinear modules.
 
     Args:
@@ -332,6 +333,10 @@ def preprocess_qlinear_module(model: torch.nn.Module, global_quant_config: Globa
                     global_quant_config.hf_quant_method,
                 ),
             )
+            if module.bias is not None and module.bias.dtype != model.dtype:
+                module.bias = module.bias.to(model.dtype)
+            if isinstance(module.scales, torch.Tensor) and module.scales.dtype != model.dtype:
+                module.scales = module.scales.to(model.dtype)
             if (
                 global_quant_config.quant_configs[0].weight_quant_scheme is not None
                 and global_quant_config.quant_configs[0].weight_quant_scheme.mode == QuantizeMode.UNKNOWN

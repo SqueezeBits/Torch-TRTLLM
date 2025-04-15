@@ -38,7 +38,6 @@ def patch_wqlinear_mm_func_forward() -> None:
         out_features=0,
     ):
         out_shape = x.shape[:-1] + (out_features,)
-        x = x.to(torch.float16)
 
         out = ditto_dequantize(qweight, scales, w_bit, qzeros, group_size)
         out = torch.matmul(x, out)
@@ -53,9 +52,6 @@ def patch_wqlinear_mm_func_forward() -> None:
 
     def patched_gemm_forward(self: WQLinear_GEMM, x: torch.Tensor) -> torch.Tensor:
         out_shape = x.shape[:-1] + (self.out_features,)
-        input_dtype = x.dtype
-        if input_dtype != torch.float16:
-            x = x.half()
 
         with torch.no_grad():
             out = WQLinearMMFunction.apply(
@@ -68,9 +64,6 @@ def patch_wqlinear_mm_func_forward() -> None:
                 self.bias,
                 self.out_features,
             )
-
-        if input_dtype != torch.float16:
-            out = out.to(dtype=input_dtype)
 
         return out.reshape(out_shape)
 
