@@ -18,6 +18,7 @@ import torch
 from auto_gptq.nn_modules.qlinear import qlinear_cuda_old
 from awq.modules.linear.gemm import WQLinear_GEMM
 from compressed_tensors.compressors.quantized_compressors.pack_quantized import unpack_from_int32
+from compressed_tensors.linear.compressed_linear import CompressedLinear
 from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy, QuantizationType
 from loguru import logger
 from peft import PeftModel
@@ -318,32 +319,47 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
         if isinstance(module, qlinear_cuda_old.QuantLinear | WQLinear_GEMM):
             bits = module.bits if isinstance(module, qlinear_cuda_old.QuantLinear) else module.w_bit
             module.register_buffer(
-                "unpacked_weight",
-                unpack_qweight(
-                    module.qweight,
-                    bits,
-                    global_quant_config.hf_quant_method,
-                ),
+                "unpacked_weight", unpack_qweight(module.qweight, bits, global_quant_config.hf_quant_method)
             )
             module.register_buffer(
                 "unpacked_zeros",
-                unpack_zeros(
-                    module.qzeros,
-                    bits,
-                    global_quant_config.hf_quant_method,
-                ),
+                unpack_zeros(module.qzeros, bits, global_quant_config.hf_quant_method)
+                if isinstance(module.qzeros, torch.Tensor)
+                else None,
             )
             if module.bias is not None and module.bias.dtype != model.dtype:
                 module.bias = module.bias.to(model.dtype)
             if isinstance(module.scales, torch.Tensor) and module.scales.dtype != model.dtype:
                 module.scales = module.scales.to(model.dtype)
-            if (
-                global_quant_config.quant_configs[0].weight_quant_scheme is not None
-                and global_quant_config.quant_configs[0].weight_quant_scheme.mode == QuantizeMode.UNKNOWN
-            ):
-                global_quant_config.quant_configs[0].weight_quant_scheme.mode = QuantizeMode.PER_GROUP
-        else:
-            pass
+
+        elif isinstance(module, CompressedLinear):
+            if "weight_packed" in module.compressor.compression_param_names:  # packed_compressor
+                assert isinstance(packed_weight := module.weight_packed, torch.Tensor)
+                assert isinstance(weight_shape := module.weight_shape, torch.Tensor)
+                bits = 32 // (weight_shape[1].item() // packed_weight.shape[1])
+                unpacked_weight = unpack_qweight(
+                    packed_weight, bits, global_quant_config.hf_quant_method
+                ).T.contiguous()
+                unpacked_zeros = (
+                    unpack_zeros(packed_zero, bits, global_quant_config.hf_quant_method)
+                    if hasattr(module, "weight_zero_point")
+                    and isinstance(packed_zero := module.weight_zero_point, torch.Tensor)
+                    else None
+                )
+            else:
+                unpacked_weight = module.weight
+                unpacked_zeros = (
+                    module.weight_zero_point
+                    if hasattr(module, "weight_zero_point") and isinstance(module.weight_zero_point, torch.Tensor)
+                    else None
+                )
+
+            module.register_buffer("unpacked_weight", unpacked_weight)
+            module.register_buffer("unpacked_zeros", unpacked_zeros)
+            assert isinstance(weight_scale := module.weight_scale, torch.Tensor), "scale tensor is not found"
+            module.register_buffer(
+                "scales", weight_scale.T.contiguous() if module.quantization_scheme.weights.group_size else weight_scale
+            )
 
 
 def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: HFQuantizeMethod) -> torch.Tensor:

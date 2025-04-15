@@ -20,7 +20,7 @@ from .patch import custom_patch
 
 
 @custom_patch(
-    name="autoawq_qlinear_gemm",
+    name="awq.modules.linear.gemm.WQLinear_GEMM",
     reason="applying custom dequantize operation",
     required=True,
     env_var_to_disable="DISABLE_AUTO_AWQ_WQLINEAR_GEMM_PATCH",

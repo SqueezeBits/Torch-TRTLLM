@@ -26,7 +26,7 @@ from auto_gptq.utils import import_utils  # noqa: E402
 
 
 @custom_patch(
-    name="AutoGPTQ_QuantLinear",
+    name="auto_gptq.nn_modules.qlinear.qlinear_cuda_old.QuantLinear",
     reason="applying custom dequantize operation",
     required=True,
     env_var_to_disable="DISABLE_AUTO_GPTQ_QUANTLINEAR_PATCH",
