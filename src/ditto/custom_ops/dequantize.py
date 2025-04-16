@@ -12,59 +12,67 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# pylint: disable=unused-argument
+# pylint: disable=unused-argument,too-many-positional-arguments
 
 import torch
 
 
 @torch.library.custom_op("ditto::dequantize", mutates_args=())
 def dequantize(
-    weight: torch.Tensor,
-    scale: torch.Tensor,
+    x: torch.Tensor,
     bits: int,
+    dynamic: bool,
+    output_dtype: torch.dtype,
+    scale: torch.Tensor | None = None,
     zeros: torch.Tensor | None = None,
     group_size: int | None = None,
 ) -> torch.Tensor:
-    """Dequantize the weight tensor.
+    """Dequantize the input tensor.
 
     This function's implementation is not supported in the no fake mode.
 
     Args:
-        weight (torch.Tensor): The weight tensor to dequantize.
-        scale (torch.Tensor): The scale tensor.
+        x (torch.Tensor): The input tensor to dequantize.
         bits (int): The number of bits.
+        dynamic (bool): Whether the quantization is dynamic.
+        output_dtype (torch.dtype | None): The output data type.
+        scale (torch.Tensor | None): The scale tensor. Defaults to None.
         zeros (torch.Tensor | None): The zeros tensor. Defaults to None.
         group_size (int | None): The group size. Defaults to None.
 
     Returns:
         torch.Tensor: The dequantized weight tensor.
     """
-    raise NotImplementedError("Dequantization is not supported in the no fake mode.")
+    raise NotImplementedError("ditto::dequantize is not supported in the no fake mode.")
 
 
 @torch.library.register_fake("ditto::dequantize")
 def fake_dequantize(
-    weight: torch.Tensor,
-    scale: torch.Tensor,
+    x: torch.Tensor,
     bits: int,
+    dynamic: bool,
+    output_dtype: torch.dtype,
+    scale: torch.Tensor | None = None,
     zeros: torch.Tensor | None = None,
     group_size: int | None = None,
 ) -> torch.Tensor:
-    """Fake dequantize the weight tensor.
+    """Fake dequantize the input tensor.
 
     This function is a fake version of the torch.ops.ditto.dequantize operation.
 
     Args:
-        weight (torch.Tensor): The weight tensor to dequantize.
-        scale (torch.Tensor): The scale tensor.
+        x (torch.Tensor): The input tensor to dequantize.
         bits (int): The number of bits.
+        dynamic (bool): Whether the quantization is dynamic.
+        output_dtype (torch.dtype | None): The output data type.
+        scale (torch.Tensor | None): The scale tensor. Defaults to None.
         zeros (torch.Tensor | None): The zeros tensor. Defaults to None.
         group_size (int | None): The group size. Defaults to None.
 
     Returns:
         torch.Tensor: The dequantized weight tensor.
     """
-    return torch.zeros_like(weight, dtype=scale.dtype, device=weight.device)
+    return torch.zeros_like(x, dtype=output_dtype, device=x.device)
 
 
 ditto_dequantize = torch.ops.ditto.dequantize

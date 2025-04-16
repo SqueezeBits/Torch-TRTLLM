@@ -14,7 +14,13 @@
 
 import torch
 from compressed_tensors.linear.compressed_linear import CompressedLinear
-from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy
+from compressed_tensors.quantization import (
+    QuantizationArgs,
+    QuantizationScheme,
+    QuantizationStatus,
+    QuantizationStrategy,
+)
+from compressed_tensors.quantization.lifecycle import forward
 
 from ..custom_ops import ditto_dequantize
 from .patch import custom_patch
@@ -56,13 +62,38 @@ def patch_compressed_linear_process() -> None:
     def patched_forward(self, input: torch.Tensor) -> torch.Tensor:
         unpacked_weight = ditto_dequantize(
             self.unpacked_weight,
-            self.scales,
             self.quantization_scheme.weights.num_bits,
+            False,
+            self.scales.dtype,
+            self.scales,
             self.unpacked_zeros,
             self.quantization_scheme.weights.group_size,
         )
         out = torch.nn.functional.linear(input, unpacked_weight.T, self.bias if self.bias is not None else None)
         return out
 
+    @torch.no_grad()
+    def patched_forward_quantize(
+        module: torch.nn.Module, value: torch.Tensor, base_name: str, args: QuantizationArgs
+    ) -> torch.Tensor:
+        if module.quantization_status == QuantizationStatus.COMPRESSED and base_name == "weight":
+            return value
+
+        if args.dynamic:
+            out = ditto_dequantize(value, args.num_bits, True, value.dtype)
+        else:
+            out = ditto_dequantize(
+                value,
+                args.num_bits,
+                False,
+                module.input_scale.dtype if base_name == "input" else module.scales.dtype,
+                module.input_scale if base_name == "input" else module.scales,
+                module.unpacked_zeros,
+                args.group_size,
+            )
+
+        return out
+
     CompressedLinear.from_linear = patched_from_linear
     CompressedLinear.forward = patched_forward
+    forward.forward_quantize = patched_forward_quantize

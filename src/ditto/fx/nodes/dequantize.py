@@ -18,6 +18,7 @@ from typing import Any
 import torch
 from torch.fx import Node
 
+from ...quantization import QuantizeMode
 from .call_function import FinalCallFunction
 from .get_attr import GetAttr
 
@@ -26,27 +27,31 @@ class Dequantize(FinalCallFunction):
     """A representation of torch.ops.ditto.dequantize.default operation.
 
     Attributes:
-        weight (Node): The unpacked weight tensor node.
-        scale (Node): The scale tensor node.
+        x (Node): The input tensor node.
         bits (int): The number of bits.
+        dynamic (bool): Whether the quantization is dynamic.
+        output_dtype (torch.dtype): The output data type.
+        scale (Node | None): The scale tensor node. Defaults to None.
         zeros (Node | None): The unpacked zeros tensor node, if any. Defaults to None.
         group_size (int | None): The group size, if any. Defaults to None.
     """
 
-    weight: Node
-    scale: Node
+    x: Node
     bits: int
+    dynamic: bool
+    output_dtype: torch.dtype
+    scale: Node | None = None
     zeros: Node | None = None
     group_size: int | None = None
 
     @property
-    def weight_tensor(self) -> torch.Tensor | None:
-        """Get the unpacked weight tensor.
+    def input_tensor(self) -> torch.Tensor | None:
+        """Get the input tensor.
 
         Returns:
-            torch.Tensor | None: The unpacked weight tensor or None if not found
+            torch.Tensor | None: The input tensor or None if not found
         """
-        if attr := GetAttr.specialize_from(self.weight):
+        if attr := GetAttr.specialize_from(self.x):
             return attr.tensor
         return None
 
@@ -57,7 +62,7 @@ class Dequantize(FinalCallFunction):
         Returns:
             torch.Tensor | None: The scale tensor or None if not found
         """
-        if attr := GetAttr.specialize_from(self.scale):
+        if self.scale is not None and (attr := GetAttr.specialize_from(self.scale)):
             return attr.tensor
         return None
 
@@ -71,6 +76,24 @@ class Dequantize(FinalCallFunction):
         if self.zeros is not None and (attr := GetAttr.specialize_from(self.zeros)):
             return attr.tensor
         return None
+
+    @property
+    def quantize_mode(self) -> QuantizeMode:
+        """Get the quantization mode.
+
+        Returns:
+            QuantizeMode: The quantization mode
+        """
+        if (scale := self.scale_tensor) is not None:
+            if self.group_size is not None:
+                return QuantizeMode.PER_GROUP
+            if scale.ndim in (0, 1):
+                return QuantizeMode.PER_TENSOR
+            if scale.ndim == 2 and (scale.shape[1] == 1):
+                return QuantizeMode.PER_CHANNEL
+        if self.dynamic:
+            return QuantizeMode.PER_TOKEN
+        return QuantizeMode.UNKNOWN
 
     @classmethod
     def possible_targets(cls) -> tuple[Callable[..., Any], ...]:

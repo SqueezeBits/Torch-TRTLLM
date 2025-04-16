@@ -68,7 +68,7 @@ from .rewrite_index_as_single_slice import RewriteIndexAsSingleSlice
 from .rewrite_pow_as_mul import RewritePowAsMul
 from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
 from .rewrite_split_as_slices import RewriteSplitAsSlices
-from .stash_act_quant_subgraphs import StashActQuantSubgraphs
+from .stash_activation_dequantize import StashActivationDequantize
 from .stash_lora_subgraphs import StashLoraSubgraphs
 from .wrap_rope_subgraphs import WrapRoPESubgraphs
 from .wrap_sdpa_subgraphs import WrapSDPASubgraphs

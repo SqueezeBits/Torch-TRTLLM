@@ -78,7 +78,7 @@ from .passes import (
     RewritePowAsMul,
     RewriteReshapeAsUnsqueeze,
     RewriteSplitAsSlices,
-    StashActQuantSubgraphs,
+    StashActivationDequantize,
     StashLoraSubgraphs,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
@@ -103,7 +103,7 @@ def get_preoptimization_transform(
     mark_linears_for_tp = [MarkMoELinears, MarkMLALinears]
 
     return get_transform(
-        StashActQuantSubgraphs(global_quant_config=global_quant_config),
+        StashActivationDequantize(global_quant_config=global_quant_config),
         StashLoraSubgraphs(),
         ConstantFolding(),
         AddTRTLLMInputs(argument_hint=argument_hint),
@@ -289,7 +289,7 @@ def get_trtllm_conversion_transform(
         ReplaceRmsNormByFp8RmsNormPlugin(model_dtype=dtype, global_quant_config=global_quant_config),
         ReplaceMMByWoQGemmPlugin(model_dtype=dtype, global_quant_config=global_quant_config),
         ReplaceMMByFp8GemmPlugin,
-        ReplaceMMByFp8RowwiseGemmPlugin(model_dtype=dtype),
+        ReplaceMMByFp8RowwiseGemmPlugin,
         ReplaceMMByGemmPlugin,
         CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]

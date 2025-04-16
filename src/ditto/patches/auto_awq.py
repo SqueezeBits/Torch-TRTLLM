@@ -39,7 +39,7 @@ def patch_wqlinear_mm_func_forward() -> None:
     ):
         out_shape = x.shape[:-1] + (out_features,)
 
-        out = ditto_dequantize(qweight, scales, w_bit, qzeros, group_size)
+        out = ditto_dequantize(qweight, w_bit, False, scales.dtype, scales, qzeros, group_size)
         out = torch.matmul(x, out)
 
         out = out + bias if bias is not None else out

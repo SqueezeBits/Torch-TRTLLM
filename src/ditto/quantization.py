@@ -331,6 +331,8 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
                 module.bias = module.bias.to(model.dtype)
             if isinstance(module.scales, torch.Tensor) and module.scales.dtype != model.dtype:
                 module.scales = module.scales.to(model.dtype)
+            del module.qweight
+            del module.qzeros
 
         elif isinstance(module, CompressedLinear):
             if "weight_packed" in module.compressor.compression_param_names:  # packed_compressor
@@ -346,13 +348,17 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
                     and isinstance(packed_zero := module.weight_zero_point, torch.Tensor)
                     else None
                 )
+                del module.weight_packed
+                if unpacked_zeros is not None:
+                    del module.weight_zero_point
             else:
-                unpacked_weight = module.weight
+                unpacked_weight = module.weight.T.contiguous()
                 unpacked_zeros = (
                     module.weight_zero_point
                     if hasattr(module, "weight_zero_point") and isinstance(module.weight_zero_point, torch.Tensor)
                     else None
                 )
+                del module.weight
 
             module.register_buffer("unpacked_weight", unpacked_weight)
             module.register_buffer("unpacked_zeros", unpacked_zeros)
@@ -360,6 +366,7 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
             module.register_buffer(
                 "scales", weight_scale.T.contiguous() if module.quantization_scheme.weights.group_size else weight_scale
             )
+            del module.weight_scale
 
 
 def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: HFQuantizeMethod) -> torch.Tensor:

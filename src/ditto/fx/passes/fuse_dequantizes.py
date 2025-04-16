@@ -39,7 +39,7 @@ class FuseDequantizes(NodewiseOptimizationPass):
             and are_fusible(dequantizes)
             and (
                 weights := [
-                    dequantize.weight_tensor for dequantize in dequantizes if dequantize.weight_tensor is not None
+                    dequantize.input_tensor for dequantize in dequantizes if dequantize.input_tensor is not None
                 ]
             )
             and (
@@ -72,8 +72,10 @@ class FuseDequantizes(NodewiseOptimizationPass):
             fused_dequantize = Dequantize.create(
                 node.graph,
                 fused_weight_attr,
-                fused_scale_attr,
                 dequantizes[0].bits,
+                dequantizes[0].dynamic,
+                dequantizes[0].output_dtype,
+                fused_scale_attr,
                 fused_zeros_attr,
                 dequantizes[0].group_size,
             )
@@ -94,9 +96,9 @@ def are_fusible(dequantizes: list[Dequantize]) -> bool:
     """
     if not (
         all(dequantizes[0].bits == dequantize.bits for dequantize in dequantizes[1:])
-        and (
-            weights := [dequantize.weight_tensor for dequantize in dequantizes if dequantize.weight_tensor is not None]
-        )
+        and all(dequantizes[0].dynamic == dequantize.dynamic for dequantize in dequantizes[1:])
+        and all(dequantizes[0].output_dtype == dequantize.output_dtype for dequantize in dequantizes[1:])
+        and (weights := [dequantize.input_tensor for dequantize in dequantizes if dequantize.input_tensor is not None])
         and len(weights) == len(dequantizes)
         and all(weights[0].shape[0] == weight.shape[0] and weights[0].dtype == weight.dtype for weight in weights[1:])
         and (scales := [dequantize.scale_tensor for dequantize in dequantizes if dequantize.scale_tensor is not None])

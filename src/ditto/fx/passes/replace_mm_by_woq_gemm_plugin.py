@@ -35,6 +35,7 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
 
     Attributes:
         model_dtype (torch.dtype): The data type of the model
+        global_quant_config (GlobalQuantConfig | None): The global quantization configuration
     """
 
     model_dtype: torch.dtype
@@ -45,8 +46,9 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
             self.global_quant_config is not None
             and (linear := Linear.configure_from(node))
             and linear.activation_quantization is None
-            and (dequantize := linear.weight_dequantize_node) is not None
-            and (unpacked_weight := GetAttr.specialize_from(dequantize.weight))
+            and (dequantize := linear.weight_dequantize_node)
+            and (unpacked_weight := GetAttr.specialize_from(dequantize.x))
+            and dequantize.scale
             and (scale := GetAttr.specialize_from(dequantize.scale))
             and (
                 local_trtllm_quant_algo := inference_trtllm_quant_algo(

@@ -48,8 +48,10 @@ def patch_dynamically_import_quantlinear() -> None:
         out_shape = x.shape[:-1] + (self.outfeatures,)
         weight = ditto_dequantize(
             self.unpacked_weight,
-            self.scales,
             self.bits,
+            False,
+            self.scales.dtype,
+            self.scales,
             self.unpacked_zeros,
             self.group_size,
         )

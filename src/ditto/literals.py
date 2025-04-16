@@ -124,7 +124,7 @@ PassName = Literal[
     "RewriteFloatingPointLiteralsAsNodes",
     "RewriteReshapeAsUnsqueeze",
     "RewriteSplitAsSlices",
-    "StashActQuantSubgraphs",
+    "StashActivationDequantize",
     "StashLoraSubgraphs",
     "WrapRoPESubgraphs",
     "WrapSDPASubgraphs",

@@ -83,7 +83,10 @@ def find_closest_common_descendant(x: Node, y: Node) -> Node | None:
 
 
 def get_nodes_with_depth(
-    node: Node, follow_parent: bool = True, break_if: NodeCriterion = lambda _: False
+    node: Node,
+    follow_parent: bool = True,
+    break_if: NodeCriterion = lambda _: False,
+    max_depth: int = -1,
 ) -> dict[Node, int]:
     """Get all ancestor(descendant) nodes of a given node with their depths.
 
@@ -93,6 +96,7 @@ def get_nodes_with_depth(
             (False). Defaults to True.
         break_if (NodeCriterion, optional): Function that returns True to break search
             at a node. Defaults to lambda _: False.
+        max_depth (int, optional): Maximum depth to traverse. Defaults to -1 (unlimited).
 
     Returns:
         dict[Node, int]: Dictionary mapping ancestor(descendant) nodes to their depths
@@ -103,6 +107,8 @@ def get_nodes_with_depth(
     while queue:
         current, depth = queue.pop(0)
         if break_if(current):
+            break
+        if max_depth != -1 and depth > max_depth:
             break
         if current not in visited or depth > visited[current]:
             visited[current] = depth
