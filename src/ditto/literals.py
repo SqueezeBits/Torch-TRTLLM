@@ -124,9 +124,8 @@ PassName = Literal[
     "RewriteFloatingPointLiteralsAsNodes",
     "RewriteReshapeAsUnsqueeze",
     "RewriteSplitAsSlices",
-    "StashActQuantSubgraphs",
+    "StashActivationDequantize",
     "StashLoraSubgraphs",
-    "WrapWeightDequantSubgraphs",
     "WrapRoPESubgraphs",
     "WrapSDPASubgraphs",
 ]
@@ -143,3 +142,5 @@ LogLevelLiteral = Literal[
     "DEBUG",
     "NOTSET",
 ]
+
+HFQuantizeMethod = Literal["gptq", "awq", "compressed-tensors", "modelopt", None]

@@ -103,7 +103,7 @@ def transform(
         copied_graph_module = copy_graph_module(graph_module)
         pre_custom_pass_manager = DynamoPassManager.build_from_passlist(
             [
-                get_preoptimization_transform(argument_hint, global_quant_config, dtype),
+                get_preoptimization_transform(argument_hint, global_quant_config),
             ]
         )
         logger.debug(f"Running pre-custom passes for rank {rank}")
