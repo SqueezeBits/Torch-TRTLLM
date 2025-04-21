@@ -83,11 +83,12 @@ class FuseProjections(NodewiseOptimizationPass):
             ]:
                 assert len(act_scales) == len(linears) and all(
                     act_scales[0].item() == act_scale.item() for act_scale in act_scales
-                )
-                assert (activation_quantization := linears[0].activation_quantization) is not None
+                ), "All scale values of target linear layers must be the same"
                 assert (
-                    activation_quantization.zero_point is None
-                ), "fusion of per-tensor activation quantization with zero point is not supported"
+                    activation_quantization := linears[0].activation_quantization
+                ) is not None and activation_quantization.zero_point is None, (
+                    "fusion of per-tensor activation quantization with zero point is not supported"
+                )
                 fused_node.meta[ACTIVATION_QUANTIZATION] = activation_quantization.model_copy()
 
             if all(linear.bias_node is not None for linear in linears):

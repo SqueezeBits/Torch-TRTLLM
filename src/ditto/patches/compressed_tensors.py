@@ -31,7 +31,7 @@ from .patch import custom_patch
     reason="resolving torch.export error and the registration of the parameters "
     "and applying custom dequantize operation",
     required=True,
-    env_var_to_disable="DISABLE_COMPRESSED_TENSORS_COMPRESSED_LINEAR_PROCESS_PACH",
+    env_var_to_disable="DISABLE_COMPRESSED_TENSORS_COMPRESSED_LINEAR_PROCESS_PATCH",
 )
 def patch_compressed_linear_process() -> None:
     original_from_linear = CompressedLinear.from_linear

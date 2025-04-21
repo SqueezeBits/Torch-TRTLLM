@@ -21,6 +21,7 @@ from compressed_tensors.compressors.quantized_compressors.pack_quantized import 
 from compressed_tensors.linear.compressed_linear import CompressedLinear
 from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy, QuantizationType
 from loguru import logger
+from modelopt.torch.quantization.nn.modules.quant_linear import _QuantLinear as QuantLinear
 from peft import PeftModel
 from tensorrt_llm.quantization import QuantAlgo
 from tensorrt_llm.quantization.functional import unpack_int32_into_int8
@@ -163,18 +164,105 @@ class GlobalQuantConfig(StrictlyTyped):
     quant_configs: list[TargetQuantConfig] = []
 
     @classmethod
-    # pylint: disable-next=too-many-branches
-    def create_from(cls, pretrained_config: PretrainedConfig) -> Self | None:
+    # pylint: disable-next=too-many-branches, too-many-statements
+    def create_from(cls, model: PreTrainedModel | PeftModel) -> Self | None:
         """Create a GlobalQuantConfig from a pretrained config.
 
         Args:
-            pretrained_config (PretrainedConfig): The pretrained config
+            model (PreTrainedModel | PeftModel): The model to create the GlobalQuantConfig from
 
         Returns:
             Self | None: The created GlobalQuantConfig or None if no quantization config is found
         """
+        input_quant_scheme: QuantScheme | None = None
+        weight_quant_scheme: QuantScheme | None = None
+
+        if quant_linears := [module for _, module in model.named_modules() if isinstance(module, QuantLinear)]:
+            if quant_linears[0].input_quantizer.is_enabled:
+                assert (bits := quant_linears[0].input_quantizer.num_bits) == (
+                    4,
+                    3,
+                ), f"Unsupported bits for activation quantization: {bits=}"
+                assert (
+                    quant_linears[0].input_quantizer.axis is None or quant_linears[0].input_quantizer._dynamic
+                ), "Only per-tensor or per-token quantization is supported for activation quantization"
+                input_quant_scheme = QuantScheme(
+                    bits=8,
+                    mode=(
+                        QuantizeMode.PER_TOKEN if quant_linears[0].input_quantizer._dynamic else QuantizeMode.PER_TENSOR
+                    ),
+                    type=QuantizeType.FLOAT,
+                    has_zero_point=False,
+                    dynamic=quant_linears[0].input_quantizer._dynamic,
+                )
+
+            if quant_linears[0].weight_quantizer.is_enabled:
+                assert (bits := quant_linears[0].weight_quantizer.num_bits) in (
+                    4,
+                    8,
+                    (4, 3),
+                ), f"Unsupported bits for weight quantization: {bits=}"
+                weight_quant_scheme = QuantScheme(
+                    bits=8 if bits == (4, 3) else bits,
+                    mode=(
+                        QuantizeMode.PER_GROUP
+                        if quant_linears[0].weight_quantizer.block_sizes
+                        else QuantizeMode.PER_TENSOR
+                        if quant_linears[0].weight_quantizer.axis is None
+                        else QuantizeMode.PER_CHANNEL
+                    ),
+                    type=QuantizeType.FLOAT if bits == (4, 3) else QuantizeType.INT,
+                    group_size=quant_linears[0].weight_quantizer.block_sizes.get(-1, None)
+                    if quant_linears[0].weight_quantizer.block_sizes
+                    else None,
+                    has_zero_point=False,
+                    dynamic=quant_linears[0].weight_quantizer._dynamic,
+                )
+
+            assert weight_quant_scheme is not None, "Weight quantization scheme is required"
+
+            if input_quant_scheme is None:
+                if weight_quant_scheme.type == QuantizeType.INT:
+                    trtllm_quant_algo = QuantAlgo.W8A16 if weight_quant_scheme.bits == 8 else QuantAlgo.W4A16
+                else:
+                    raise NotImplementedError("Weight-only quantization for floating-point types is not supported")
+            else:
+                assert (
+                    quantize_type := input_quant_scheme.type
+                ) == weight_quant_scheme.type, "input and weight quantization type must be the same"
+                if quantize_type == QuantizeType.FLOAT:
+                    if (input_quant_scheme.mode, weight_quant_scheme.mode) == (
+                        QuantizeMode.PER_TENSOR,
+                        QuantizeMode.PER_TENSOR,
+                    ):
+                        trtllm_quant_algo = QuantAlgo.FP8
+                    elif (input_quant_scheme.mode, weight_quant_scheme.mode) == (
+                        QuantizeMode.PER_TOKEN,
+                        QuantizeMode.PER_CHANNEL,
+                    ):
+                        trtllm_quant_algo = QuantAlgo.FP8_PER_CHANNEL_PER_TOKEN
+                    else:
+                        raise NotImplementedError(
+                            f"Unsupported quantization mode: {input_quant_scheme.mode}, {weight_quant_scheme.mode}"
+                        )
+                else:
+                    raise NotImplementedError(f"Unsupported input/weight quantization type: {quantize_type=}")
+
+            return cls(
+                hf_quant_method="modelopt",
+                trtllm_quant_algo=trtllm_quant_algo,
+                quant_configs=[
+                    TargetQuantConfig(
+                        target=torch.ops.aten.mm.default,
+                        input_quant_scheme=input_quant_scheme,
+                        weight_quant_scheme=weight_quant_scheme,
+                    ),
+                ],
+            )
+
         if not (
-            (quantization_config := getattr(pretrained_config, "quantization_config", None)) is not None
+            isinstance(pretrained_config := model.config, PretrainedConfig)
+            and (quantization_config := getattr(pretrained_config, "quantization_config", None)) is not None
             and isinstance(quantization_config, QuantizationConfigMixin)
         ):
             return None
@@ -234,7 +322,6 @@ class GlobalQuantConfig(StrictlyTyped):
                 "Linear"
             ], f'Unsupported targets: {config.targets=}. Currently, only a single "Linear" target is supported.'
 
-            input_quant_scheme: QuantScheme | None = None
             if config.input_activations is not None:
                 assert (
                     config.input_activations.strategy is not None
@@ -247,7 +334,7 @@ class GlobalQuantConfig(StrictlyTyped):
                     type=QuantizeType.from_quant_type(config.input_activations.type),
                     dynamic=config.input_activations.dynamic,
                 )
-            weight_quant_scheme: QuantScheme | None = None
+
             if config.weights is not None:
                 assert (
                     config.weights.strategy is not None
@@ -367,6 +454,65 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
                 "scales", weight_scale.T.contiguous() if module.quantization_scheme.weights.group_size else weight_scale
             )
             del module.weight_scale
+
+        elif isinstance(module, QuantLinear):
+            if module.weight_quantizer.is_enabled:
+                weight, scale = export_modelopt_weight_and_scale(module)
+                module.register_buffer("unpacked_weight", weight)
+                module.register_buffer("unpacked_zeros", None)
+                module.register_buffer("scales", scale)
+                del module.weight
+
+
+def export_modelopt_weight_and_scale(module: QuantLinear) -> tuple[torch.Tensor, torch.Tensor]:
+    """Export the weight and scale of the QuantLinear module for ModelOpt.
+
+    Args:
+        module (QuantLinear): The QuantLinear module to export
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]: The unpacked weight and scale
+    """
+    assert (
+        hasattr(module, "weight")
+        and isinstance(module.weight, torch.nn.Parameter)
+        and isinstance(weight := module.weight.data, torch.Tensor)
+        and isinstance(amax := module.weight_quantizer.amax, torch.Tensor)
+    )
+    if module.weight_quantizer.num_bits in (4, 8):
+        maxbound = torch.tensor(
+            [(1 << (module.weight_quantizer.num_bits - 1 + int(module.weight_quantizer.unsigned))) - 1]
+        )
+        scale = (amax.float() / maxbound.to(amax.device)).to(amax.dtype)
+
+        if module.weight_quantizer.block_sizes:
+            assert (block_size := module.weight_quantizer.block_sizes.get(-1, None)) is not None
+            scale = scale.reshape(-1, weight.shape[-1] // block_size)
+            weight = (
+                (weight / scale[..., :, torch.arange(weight.shape[-1]) // block_size])
+                .round()
+                .clamp(-maxbound.item() - 1, maxbound.item())
+                .to(torch.int8)
+            )
+            scale = scale.T
+        else:
+            weight = (weight / scale).round().clamp(-maxbound.item() - 1, maxbound.item()).to(torch.int8)
+            if scale.ndim == 1 and scale.numel() == 1:  # convert per-tensor to per-channel
+                logger.warning(
+                    "Converting per-tensor scale to per-channel scale, which might cause performance degradation."
+                )
+                scale = scale.expand(weight.shape[0], 1)
+
+    else:
+        maxbound = torch.tensor(448.0)
+        scale = (amax.float() / maxbound.to(amax.device)).to(amax.dtype)
+        weight = (weight / scale).to(torch.float8_e4m3fn)
+
+    if module.weight_quantizer.num_bits == 4:
+        weight[weight < 0] += 16
+        weight = weight.view(torch.uint8)
+
+    return weight.T.contiguous(), scale.contiguous()
 
 
 def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: HFQuantizeMethod) -> torch.Tensor:

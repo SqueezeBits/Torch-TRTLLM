@@ -168,7 +168,7 @@ def postprocess_qweight_for_trtllm(
         torch.Tensor: The postprocessed weight tensor for TensorRT-LLM
     """
     assert bits in (4, 8), "Only 4-bit or 8-bit quantization is supported for Weight-Only Quantization of TensorRT-LLM"
-    if quant_method in ("awq", "gptq", "compressed-tensors"):
+    if quant_method in ("awq", "gptq", "compressed-tensors", "modelopt"):
         assert qweight.dtype in (torch.uint8, torch.int8), f"Unsupported tensor dtype: {qweight.dtype=}"
         if bits == 4:
             qweight = (qweight[:, 1::2] * 16 + qweight[:, ::2]).view(torch.int8)
@@ -200,7 +200,7 @@ def postprocess_zeros_for_trtllm(
     Returns:
         torch.Tensor: The postprocessed zero point tensor for TensorRT-LLM
     """
-    if quant_method in ("awq", "compressed-tensors", "gptq"):
+    if quant_method in ("awq", "compressed-tensors", "gptq", "modelopt"):
         zeros = zeros * scale
         zeros = zeros.to(model_dtype)
     else:
@@ -223,7 +223,7 @@ def inference_trtllm_quant_algo(
         QuantAlgo: The quantization algorithm for TensorRT-LLM
     """
     assert bits in (4, 8), "Only 4-bit and 8-bit quantization is supported for TensorRT-LLM"
-    if hf_quant_method in ("awq", "compressed-tensors", "gptq"):
+    if hf_quant_method in ("awq", "compressed-tensors", "gptq", "modelopt"):
         quant_algo: str = f"W{bits}A{compute_dtype.itemsize * 8}"
         if hf_quant_method == "gptq":
             quant_algo = f"{quant_algo}_GPTQ"
