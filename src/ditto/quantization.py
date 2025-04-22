@@ -21,6 +21,7 @@ from compressed_tensors.compressors.quantized_compressors.pack_quantized import 
 from compressed_tensors.linear.compressed_linear import CompressedLinear
 from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy, QuantizationType
 from loguru import logger
+from modelopt.torch.quantization.model_calib import disable_pre_quant_scale_and_resmooth
 from modelopt.torch.quantization.nn.modules.quant_linear import _QuantLinear as QuantLinear
 from peft import PeftModel
 from tensorrt_llm.quantization import QuantAlgo
@@ -455,11 +456,24 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
 
         elif isinstance(module, QuantLinear):
             if module.weight_quantizer.is_enabled:
+                if (
+                    module.weight_quantizer._enable_pre_quant_scale
+                    and module.input_quantizer._enable_pre_quant_scale
+                    and hasattr(module.input_quantizer, "_pre_quant_scale")
+                ):
+                    disable_pre_quant_scale_and_resmooth(module, True)
                 weight, scale = export_modelopt_weight_and_scale(module)
                 module.register_buffer("unpacked_weight", weight)
                 module.register_buffer("unpacked_zeros", None)
                 module.register_buffer("scales", scale)
                 del module.weight
+            if module.input_quantizer.is_enabled and not module.input_quantizer._dynamic:
+                assert (
+                    isinstance(amax := module.input_quantizer.amax, torch.Tensor) and amax.numel() == 1
+                ), "Only per-tensor quantization for activation is supported"
+                maxbound = torch.tensor(448.0)
+                input_scale = (amax.float() / maxbound.to(amax.device)).to(amax.dtype)
+                module.register_buffer("input_scale", input_scale)
 
 
 def export_modelopt_weight_and_scale(module: QuantLinear) -> tuple[torch.Tensor, torch.Tensor]:

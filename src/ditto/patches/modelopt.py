@@ -32,8 +32,8 @@ def patch_quantize_forward() -> None:
                 inp,
                 8,
                 self.input_quantizer._dynamic,
-                self.scales.dtype,
-                self.scales if self.input_quantizer._dynamic is False else None,
+                self.input_scale.dtype,
+                self.input_scale if self.input_quantizer._dynamic is False else None,
             )
         if self.weight_quantizer.is_enabled:
             weight = ditto_dequantize(
