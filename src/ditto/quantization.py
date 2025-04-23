@@ -34,7 +34,7 @@ from transformers.utils.quantization_config import (
 )
 from typing_extensions import Self
 
-from .literals import HFQuantizeMethod
+from .literals import QuantizeMethod
 from .types import StrictlyTyped
 
 
@@ -148,7 +148,7 @@ class GlobalQuantConfig(StrictlyTyped):
     """Global quantization configuration.
 
     Attributes:
-        hf_quant_method (HFQuantizeMethod): The quantization method used by the Hugging Face model
+        quant_method (QuantizeMethod): The quantization method used by the Hugging Face model
         trtllm_quant_algo (QuantAlgo): The quantization algorithm used by TRT-LLM
         trtllm_kv_cache_quant_algo (QuantAlgo | None): The quantization algorithm used by TRT-LLM for the KV cache.
             Defaults to None.
@@ -156,7 +156,7 @@ class GlobalQuantConfig(StrictlyTyped):
         quant_configs (list[TargetQuantConfig]): The quantization schemes for the target operators.
     """
 
-    hf_quant_method: HFQuantizeMethod
+    quant_method: QuantizeMethod
     trtllm_quant_algo: QuantAlgo
     trtllm_kv_cache_quant_algo: QuantAlgo | None = None
     clamp_val: list[float] | None = None
@@ -184,7 +184,7 @@ class GlobalQuantConfig(StrictlyTyped):
             if quantization_config.bits not in (4, 8):
                 raise ValueError(f"Unsupported GPTQ bits: {quantization_config.bits=}")
             return cls(
-                hf_quant_method=quantization_config.quant_method.value,
+                quant_method=quantization_config.quant_method.value,
                 trtllm_quant_algo=QuantAlgo.W4A16_GPTQ if quantization_config.bits == 4 else QuantAlgo.W8A16_GPTQ,
                 quant_configs=[
                     TargetQuantConfig(
@@ -204,7 +204,7 @@ class GlobalQuantConfig(StrictlyTyped):
             if quantization_config.bits not in (4, 8):
                 raise ValueError(f"Unsupported AWQ bits: {quantization_config.bits=}")
             return cls(
-                hf_quant_method=quantization_config.quant_method.value,
+                quant_method=quantization_config.quant_method.value,
                 trtllm_quant_algo=QuantAlgo.W4A16_AWQ if quantization_config.bits == 4 else QuantAlgo.W8A16,
                 quant_configs=[
                     TargetQuantConfig(
@@ -293,7 +293,7 @@ class GlobalQuantConfig(StrictlyTyped):
                 else:
                     raise NotImplementedError(f"Unsupported input/weight quantization type: {quantize_type=}")
             return cls(
-                hf_quant_method=quantization_config.quantization_config.quant_method,
+                quant_method=quantization_config.quantization_config.quant_method,
                 trtllm_quant_algo=trtllm_quant_algo,
                 clamp_val=[-1200.0, 1200.0] if trtllm_quant_algo == QuantAlgo.FP8_PER_CHANNEL_PER_TOKEN else None,
                 quant_configs=[
@@ -319,11 +319,11 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
         if isinstance(module, qlinear_cuda_old.QuantLinear | WQLinear_GEMM):
             bits = module.bits if isinstance(module, qlinear_cuda_old.QuantLinear) else module.w_bit
             module.register_buffer(
-                "unpacked_weight", unpack_qweight(module.qweight, bits, global_quant_config.hf_quant_method)
+                "unpacked_weight", unpack_qweight(module.qweight, bits, global_quant_config.quant_method)
             )
             module.register_buffer(
                 "unpacked_zeros",
-                unpack_zeros(module.qzeros, bits, global_quant_config.hf_quant_method)
+                unpack_zeros(module.qzeros, bits, global_quant_config.quant_method)
                 if isinstance(module.qzeros, torch.Tensor)
                 else None,
             )
@@ -339,11 +339,9 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
                 assert isinstance(packed_weight := module.weight_packed, torch.Tensor)
                 assert isinstance(weight_shape := module.weight_shape, torch.Tensor)
                 bits = 32 // (weight_shape[1].item() // packed_weight.shape[1])
-                unpacked_weight = unpack_qweight(
-                    packed_weight, bits, global_quant_config.hf_quant_method
-                ).T.contiguous()
+                unpacked_weight = unpack_qweight(packed_weight, bits, global_quant_config.quant_method).T.contiguous()
                 unpacked_zeros = (
-                    unpack_zeros(packed_zero, bits, global_quant_config.hf_quant_method)
+                    unpack_zeros(packed_zero, bits, global_quant_config.quant_method)
                     if hasattr(module, "weight_zero_point")
                     and isinstance(packed_zero := module.weight_zero_point, torch.Tensor)
                     else None
@@ -369,7 +367,7 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
             del module.weight_scale
 
 
-def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: HFQuantizeMethod) -> torch.Tensor:
+def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: QuantizeMethod) -> torch.Tensor:
     """Unpack the quantized weight tensor from int32 to int8 or uint8.
 
     if the weight is already unpacked, it will return the original tensor.
@@ -377,7 +375,7 @@ def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: HFQuantizeMet
     Args:
         qweight (torch.Tensor): The quantized weight tensor
         bits (int): The number of bits used for quantization
-        quant_method (HFQuantizeMethod): The quantization method used
+        quant_method (QuantizeMethod): The quantization method used
 
     Returns:
         torch.Tensor: The unpacked weight tensor
@@ -416,13 +414,13 @@ def unpack_qweight(qweight: torch.Tensor, bits: int, quant_method: HFQuantizeMet
     return qweight.to(device)
 
 
-def unpack_zeros(zeros: torch.Tensor, bits: int, quant_method: HFQuantizeMethod) -> torch.Tensor:
+def unpack_zeros(zeros: torch.Tensor, bits: int, quant_method: QuantizeMethod) -> torch.Tensor:
     """Unpack the quantized zero point tensor.
 
     Args:
         zeros (torch.Tensor): The quantized zero point tensor
         bits (int): The number of bits used for quantization
-        quant_method (HFQuantizeMethod): The quantization method used
+        quant_method (QuantizeMethod): The quantization method used
 
     Returns:
         torch.Tensor: The unpacked zero point tensor

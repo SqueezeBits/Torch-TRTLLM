@@ -131,7 +131,6 @@ def trtllm_build(
         mapping=mapping,
     )
 
-    # resolve_qlinear_device_map(model)
     if (global_quant_config := GlobalQuantConfig.create_from(model.config)) is not None:
         preprocess_qlinear_module(model, global_quant_config)
     graph_module = trtllm_export(model, argument_hint)
