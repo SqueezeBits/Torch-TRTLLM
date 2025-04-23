@@ -32,7 +32,7 @@ def patch_quantize_forward() -> None:
                 inp,
                 8,
                 self.input_quantizer._dynamic,
-                self.input_scale.dtype,
+                inp.dtype,
                 self.input_scale if self.input_quantizer._dynamic is False else None,
             )
         if self.weight_quantizer.is_enabled:
@@ -47,6 +47,7 @@ def patch_quantize_forward() -> None:
             ).T
         else:
             weight = self.weight
+
         out = torch.nn.functional.linear(inp, weight, self.bias if self.bias is not None else None)
 
         if self.output_quantizer.is_enabled:

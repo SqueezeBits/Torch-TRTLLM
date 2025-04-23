@@ -21,6 +21,7 @@ import torch
 from loguru import logger
 from peft import LoraConfig, PeftModel
 from safetensors.torch import save_file as save_as_safetensors
+from tensorrt_llm.quantization import QuantAlgo
 from torch.fx import GraphModule
 from torch.fx.graph import CodeGen
 from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
@@ -134,6 +135,17 @@ def trtllm_build(
 
     if (global_quant_config := GlobalQuantConfig.create_from(model)) is not None:
         preprocess_qlinear_module(model, global_quant_config)
+    if (
+        global_quant_config is not None
+        and global_quant_config.trtllm_kv_cache_quant_algo in (QuantAlgo.INT8, QuantAlgo.FP8)
+        and plugin_config.use_paged_context_fmha
+    ):
+        raise RuntimeError(
+            "Paged Context FMHA is not compatible with int8/fp8 KV cache. "
+            "Enabling it may lead to incorrect results or even a crash. "
+            "To disable Paged Context FMHA, Use `--no-use-paged-context-fmha`."
+        )
+
     with mtq.utils.export_torch_mode():
         graph_module = trtllm_export(model, argument_hint)
 

@@ -152,15 +152,15 @@ class GlobalQuantConfig(StrictlyTyped):
     Attributes:
         quant_method (QuantizeMethod): The quantization method used by the Hugging Face model
         trtllm_quant_algo (QuantAlgo): The quantization algorithm used by TRT-LLM
-        trtllm_kv_cache_quant_algo (QuantAlgo | None): The quantization algorithm used by TRT-LLM for the KV cache.
-            Defaults to None.
+        trtllm_kv_cache_quant_algo (QuantAlgo): The quantization algorithm used by TRT-LLM for the KV cache.
+            Defaults to QuantAlgo.NO_QUANT.
         clamp_val (list[float] | None): The clamp values for the quantization. Defaults to None.
         quant_configs (list[TargetQuantConfig]): The quantization schemes for the target operators.
     """
 
     quant_method: QuantizeMethod
     trtllm_quant_algo: QuantAlgo
-    trtllm_kv_cache_quant_algo: QuantAlgo | None = None
+    trtllm_kv_cache_quant_algo: QuantAlgo = QuantAlgo.NO_QUANT
     clamp_val: list[float] | None = None
     quant_configs: list[TargetQuantConfig] = []
 
@@ -179,19 +179,20 @@ class GlobalQuantConfig(StrictlyTyped):
         weight_quant_scheme: QuantScheme | None = None
 
         if is_quantized_by_modelopt(model):
-            input_quant_scheme, weight_quant_scheme = get_modelopt_quantization_scheme(model)
+            input_quant_scheme, weight_quant_scheme, output_quant_scheme = get_modelopt_quantization_scheme(model)
 
-            assert weight_quant_scheme is not None, "Weight quantization scheme is required"
-
+            trtllm_quant_algo: QuantAlgo = QuantAlgo.NO_QUANT
             if input_quant_scheme is None:
-                if weight_quant_scheme.type == QuantizeType.INT:
-                    trtllm_quant_algo = QuantAlgo.W8A16 if weight_quant_scheme.bits == 8 else QuantAlgo.W4A16
-                else:
-                    raise NotImplementedError("Weight-only quantization for floating-point types is not supported")
+                if weight_quant_scheme is not None:
+                    if weight_quant_scheme.type == QuantizeType.INT:
+                        trtllm_quant_algo = QuantAlgo.W8A16 if weight_quant_scheme.bits == 8 else QuantAlgo.W4A16
+                    else:
+                        raise NotImplementedError("Weight-only quantization for floating-point types is not supported")
             else:
+                assert weight_quant_scheme is not None, "Weight quantization scheme is required"
                 assert (
                     quantize_type := input_quant_scheme.type
-                ) == weight_quant_scheme.type, "input and weight quantization type must be the same"
+                ) == weight_quant_scheme.type, "Input and weight quantization type must be the same"
                 if quantize_type == QuantizeType.FLOAT:
                     if (input_quant_scheme.mode, weight_quant_scheme.mode) == (
                         QuantizeMode.PER_TENSOR,
@@ -210,9 +211,17 @@ class GlobalQuantConfig(StrictlyTyped):
                 else:
                     raise NotImplementedError(f"Unsupported input/weight quantization type: {quantize_type=}")
 
+            trtllm_kv_cache_quant_algo: QuantAlgo = QuantAlgo.NO_QUANT
+            if output_quant_scheme is not None:
+                logger.info("Output quantizations are found, which enables KV cache quantization")
+                trtllm_kv_cache_quant_algo = (
+                    QuantAlgo.INT8 if output_quant_scheme.type == QuantizeType.INT else QuantAlgo.FP8
+                )
+
             return cls(
-                hf_quant_method="modelopt",
+                quant_method="modelopt",
                 trtllm_quant_algo=trtllm_quant_algo,
+                trtllm_kv_cache_quant_algo=trtllm_kv_cache_quant_algo,
                 quant_configs=[
                     TargetQuantConfig(
                         target=torch.ops.aten.mm.default,
@@ -274,14 +283,19 @@ class GlobalQuantConfig(StrictlyTyped):
         if isinstance(quantization_config, CompressedTensorsConfig):
             input_quant_scheme, weight_quant_scheme = get_compressed_tensors_quantization_scheme(quantization_config)
 
-            assert weight_quant_scheme is not None, "Weight quantization scheme is required"
-
+            trtllm_quant_algo = QuantAlgo.NO_QUANT
             if input_quant_scheme is None:
-                if weight_quant_scheme.type == QuantizeType.INT:
-                    trtllm_quant_algo = QuantAlgo.W8A16 if weight_quant_scheme.bits == 8 else QuantAlgo.W4A16
-                else:
-                    raise NotImplementedError(f"Unsupported weight-only quantization type: {weight_quant_scheme.type=}")
+                if weight_quant_scheme is not None:
+                    if weight_quant_scheme.type == QuantizeType.INT:
+                        trtllm_quant_algo = QuantAlgo.W8A16 if weight_quant_scheme.bits == 8 else QuantAlgo.W4A16
+                    else:
+                        raise NotImplementedError(
+                            f"Unsupported weight-only quantization type: {weight_quant_scheme.type=}"
+                        )
             else:
+                assert (
+                    weight_quant_scheme is not None
+                ), "Weight quantization scheme is required if input quantization scheme is provided"
                 assert (
                     quantize_type := input_quant_scheme.type
                 ) == weight_quant_scheme.type, "input and weight quantization type must be the same"
@@ -302,6 +316,7 @@ class GlobalQuantConfig(StrictlyTyped):
                         )
                 else:
                     raise NotImplementedError(f"Unsupported input/weight quantization type: {quantize_type=}")
+
             return cls(
                 quant_method=quantization_config.quantization_config.quant_method,
                 trtllm_quant_algo=trtllm_quant_algo,
@@ -393,9 +408,17 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
                 assert (
                     isinstance(amax := module.input_quantizer.amax, torch.Tensor) and amax.numel() == 1
                 ), "Only per-tensor quantization for activation is supported"
-                maxbound = torch.tensor(448.0)
-                input_scale = (amax.float() / maxbound.to(amax.device)).to(amax.dtype)
+                maxbound = torch.tensor([module.input_quantizer.maxbound])
+                input_scale = amax.float() / maxbound.to(amax.device)
                 module.register_buffer("input_scale", input_scale)
+
+            if module.output_quantizer.is_enabled:
+                assert (
+                    isinstance(amax := module.output_quantizer.amax, torch.Tensor) and amax.numel() == 1
+                ), "Only per-tensor quantization for output is supported"
+                maxbound = torch.tensor([module.output_quantizer.maxbound])
+                output_scale = amax.float() / maxbound.to(amax.device)
+                module.register_buffer("output_scale", output_scale)
 
 
 def export_modelopt_weight_and_scale(module: QuantLinear) -> tuple[torch.Tensor, torch.Tensor]:
@@ -414,9 +437,7 @@ def export_modelopt_weight_and_scale(module: QuantLinear) -> tuple[torch.Tensor,
         and isinstance(amax := module.weight_quantizer.amax, torch.Tensor)
     )
     if module.weight_quantizer.num_bits in (4, 8):
-        maxbound = torch.tensor(
-            [(1 << (module.weight_quantizer.num_bits - 1 + int(module.weight_quantizer.unsigned))) - 1]
-        )
+        maxbound = torch.tensor([module.weight_quantizer.maxbound])
         scale = (amax.float() / maxbound.to(amax.device)).to(amax.dtype)
 
         if module.weight_quantizer.block_sizes:
@@ -438,7 +459,7 @@ def export_modelopt_weight_and_scale(module: QuantLinear) -> tuple[torch.Tensor,
                 scale = scale.expand(weight.shape[0], 1)
 
     else:
-        maxbound = torch.tensor(448.0)
+        maxbound = torch.tensor([module.weight_quantizer.maxbound])
         scale = (amax.float() / maxbound.to(amax.device)).to(amax.dtype)
         weight = (weight / scale).to(torch.float8_e4m3fn)
 
@@ -542,20 +563,26 @@ def is_quantized_by_modelopt(model: PreTrainedModel | PeftModel) -> bool:
 
 def get_modelopt_quantization_scheme(
     model: PreTrainedModel | PeftModel,
-) -> tuple[QuantScheme | None, QuantScheme | None]:
+) -> tuple[QuantScheme | None, QuantScheme | None, QuantScheme | None]:
     """Get the quantization schemes for the model quantized by ModelOpt.
 
     Args:
         model (PreTrainedModel | PeftModel): The model to get the quantization schemes for
 
     Returns:
-        tuple[QuantScheme | None, QuantScheme | None]: The quantization schemes of input and weight for the model
+        tuple[QuantScheme | None, QuantScheme | None, QuantScheme | None]:
+            The quantization schemes of input, weight, and output for the model
     """
     quant_schemes: list[tuple[QuantScheme | None, QuantScheme | None]] = []
+    output_quant_schemes: list[QuantScheme] = []
     for _, module in model.named_modules():
         if not (
             isinstance(module, QuantLinear)
-            and (module.input_quantizer.is_enabled or module.weight_quantizer.is_enabled)
+            and (
+                module.input_quantizer.is_enabled
+                or module.weight_quantizer.is_enabled
+                or module.output_quantizer.is_enabled
+            )
         ):
             continue
 
@@ -600,16 +627,39 @@ def get_modelopt_quantization_scheme(
                 dynamic=module.weight_quantizer._dynamic,
             )
 
+        if module.output_quantizer.is_enabled:
+            assert (bits := module.output_quantizer.num_bits) in (
+                8,
+                (4, 3),
+            ), f"Unsupported bits for weight quantization: {bits=}"
+            assert (
+                module.output_quantizer.axis is None and not module.output_quantizer._dynamic
+            ), "Only per-tensor quantization is supported for output quantization"
+            output_quant_schemes.append(
+                QuantScheme(
+                    bits=8 if bits == (4, 3) else bits,
+                    mode=QuantizeMode.PER_TENSOR,
+                    type=QuantizeType.FLOAT if bits == (4, 3) else QuantizeType.INT,
+                    has_zero_point=False,
+                    dynamic=module.output_quantizer._dynamic,
+                )
+            )
+
         quant_schemes.append((input_quant_scheme, weight_quant_scheme))
 
-    if not quant_schemes:
-        return None, None
-
-    assert len(quant_schemes) == 1 or all(
+    assert len(quant_schemes) < 2 or all(
         quant_schemes[0][0] == quant_scheme[0] and quant_schemes[0][1] == quant_scheme[1]
         for quant_scheme in quant_schemes[1:]
     ), "All quantization schemes must be the same"
-    return quant_schemes[0][0], quant_schemes[0][1]
+    assert len(output_quant_schemes) < 2 or all(
+        output_quant_schemes[0] == output_quant_scheme for output_quant_scheme in output_quant_schemes[1:]
+    ), "All output quantization schemes must be the same"
+
+    return (
+        quant_schemes[0][0] if quant_schemes else None,
+        quant_schemes[0][1] if quant_schemes else None,
+        output_quant_schemes[0] if output_quant_schemes else None,
+    )
 
 
 def get_compressed_tensors_quantization_scheme(

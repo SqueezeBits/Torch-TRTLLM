@@ -630,6 +630,8 @@ class GPTAttentionPluginInputs(StrictlyTyped):
     host_kv_cache_block_offsets: Node
     host_kv_cache_pool_pointers: Node
     host_kv_cache_pool_mapping: Node
+    kv_orig_quant_scale: Node | None = None
+    kv_quant_orig_scale: Node | None = None
     rotary_inv_freq: Node | None = None
     rotary_cos_sin: Node | None = None
     host_context_lengths: Node
@@ -649,7 +651,9 @@ class GPTAttentionPluginInputs(StrictlyTyped):
         """
         existing_placeholders = {p.name: p for p in graph.find_nodes(op="placeholder")}
         get_attr_nodes = {n.name: n for n in graph.nodes if n.op == "get_attr"}
-        excluded = set() if is_rope else {"rotary_inv_freq", "rotary_cos_sin"}
+        excluded: set[str] = {"kv_orig_quant_scale", "kv_quant_orig_scale"}
+        if not is_rope:
+            excluded.update({"rotary_inv_freq", "rotary_cos_sin"})
         nodes = {
             name: node
             # pylint: disable-next=bad-reversed-sequence

@@ -20,7 +20,16 @@ from ...types import StrictlyTyped
 
 
 class ActivationQuantization(StrictlyTyped):
-    """Activation quantization."""
+    """Activation quantization.
+
+    Attributes:
+        quant_mode (QuantizeMode): Quantization mode
+        bits (int): Number of bits
+        type (QuantizeType): Quantization type
+        scale (torch.Tensor | None): Scale tensor
+        zero_point (torch.Tensor | None): Zero point tensor
+        dynamic (bool): Whether the quantization is dynamic
+    """
 
     quant_mode: QuantizeMode
     bits: int
@@ -28,6 +37,22 @@ class ActivationQuantization(StrictlyTyped):
     scale: torch.Tensor | None = Field(default=None, exclude=True)
     zero_point: torch.Tensor | None = Field(default=None, exclude=True)
     dynamic: bool = False
+
+
+class OutputQuantization(StrictlyTyped):
+    """Output quantization.
+
+    Output quantization supports per-tensor quantization only.
+
+    Attributes:
+        bits (int): Number of bits
+        type (QuantizeType): Quantization type
+        scale (torch.Tensor): Scale tensor
+    """
+
+    bits: int
+    type: QuantizeType
+    scale: torch.Tensor = Field(exclude=True)
 
 
 class Quantizer(StrictlyTyped):

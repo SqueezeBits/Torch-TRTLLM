@@ -80,6 +80,7 @@ from .passes import (
     RewriteSplitAsSlices,
     StashActivationFakeQuantize,
     StashLoraSubgraphs,
+    StashOutputFakeQuantize,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
 )
@@ -104,6 +105,7 @@ def get_preoptimization_transform(
 
     return get_transform(
         StashActivationFakeQuantize(global_quant_config=global_quant_config),
+        StashOutputFakeQuantize(global_quant_config=global_quant_config),
         StashLoraSubgraphs(),
         ConstantFolding(),
         AddTRTLLMInputs(argument_hint=argument_hint),
@@ -282,6 +284,7 @@ def get_trtllm_conversion_transform(
             dtype=dtype,
             mapping=argument_hint.mapping,
             plugin_config=model_config.plugin_config,
+            global_quant_config=global_quant_config,
         ),
         IndexLayers,
         BindUnmatchedLoraProtos,

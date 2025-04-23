@@ -18,11 +18,13 @@ import tensorrt as trt
 import torch
 from loguru import logger
 from pydantic import Field
+from tensorrt_llm.quantization import QuantAlgo, QuantMode
 from torch.fx import Graph, GraphModule, Node
 from typing_extensions import Self
 
 from ...configs import TRTLLMMapping, TRTLLMPluginConfig
 from ...debug import save_for_debug
+from ...quantization import GlobalQuantConfig
 from ...types import DataType, StrictlyTyped, SymbolicShape, expect_identical
 from ..nodes import (
     BMM,
@@ -61,8 +63,9 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
     dtype: torch.dtype
     mapping: TRTLLMMapping = Field(frozen=True)
     plugin_config: TRTLLMPluginConfig = Field(frozen=True)
+    global_quant_config: GlobalQuantConfig | None = Field(default=None, frozen=True)
 
-    # pylint: disable-next=too-many-locals,too-many-statements
+    # pylint: disable-next=too-many-locals,too-many-statements,too-many-branches
     def call(self, graph_module: GraphModule) -> PassResult:
         save_for_debug("before_attn_plugin", graph_module)
         layer_idx = -1
@@ -124,6 +127,32 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph, global_rope_config.is_rope)
                 logger.debug(f"Found GPTAttentionPluginInputs for layer {layer_idx}")
 
+            kv_cache_quant_mode = QuantMode(0)
+            if (
+                isinstance(attn, MHA)
+                and (qkv_linear := Linear.configure_from(attn.qkv))
+                and qkv_linear.output_quantization is not None
+            ):
+                assert (
+                    self.global_quant_config is not None
+                ), "Global quant config is required for setting KV cache quantization"
+                with graph.inserting_after(qkv_linear.mm.node):
+                    qkv_output_scale = (
+                        qkv_linear.output_quantization.scale
+                        if self.global_quant_config.trtllm_kv_cache_quant_algo == QuantAlgo.INT8
+                        else torch.tensor(1.0)
+                    )
+                    global_plugin_inputs.kv_orig_quant_scale = GetAttr.create(
+                        graph, qkv_linear.mm.name + "_kv_orig_quant_scale", 1.0 / qkv_output_scale
+                    ).node
+                    global_plugin_inputs.kv_quant_orig_scale = GetAttr.create(
+                        graph, qkv_linear.mm.name + "_kv_quant_orig_scale", qkv_output_scale
+                    ).node
+                kv_cache_quant_mode = QuantMode.from_quant_algo(
+                    quant_algo=self.global_quant_config.trtllm_quant_algo,
+                    kv_cache_quant_algo=self.global_quant_config.trtllm_kv_cache_quant_algo,
+                )
+
             if isinstance(attn, MLA):
                 attn.apply_lazy_tensor_parallelism(self.mapping)
 
@@ -135,6 +164,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 head_size=attn.embed_dim,
                 tp_size=self.mapping.tp_size,
                 tp_rank=self.mapping.tp_rank,
+                kv_cache_quant_mode=kv_cache_quant_mode,
                 tokens_per_block=self.plugin_config.tokens_per_block,
                 type_id=DataType(self.dtype).to(trt.DataType),
                 q_scaling=sdpa.default_scale / sdpa.scale,

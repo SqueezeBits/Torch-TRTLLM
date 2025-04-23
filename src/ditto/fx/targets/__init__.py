@@ -14,7 +14,7 @@
 
 from .allgather_plugin import AllGatherPlugin
 from .allreduce_plugin import AllReducePlugin, AllReducePluginInputs
-from .fake_quantizer import ActivationQuantization, Quantizer
+from .fake_quantizer import ActivationQuantization, OutputQuantization, Quantizer
 from .fp8_rowwise_gemm_plugin import Fp8RowwiseGemmPlugin
 from .gemm_plugin import (
     GemmPlugin,
