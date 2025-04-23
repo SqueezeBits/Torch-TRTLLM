@@ -133,12 +133,12 @@ def parallelize_column_linear(
     """
     graph = linear.mm.node.graph
 
-    if (dequantize := linear.weight_dequantize_node) is not None:
+    if (fake_quantize := linear.weight_fake_quantize) is not None:
         input_nodes: list[Node] = []
         for dequant_input_node in linear.mm.other.all_input_nodes:
             assert (
                 tensor := GetAttr.specialize_from(dequant_input_node)
-            ), "dequantize's input node is not specialized to GetAttr"
+            ), "fake_quantize's input node is not specialized to GetAttr"
             with graph.inserting_before(tensor.node):
                 parallelized_weight = GetAttr.create(
                     graph,
@@ -156,19 +156,19 @@ def parallelize_column_linear(
                 propagate_metadata_from(tensor, to=parallelized_weight)
             dequant_input_node.replace_all_uses_with(parallelized_weight.node)
             input_nodes.append(parallelized_weight.node)
-        parallelized_dequantize = dequantize.target.model_copy(
+        parallelized_fake_quantize = fake_quantize.target.model_copy(
             update={
                 "output_shape": torch.Size(
-                    [dequantize.target.output_shape[0], dequantize.target.output_shape[1] // mapping.tp_size]
+                    [fake_quantize.target.output_shape[0], fake_quantize.target.output_shape[1] // mapping.tp_size]
                 )
             }
         )
         with graph.inserting_before(linear.mm.other):
-            parallelized_dequantize_node = graph.call_function(parallelized_dequantize, tuple(input_nodes))
-            propagate_metadata_from(linear.mm.other, to=parallelized_dequantize_node)
-        linear.mm.other.replace_all_uses_with(parallelized_dequantize_node)
+            parallelized_fake_quantize_node = graph.call_function(parallelized_fake_quantize, tuple(input_nodes))
+            propagate_metadata_from(linear.mm.other, to=parallelized_fake_quantize_node)
+        linear.mm.other.replace_all_uses_with(parallelized_fake_quantize_node)
         if inplace:
-            linear.mm.other = parallelized_dequantize_node
+            linear.mm.other = parallelized_fake_quantize_node
     else:
         assert (
             weight := GetAttr.specialize_from(linear.weight_node)
@@ -250,12 +250,12 @@ def parallelize_row_linear(
         eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
     """
     graph = linear.mm.node.graph
-    if (dequantize := linear.weight_dequantize_node) is not None:
+    if (fake_quantize := linear.weight_fake_quantize) is not None:
         input_nodes: list[Node] = []
         for dequant_input_node in linear.mm.other.all_input_nodes:
             assert (
                 tensor := GetAttr.specialize_from(dequant_input_node)
-            ), "dequantize's input node is not specialized to GetAttr"
+            ), "fake_quantize's input node is not specialized to GetAttr"
             with graph.inserting_before(tensor.node):
                 parallelized_weight = GetAttr.create(
                     graph,
@@ -273,17 +273,17 @@ def parallelize_row_linear(
                 propagate_metadata_from(tensor, to=parallelized_weight)
             dequant_input_node.replace_all_uses_with(parallelized_weight.node)
             input_nodes.append(parallelized_weight.node)
-        parallelized_dequantize = dequantize.target.model_copy(
+        parallelized_fake_quantize = fake_quantize.target.model_copy(
             update={
                 "output_shape": torch.Size(
-                    [dequantize.target.output_shape[0] // mapping.tp_size, dequantize.target.output_shape[1]]
+                    [fake_quantize.target.output_shape[0] // mapping.tp_size, fake_quantize.target.output_shape[1]]
                 )
             }
         )
         with graph.inserting_before(linear.mm.other):
-            parallelized_dequantize_node = graph.call_function(parallelized_dequantize, tuple(input_nodes))
-            propagate_metadata_from(linear.mm.other, to=parallelized_dequantize_node)
-        linear.mm.other.replace_all_uses_with(parallelized_dequantize_node)
+            parallelized_fake_quantize_node = graph.call_function(parallelized_fake_quantize, tuple(input_nodes))
+            propagate_metadata_from(linear.mm.other, to=parallelized_fake_quantize_node)
+        linear.mm.other.replace_all_uses_with(parallelized_fake_quantize_node)
     else:
         assert (
             weight := GetAttr.specialize_from(linear.weight_node)

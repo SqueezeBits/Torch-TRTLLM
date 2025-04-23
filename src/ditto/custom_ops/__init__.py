@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .dequantize import ditto_dequantize
+from .fake_quantize import ditto_fake_quantize

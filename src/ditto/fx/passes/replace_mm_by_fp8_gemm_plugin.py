@@ -18,7 +18,7 @@ from torch.fx import Node
 
 from ...quantization import QuantizeMode
 from ...types import DataType
-from ..nodes import Dequantize, GetAttr, Permute
+from ..nodes import FakeQuantize, GetAttr, Permute
 from ..subgraphs import Linear
 from ..targets import GemmPlugin, Quantizer
 from ..utils import attr_name_generator, get_tensor_metadata
@@ -38,11 +38,11 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
             and (activation_quantization := linear.activation_quantization) is not None
             and activation_quantization.quant_mode == QuantizeMode.PER_TENSOR
             and activation_quantization.scale is not None
-            and (dequantize := Dequantize.specialize_from(linear.mm.other)) is not None
-            and dequantize.input_tensor is not None
-            and dequantize.input_tensor.dtype == torch.float8_e4m3fn
-            and dequantize.scale_tensor is not None
-            and dequantize.quantize_mode == QuantizeMode.PER_TENSOR
+            and (fake_quantize := FakeQuantize.specialize_from(linear.mm.other)) is not None
+            and fake_quantize.input_tensor is not None
+            and fake_quantize.input_tensor.dtype == torch.float8_e4m3fn
+            and fake_quantize.scale_tensor is not None
+            and fake_quantize.quantize_mode == QuantizeMode.PER_TENSOR
             and (graph_module := node.graph.owning_module) is not None
         ):
             return {}
@@ -56,18 +56,18 @@ class ReplaceMMByFp8GemmPlugin(NodewiseOptimizationPass):
                 (
                     linear.input_node,
                     act_scale_attr.node,
-                    dequantize.input_tensor.dtype,
+                    fake_quantize.input_tensor.dtype,
                 ),
             )
 
         gemm_plugin = GemmPlugin(
             transb=1,
-            type_id=DataType(dequantize.output_dtype).to(trt.DataType),
+            type_id=DataType(fake_quantize.output_dtype).to(trt.DataType),
             use_fp8=1,
-            alpha=(activation_quantization.scale * dequantize.scale_tensor).item(),
+            alpha=(activation_quantization.scale * fake_quantize.scale_tensor).item(),
         )
         with node.graph.inserting_before(node):
-            permute = Permute.create(node.graph, dequantize.x, (1, 0))
+            permute = Permute.create(node.graph, fake_quantize.x, (1, 0))
             plugin_node = node.graph.call_function(gemm_plugin, (quantize, permute.node))
             propagate_metadata_from(linear.mm, to=plugin_node)
 

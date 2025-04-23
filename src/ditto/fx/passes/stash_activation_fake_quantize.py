@@ -15,15 +15,15 @@
 from torch.fx import Node
 
 from ...quantization import GlobalQuantConfig, QuantizeType
-from ..nodes import Dequantize
+from ..nodes import FakeQuantize
 from ..subgraphs import Linear
 from ..targets import ActivationQuantization
 from ..utils import get_nodes_with_depth
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
-class StashActivationDequantize(NodewiseOptimizationPass):
-    """Match and stash activation dequantization operations.
+class StashActivationFakeQuantize(NodewiseOptimizationPass):
+    """Match and stash activation fake-quantize operations.
 
     Attributes:
         global_quant_config (GlobalQuantConfig): The global quantization config.
@@ -38,20 +38,20 @@ class StashActivationDequantize(NodewiseOptimizationPass):
             and (input_quant_scheme := self.global_quant_config.quant_configs[0].input_quant_scheme) is not None
             and input_quant_scheme.bits == 8
             and input_quant_scheme.type == QuantizeType.FLOAT  # Note: only support FP8 quantization for now
-            and (dequantize := Dequantize.specialize_from(node))
-            and dequantize.bits == 8
+            and (fake_quantize := FakeQuantize.specialize_from(node))
+            and fake_quantize.bits == 8
             and (
                 linears := [
                     linear
-                    for n in get_nodes_with_depth(dequantize.node, follow_parent=False, max_depth=2)
+                    for n in get_nodes_with_depth(fake_quantize.node, follow_parent=False, max_depth=2)
                     if (linear := Linear.configure_from(n)) is not None
                 ]
             )
-            and (len(linears) > 1 or linears[0].weight_dequantize_node != dequantize)
+            and (len(linears) > 1 or linears[0].weight_fake_quantize != fake_quantize)
         ):
             return {}
 
-        assert (scale := dequantize.scale_tensor) is None or scale.ndim in (
+        assert (scale := fake_quantize.scale_tensor) is None or scale.ndim in (
             0,
             1,
         ), "per-token activation quantization is not supported yet"
@@ -62,8 +62,8 @@ class StashActivationDequantize(NodewiseOptimizationPass):
                 type=input_quant_scheme.type,
                 quant_mode=input_quant_scheme.mode,
                 scale=scale,
-                zero_point=dequantize.zeros_tensor,
-                dynamic=dequantize.dynamic,
+                zero_point=fake_quantize.zeros_tensor,
+                dynamic=fake_quantize.dynamic,
             )
 
-        return {dequantize.node: ReplaceAllUses(by=dequantize.x)}
+        return {fake_quantize.node: ReplaceAllUses(by=fake_quantize.x)}

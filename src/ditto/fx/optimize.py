@@ -49,7 +49,7 @@ from .passes import (
     FuseConsecutiveSliceConcat,
     FuseConsecutiveSplitConcat,
     FuseConsecutiveToCopys,
-    FuseDequantizes,
+    FuseFakeQuantizes,
     FuseGatedMLPProjections,
     FuseMLAQKVProjections,
     FuseQKVProjections,
@@ -78,7 +78,7 @@ from .passes import (
     RewritePowAsMul,
     RewriteReshapeAsUnsqueeze,
     RewriteSplitAsSlices,
-    StashActivationDequantize,
+    StashActivationFakeQuantize,
     StashLoraSubgraphs,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
@@ -103,7 +103,7 @@ def get_preoptimization_transform(
     mark_linears_for_tp = [MarkMoELinears, MarkMLALinears]
 
     return get_transform(
-        StashActivationDequantize(global_quant_config=global_quant_config),
+        StashActivationFakeQuantize(global_quant_config=global_quant_config),
         StashLoraSubgraphs(),
         ConstantFolding(),
         AddTRTLLMInputs(argument_hint=argument_hint),
@@ -275,7 +275,7 @@ def get_trtllm_conversion_transform(
         FuseQKVProjections,
         FuseMLAQKVProjections,
         FuseGatedMLPProjections,
-        FuseDequantizes,
+        FuseFakeQuantizes,
         WrapRoPESubgraphs,
         RewriteIndexAsSingleSlice,
         ReplaceSDPAByGPTAttentionPlugin(

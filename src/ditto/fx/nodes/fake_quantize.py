@@ -23,8 +23,8 @@ from .call_function import FinalCallFunction
 from .get_attr import GetAttr
 
 
-class Dequantize(FinalCallFunction):
-    """A representation of torch.ops.ditto.dequantize.default operation.
+class FakeQuantize(FinalCallFunction):
+    """A representation of torch.ops.ditto.fake_quantize.default operation.
 
     Attributes:
         x (Node): The input tensor node.
@@ -97,4 +97,4 @@ class Dequantize(FinalCallFunction):
 
     @classmethod
     def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
-        return (torch.ops.ditto.dequantize.default,)
+        return (torch.ops.ditto.fake_quantize.default,)

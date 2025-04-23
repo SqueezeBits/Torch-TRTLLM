@@ -16,93 +16,109 @@ import torch
 from torch.fx import Node
 
 from ...quantization import QuantizeMode
-from ..nodes import Cat, Dequantize, GetAttr
+from ..nodes import Cat, FakeQuantize, GetAttr
 from ..utils import attr_name_generator
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
 
 
-class FuseDequantizes(NodewiseOptimizationPass):
-    """Fuse consecutive torch.ops.ditto.dequantize.default nodes with cat node."""
+class FuseFakeQuantizes(NodewiseOptimizationPass):
+    """Fuse consecutive torch.ops.ditto.fake_quantize.default nodes with cat node."""
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
             (cat := Cat.specialize_from(node))
-            and len(dequantize_nodes := cat.tensors) > 1
+            and len(fake_quantize_nodes := cat.tensors) > 1
             and (
-                dequantizes := [
-                    dequantize
-                    for node in dequantize_nodes
-                    if (dequantize := Dequantize.specialize_from(node)) is not None
+                fake_quantizes := [
+                    fake_quantize
+                    for node in fake_quantize_nodes
+                    if (fake_quantize := FakeQuantize.specialize_from(node)) is not None
                 ]
             )
-            and len(dequantizes) == len(dequantize_nodes)
-            and are_fusible(dequantizes)
+            and len(fake_quantizes) == len(fake_quantize_nodes)
+            and are_fusible(fake_quantizes)
             and (
                 weights := [
-                    dequantize.input_tensor for dequantize in dequantizes if dequantize.input_tensor is not None
+                    fake_quantize.input_tensor
+                    for fake_quantize in fake_quantizes
+                    if fake_quantize.input_tensor is not None
                 ]
             )
             and (
-                scales := [dequantize.scale_tensor for dequantize in dequantizes if dequantize.scale_tensor is not None]
+                scales := [
+                    fake_quantize.scale_tensor
+                    for fake_quantize in fake_quantizes
+                    if fake_quantize.scale_tensor is not None
+                ]
             )
             and (graph_module := node.graph.owning_module) is not None
         ):
             return {}
 
-        name_gen = attr_name_generator(graph_module, "dequantize_fused_constant")
+        name_gen = attr_name_generator(graph_module, "fake_quantize_fused_constant")
         quantize_mode = get_quantize_mode(scales[0].shape)
 
         fused_weight_tensor = fuse_weights(weights, quant_mode=quantize_mode, scales=scales)
-        with node.graph.inserting_before(min(dequantize_nodes)):
+        with node.graph.inserting_before(min(fake_quantize_nodes)):
             fused_weight_attr = GetAttr.create(node.graph, next(name_gen), fused_weight_tensor)
 
         fused_scale_tensor = fuse_scales(scales, quant_mode=quantize_mode)
-        with node.graph.inserting_before(min(dequantize_nodes)):
+        with node.graph.inserting_before(min(fake_quantize_nodes)):
             fused_scale_attr = GetAttr.create(node.graph, next(name_gen), fused_scale_tensor)
 
         fused_zeros_attr: GetAttr | None = None
         if len(
-            zeros := [dequantize.zeros_tensor for dequantize in dequantizes if dequantize.zeros_tensor is not None]
-        ) == len(dequantizes):
+            zeros := [
+                fake_quantize.zeros_tensor for fake_quantize in fake_quantizes if fake_quantize.zeros_tensor is not None
+            ]
+        ) == len(fake_quantizes):
             fused_zeros_tensor = torch.cat(zeros, dim=-1)
-            with node.graph.inserting_before(min(dequantize_nodes)):
+            with node.graph.inserting_before(min(fake_quantize_nodes)):
                 fused_zeros_attr = GetAttr.create(node.graph, next(name_gen), fused_zeros_tensor)
 
         with node.graph.inserting_before(node):
-            fused_dequantize = Dequantize.create(
+            fused_fake_quantize = FakeQuantize.create(
                 node.graph,
                 fused_weight_attr,
-                dequantizes[0].bits,
-                dequantizes[0].dynamic,
-                dequantizes[0].output_dtype,
+                fake_quantizes[0].bits,
+                fake_quantizes[0].dynamic,
+                fake_quantizes[0].output_dtype,
                 fused_scale_attr,
                 fused_zeros_attr,
-                dequantizes[0].group_size,
+                fake_quantizes[0].group_size,
             )
-        nodes_to_replace = [node] + list(dequantize_nodes)
-        propagate_metadata_from(*nodes_to_replace, to=fused_dequantize.node)
+        nodes_to_replace = [node] + list(fake_quantize_nodes)
+        propagate_metadata_from(*nodes_to_replace, to=fused_fake_quantize.node)
 
-        return {node: ReplaceAllUses(by=fused_dequantize.node)}
+        return {node: ReplaceAllUses(by=fused_fake_quantize.node)}
 
 
-def are_fusible(dequantizes: list[Dequantize]) -> bool:
-    """Check if the dequantize nodes are fusible.
+def are_fusible(fake_quantizes: list[FakeQuantize]) -> bool:
+    """Check if the fake-quantize nodes are fusible.
 
     Args:
-        dequantizes (list[Dequantize]): A list of dequantize nodes to check for fusibility
+        fake_quantizes (list[FakeQuantize]): A list of fake-quantize nodes to check for fusibility
 
     Returns:
-        bool: True if all dequantize nodes are fusible, False otherwise
+        bool: True if all fake-quantize nodes are fusible, False otherwise
     """
     if not (
-        all(dequantizes[0].bits == dequantize.bits for dequantize in dequantizes[1:])
-        and all(dequantizes[0].dynamic == dequantize.dynamic for dequantize in dequantizes[1:])
-        and all(dequantizes[0].output_dtype == dequantize.output_dtype for dequantize in dequantizes[1:])
-        and (weights := [dequantize.input_tensor for dequantize in dequantizes if dequantize.input_tensor is not None])
-        and len(weights) == len(dequantizes)
+        all(fake_quantizes[0].bits == fake_quantize.bits for fake_quantize in fake_quantizes[1:])
+        and all(fake_quantizes[0].dynamic == fake_quantize.dynamic for fake_quantize in fake_quantizes[1:])
+        and all(fake_quantizes[0].output_dtype == fake_quantize.output_dtype for fake_quantize in fake_quantizes[1:])
+        and (
+            weights := [
+                fake_quantize.input_tensor for fake_quantize in fake_quantizes if fake_quantize.input_tensor is not None
+            ]
+        )
+        and len(weights) == len(fake_quantizes)
         and all(weights[0].shape[0] == weight.shape[0] and weights[0].dtype == weight.dtype for weight in weights[1:])
-        and (scales := [dequantize.scale_tensor for dequantize in dequantizes if dequantize.scale_tensor is not None])
-        and len(scales) == len(dequantizes)
+        and (
+            scales := [
+                fake_quantize.scale_tensor for fake_quantize in fake_quantizes if fake_quantize.scale_tensor is not None
+            ]
+        )
+        and len(scales) == len(fake_quantizes)
         and all(get_quantize_mode(scales[0].shape) == get_quantize_mode(scale.shape) for scale in scales[1:])
     ):
         return False
@@ -130,12 +146,12 @@ def fuse_weights(
     quant_mode: QuantizeMode,
     scales: list[torch.Tensor] | None = None,
 ) -> torch.Tensor:
-    """Fuse the weights of the dequantize nodes.
+    """Fuse the weights of the fake-quantize nodes.
 
     Args:
-        weights (list[torch.Tensor]): The weights of the dequantize nodes
-        quant_mode (QuantizeMode): The quantization mode of the dequantize nodes
-        scales (list[torch.Tensor] | None): The scales of the dequantize nodes
+        weights (list[torch.Tensor]): The weights of the fake-quantize nodes
+        quant_mode (QuantizeMode): The quantization mode of the fake-quantize nodes
+        scales (list[torch.Tensor] | None): The scales of the fake-quantize nodes
     """
     assert len(weights) > 1
     if quant_mode == QuantizeMode.PER_TENSOR:
@@ -149,11 +165,11 @@ def fuse_weights(
 
 
 def fuse_scales(scales: list[torch.Tensor], *, quant_mode: QuantizeMode) -> torch.Tensor:
-    """Fuse the scales of the dequantize nodes.
+    """Fuse the scales of the fake-quantize nodes.
 
     Args:
-        scales (list[torch.Tensor]): The scales of the dequantize nodes
-        quant_mode (QuantizeMode): The quantization mode of the dequantize nodes
+        scales (list[torch.Tensor]): The scales of the fake-quantize nodes
+        quant_mode (QuantizeMode): The quantization mode of the fake-quantize nodes
     """
     assert len(scales) > 1
     if quant_mode == QuantizeMode.PER_TENSOR:

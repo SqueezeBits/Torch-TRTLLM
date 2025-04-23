@@ -46,13 +46,13 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
             self.global_quant_config is not None
             and (linear := Linear.configure_from(node))
             and linear.activation_quantization is None
-            and (dequantize := linear.weight_dequantize_node)
-            and (unpacked_weight := GetAttr.specialize_from(dequantize.x))
-            and dequantize.scale
-            and (scale := GetAttr.specialize_from(dequantize.scale))
+            and (fake_quantize := linear.weight_fake_quantize)
+            and (unpacked_weight := GetAttr.specialize_from(fake_quantize.x))
+            and fake_quantize.scale
+            and (scale := GetAttr.specialize_from(fake_quantize.scale))
             and (
                 local_trtllm_quant_algo := inference_trtllm_quant_algo(
-                    dequantize.bits,
+                    fake_quantize.bits,
                     self.model_dtype,
                     quant_method=self.global_quant_config.quant_method,
                 )
@@ -69,17 +69,17 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
 
         if self.global_quant_config.trtllm_quant_algo != local_trtllm_quant_algo:
             logger.warning(
-                f"The quantization algorithm of the dequantize node ({local_trtllm_quant_algo}) is different from "
+                f"The quantization algorithm of the fake quantize node ({local_trtllm_quant_algo}) is different from "
                 f"the global quantization algorithm ({self.global_quant_config.trtllm_quant_algo}). "
                 "This is not expected and may lead to incorrect behavior."
             )
 
         postprocessed_qweight_tensor = postprocess_qweight_for_trtllm(
             unpacked_weight.tensor,
-            dequantize.bits,
+            fake_quantize.bits,
             self.global_quant_config.quant_method,
             model_dtype=self.model_dtype,
-            per_group=dequantize.group_size is not None,
+            per_group=fake_quantize.group_size is not None,
         )
         with node.graph.inserting_before(unpacked_weight.node):
             postprocessed_qweight = GetAttr.create(
@@ -88,7 +88,7 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
 
         plugin_inputs: list[Node] = [linear.input_node, postprocessed_qweight.node, scale.node]
 
-        if zeros := GetAttr.specialize_from(dequantize.zeros) if dequantize.zeros is not None else None:
+        if zeros := GetAttr.specialize_from(fake_quantize.zeros) if fake_quantize.zeros is not None else None:
             postprocessed_zeros_tensor = postprocess_zeros_for_trtllm(
                 zeros.tensor,
                 self.global_quant_config.quant_method,
@@ -103,7 +103,7 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
 
         with node.graph.inserting_before(node):
             plugin: WeightOnlyQuantMatmulPlugin | WeightOnlyGroupwiseQuantMatmulPlugin
-            if dequantize.group_size is not None:
+            if fake_quantize.group_size is not None:
                 plugin = WeightOnlyGroupwiseQuantMatmulPlugin(
                     type_id=DataType(self.model_dtype).to(trt.DataType),
                     quant_algo=get_weightonly_groupwise_quant_algo(
@@ -111,15 +111,15 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
                         zeros is not None,
                         False,
                         local_trtllm_quant_algo == QuantAlgo.W4A8_AWQ,
-                        dequantize.bits == 8,
+                        fake_quantize.bits == 8,
                     ),
-                    group_size=dequantize.group_size,
+                    group_size=fake_quantize.group_size,
                 )
             else:
                 assert len(plugin_inputs) == 3, "Zero point is not supported for weight-only quantization"
                 plugin = WeightOnlyQuantMatmulPlugin(
                     type_id=DataType(self.model_dtype).to(trt.DataType),
-                    weight_type_id=WeightTypeId.INT8 if dequantize.bits == 8 else WeightTypeId.INT4,
+                    weight_type_id=WeightTypeId.INT8 if fake_quantize.bits == 8 else WeightTypeId.INT4,
                 )
 
             plugin_node = node.graph.call_function(plugin, tuple(plugin_inputs))

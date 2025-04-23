@@ -33,7 +33,7 @@ from ..metadata_keys import (
 from ..nodes import (
     MM,
     AddTensorTensor,
-    Dequantize,
+    FakeQuantize,
     Fp8RowwiseGemm,
     Gemm,
     Reshape,
@@ -236,9 +236,9 @@ class Linear(Subgraph):
         return verify(self.mm.meta.get(LORA_PREFIX), as_type=LoraPluginInputPrefix)  # type: ignore[arg-type]
 
     @property
-    def weight_dequantize_node(self) -> Dequantize | None:
-        """The weight dequantization node associated with this linear layer."""
-        return Dequantize.specialize_from(self.mm.other)
+    def weight_fake_quantize(self) -> FakeQuantize | None:
+        """The weight fake-quantization specialization associated with this linear layer."""
+        return FakeQuantize.specialize_from(self.mm.other)
 
     @property
     def activation_quantization(self) -> ActivationQuantization | None:

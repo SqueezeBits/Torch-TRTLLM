@@ -38,7 +38,7 @@ from .fuse_consecutive_reshapes import FuseConsecutiveReshapes
 from .fuse_consecutive_slice_concat import FuseConsecutiveSliceConcat
 from .fuse_consecutive_split_concat import FuseConsecutiveSplitConcat
 from .fuse_consecutive_to_copys import FuseConsecutiveToCopys
-from .fuse_dequantizes import FuseDequantizes
+from .fuse_fake_quantizes import FuseFakeQuantizes
 from .fuse_gated_mlp_projections import FuseGatedMLPProjections
 from .fuse_qkv_projections import FuseMLAQKVProjections, FuseQKVProjections
 from .fuse_reciprocal_mul import FuseReciprocalMul
@@ -68,7 +68,7 @@ from .rewrite_index_as_single_slice import RewriteIndexAsSingleSlice
 from .rewrite_pow_as_mul import RewritePowAsMul
 from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
 from .rewrite_split_as_slices import RewriteSplitAsSlices
-from .stash_activation_dequantize import StashActivationDequantize
+from .stash_activation_fake_quantize import StashActivationFakeQuantize
 from .stash_lora_subgraphs import StashLoraSubgraphs
 from .wrap_rope_subgraphs import WrapRoPESubgraphs
 from .wrap_sdpa_subgraphs import WrapSDPASubgraphs

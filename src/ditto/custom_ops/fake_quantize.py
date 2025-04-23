@@ -17,8 +17,8 @@
 import torch
 
 
-@torch.library.custom_op("ditto::dequantize", mutates_args=())
-def dequantize(
+@torch.library.custom_op("ditto::fake_quantize", mutates_args=())
+def fake_quantize(
     x: torch.Tensor,
     bits: int,
     dynamic: bool,
@@ -27,12 +27,12 @@ def dequantize(
     zeros: torch.Tensor | None = None,
     group_size: int | None = None,
 ) -> torch.Tensor:
-    """Dequantize the input tensor.
+    """Fake-quantize the input tensor.
 
     This function's implementation is not supported in the no fake mode.
 
     Args:
-        x (torch.Tensor): The input tensor to dequantize.
+        x (torch.Tensor): The input tensor to fake-quantize.
         bits (int): The number of bits.
         dynamic (bool): Whether the quantization is dynamic.
         output_dtype (torch.dtype | None): The output data type.
@@ -41,13 +41,13 @@ def dequantize(
         group_size (int | None): The group size. Defaults to None.
 
     Returns:
-        torch.Tensor: The dequantized weight tensor.
+        torch.Tensor: The fake-quantized weight tensor.
     """
-    raise NotImplementedError("ditto::dequantize is not supported in the no fake mode.")
+    raise NotImplementedError("ditto::fake_quantize is not supported in the no fake mode.")
 
 
-@torch.library.register_fake("ditto::dequantize")
-def fake_dequantize(
+@torch.library.register_fake("ditto::fake_quantize")
+def _(
     x: torch.Tensor,
     bits: int,
     dynamic: bool,
@@ -56,12 +56,12 @@ def fake_dequantize(
     zeros: torch.Tensor | None = None,
     group_size: int | None = None,
 ) -> torch.Tensor:
-    """Fake dequantize the input tensor.
+    """Fake ditto::fake_quantize the input tensor.
 
-    This function is a fake version of the torch.ops.ditto.dequantize operation.
+    This function is a fake version of the torch.ops.ditto.fake_quantize operation.
 
     Args:
-        x (torch.Tensor): The input tensor to dequantize.
+        x (torch.Tensor): The input tensor to fake-quantize.
         bits (int): The number of bits.
         dynamic (bool): Whether the quantization is dynamic.
         output_dtype (torch.dtype | None): The output data type.
@@ -70,9 +70,9 @@ def fake_dequantize(
         group_size (int | None): The group size. Defaults to None.
 
     Returns:
-        torch.Tensor: The dequantized weight tensor.
+        torch.Tensor: The fake-quantized weight tensor.
     """
     return torch.zeros_like(x, dtype=output_dtype, device=x.device)
 
 
-ditto_dequantize = torch.ops.ditto.dequantize
+ditto_fake_quantize = torch.ops.ditto.fake_quantize

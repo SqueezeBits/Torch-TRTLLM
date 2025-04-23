@@ -22,14 +22,14 @@ from compressed_tensors.quantization import (
 )
 from compressed_tensors.quantization.lifecycle import forward
 
-from ..custom_ops import ditto_dequantize
+from ..custom_ops import ditto_fake_quantize
 from .patch import custom_patch
 
 
 @custom_patch(
     name="compressed_tensors.linear.compressed_linear.CompressedLinear",
     reason="resolving torch.export error and the registration of the parameters "
-    "and applying custom dequantize operation",
+    "and applying custom fake quantize operation",
     required=True,
     env_var_to_disable="DISABLE_COMPRESSED_TENSORS_COMPRESSED_LINEAR_PROCESS_PACH",
 )
@@ -60,7 +60,7 @@ def patch_compressed_linear_process() -> None:
         return ret
 
     def patched_forward(self, input: torch.Tensor) -> torch.Tensor:
-        unpacked_weight = ditto_dequantize(
+        unpacked_weight = ditto_fake_quantize(
             self.unpacked_weight,
             self.quantization_scheme.weights.num_bits,
             False,
@@ -80,9 +80,9 @@ def patch_compressed_linear_process() -> None:
             return value
 
         if args.dynamic:
-            out = ditto_dequantize(value, args.num_bits, True, value.dtype)
+            out = ditto_fake_quantize(value, args.num_bits, True, value.dtype)
         else:
-            out = ditto_dequantize(
+            out = ditto_fake_quantize(
                 value,
                 args.num_bits,
                 False,

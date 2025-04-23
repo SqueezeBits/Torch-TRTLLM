@@ -16,7 +16,7 @@ import warnings
 
 import torch
 
-from ..custom_ops import ditto_dequantize
+from ..custom_ops import ditto_fake_quantize
 from .patch import custom_patch
 
 warnings.simplefilter("ignore", FutureWarning)
@@ -27,7 +27,7 @@ from auto_gptq.utils import import_utils  # noqa: E402
 
 @custom_patch(
     name="auto_gptq.nn_modules.qlinear.qlinear_cuda_old.QuantLinear",
-    reason="applying custom dequantize operation",
+    reason="applying custom fake quantize operation",
     required=True,
     env_var_to_disable="DISABLE_AUTO_GPTQ_QUANTLINEAR_PATCH",
 )
@@ -46,7 +46,7 @@ def patch_dynamically_import_quantlinear() -> None:
 
     def patched_forward(self: QuantLinear, x: torch.Tensor) -> torch.Tensor:
         out_shape = x.shape[:-1] + (self.outfeatures,)
-        weight = ditto_dequantize(
+        weight = ditto_fake_quantize(
             self.unpacked_weight,
             self.bits,
             False,

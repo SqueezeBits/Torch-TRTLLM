@@ -15,13 +15,13 @@
 import torch
 from awq.modules.linear.gemm import WQLinear_GEMM, WQLinearMMFunction
 
-from ..custom_ops import ditto_dequantize
+from ..custom_ops import ditto_fake_quantize
 from .patch import custom_patch
 
 
 @custom_patch(
     name="awq.modules.linear.gemm.WQLinear_GEMM",
-    reason="applying custom dequantize operation",
+    reason="applying custom fake quantize operation",
     required=True,
     env_var_to_disable="DISABLE_AUTO_AWQ_WQLINEAR_GEMM_PATCH",
 )
@@ -39,7 +39,7 @@ def patch_wqlinear_mm_func_forward() -> None:
     ):
         out_shape = x.shape[:-1] + (out_features,)
 
-        out = ditto_dequantize(qweight, w_bit, False, scales.dtype, scales, qzeros, group_size)
+        out = ditto_fake_quantize(qweight, w_bit, False, scales.dtype, scales, qzeros, group_size)
         out = torch.matmul(x, out)
 
         out = out + bias if bias is not None else out
