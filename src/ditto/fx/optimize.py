@@ -49,7 +49,7 @@ from .passes import (
     FuseConsecutiveSliceConcat,
     FuseConsecutiveSplitConcat,
     FuseConsecutiveToCopys,
-    FuseDequantizes,
+    FuseFakeQuantizes,
     FuseGatedMLPProjections,
     FuseMLAQKVProjections,
     FuseQKVProjections,
@@ -78,11 +78,10 @@ from .passes import (
     RewritePowAsMul,
     RewriteReshapeAsUnsqueeze,
     RewriteSplitAsSlices,
-    StashActQuantSubgraphs,
+    StashActivationFakeQuantize,
     StashLoraSubgraphs,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
-    WrapWeightDequantSubgraphs,
 )
 from .passes.defer_unsqueeze import SwapUnsqueezeWithSymSizeInt
 from .passes.infra import GraphOptimizationPass, PassManager
@@ -91,14 +90,12 @@ from .passes.infra import GraphOptimizationPass, PassManager
 def get_preoptimization_transform(
     argument_hint: TRTLLMArgumentHint,
     global_quant_config: GlobalQuantConfig | None,
-    dtype: torch.dtype,
 ) -> Callable[[GraphModule], GraphModule]:
     """Get the pre-optimization transform.
 
     Args:
         argument_hint (TRTLLMArgumentHint): the type hints for TRTLLM inputs
         global_quant_config (GlobalQuantConfig | None): the global quantization configuration
-        dtype (torch.dtype): the data type for the plugins
 
     Returns:
         Callable[[GraphModule], GraphModule]: the pre-optimization transform
@@ -106,8 +103,7 @@ def get_preoptimization_transform(
     mark_linears_for_tp = [MarkMoELinears, MarkMLALinears]
 
     return get_transform(
-        WrapWeightDequantSubgraphs(global_quant_config=global_quant_config, dtype=dtype),
-        StashActQuantSubgraphs(global_quant_config=global_quant_config),
+        StashActivationFakeQuantize(global_quant_config=global_quant_config),
         StashLoraSubgraphs(),
         ConstantFolding(),
         AddTRTLLMInputs(argument_hint=argument_hint),
@@ -279,7 +275,7 @@ def get_trtllm_conversion_transform(
         FuseQKVProjections,
         FuseMLAQKVProjections,
         FuseGatedMLPProjections,
-        FuseDequantizes,
+        FuseFakeQuantizes,
         WrapRoPESubgraphs,
         RewriteIndexAsSingleSlice,
         ReplaceSDPAByGPTAttentionPlugin(
@@ -291,9 +287,9 @@ def get_trtllm_conversion_transform(
         BindUnmatchedLoraProtos,
         PopLoraPlugins(argument_hint=argument_hint),
         ReplaceRmsNormByFp8RmsNormPlugin(model_dtype=dtype, global_quant_config=global_quant_config),
-        ReplaceMMByWoQGemmPlugin(model_dtype=dtype),
+        ReplaceMMByWoQGemmPlugin(model_dtype=dtype, global_quant_config=global_quant_config),
         ReplaceMMByFp8GemmPlugin,
-        ReplaceMMByFp8RowwiseGemmPlugin(model_dtype=dtype),
+        ReplaceMMByFp8RowwiseGemmPlugin,
         ReplaceMMByGemmPlugin,
         CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]

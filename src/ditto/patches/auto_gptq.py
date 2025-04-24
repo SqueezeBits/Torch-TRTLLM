@@ -14,18 +14,22 @@
 
 import warnings
 
+import torch
+
+from ..custom_ops import ditto_fake_quantize
 from .patch import custom_patch
 
 warnings.simplefilter("ignore", FutureWarning)
 
+from auto_gptq.nn_modules.qlinear.qlinear_cuda_old import QuantLinear  # noqa: E402
 from auto_gptq.utils import import_utils  # noqa: E402
 
 
 @custom_patch(
-    name="auto_gptq.utils.import_utils.dynamically_import_QuantLinear",
-    reason="",
+    name="auto_gptq.nn_modules.qlinear.qlinear_cuda_old.QuantLinear",
+    reason="applying custom fake quantize operation",
     required=True,
-    env_var_to_disable="DISABLE_AUTO_GPTQ_QUANTLINEAR_IMPORT_PATCH",
+    env_var_to_disable="DISABLE_AUTO_GPTQ_QUANTLINEAR_PATCH",
 )
 def patch_dynamically_import_quantlinear() -> None:
     def patched_dynamically_import_quantlinear(
@@ -38,10 +42,23 @@ def patch_dynamically_import_quantlinear() -> None:
         use_qigen: bool = False,
         disable_marlin: bool = True,
     ):
-        if not desc_act or group_size == -1:
-            from auto_gptq.nn_modules.qlinear.qlinear_cuda_old import QuantLinear
-        else:
-            from auto_gptq.nn_modules.qlinear.qlinear_cuda import QuantLinear
         return QuantLinear
 
+    def patched_forward(self: QuantLinear, x: torch.Tensor) -> torch.Tensor:
+        out_shape = x.shape[:-1] + (self.outfeatures,)
+        weight = ditto_fake_quantize(
+            self.unpacked_weight,
+            self.bits,
+            False,
+            self.scales.dtype,
+            self.scales,
+            self.unpacked_zeros,
+            self.group_size,
+        )
+        out = torch.matmul(x, weight)
+        out = out.to(dtype=x.dtype).reshape(out_shape)
+        out = out + self.bias if self.bias is not None else out
+        return out
+
     import_utils.dynamically_import_QuantLinear = patched_dynamically_import_quantlinear
+    QuantLinear.forward = patched_forward

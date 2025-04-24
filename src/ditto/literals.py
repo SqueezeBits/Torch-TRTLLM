@@ -96,7 +96,7 @@ PassName = Literal[
     "FuseConsecutiveSliceConcat",
     "FuseConsecutiveSplitConcat",
     "FuseConsecutiveToCopys",
-    "FuseDequantizes",
+    "FuseFakeQuantizes",
     "FuseGatedMLPProjections",
     "FuseMLAQKVProjections",
     "FuseQKVProjections",
@@ -124,9 +124,8 @@ PassName = Literal[
     "RewriteFloatingPointLiteralsAsNodes",
     "RewriteReshapeAsUnsqueeze",
     "RewriteSplitAsSlices",
-    "StashActQuantSubgraphs",
+    "StashActivationFakeQuantize",
     "StashLoraSubgraphs",
-    "WrapWeightDequantSubgraphs",
     "WrapRoPESubgraphs",
     "WrapSDPASubgraphs",
 ]
@@ -143,3 +142,5 @@ LogLevelLiteral = Literal[
     "DEBUG",
     "NOTSET",
 ]
+
+QuantizeMethod = Literal["gptq", "awq", "compressed-tensors", "modelopt", None]

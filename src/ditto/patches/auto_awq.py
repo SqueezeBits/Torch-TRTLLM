@@ -13,17 +13,17 @@
 # limitations under the License.
 
 import torch
-from awq.modules.linear.gemm import WQLinearMMFunction
-from awq.utils.packing_utils import dequantize_gemm
+from awq.modules.linear.gemm import WQLinear_GEMM, WQLinearMMFunction
 
+from ..custom_ops import ditto_fake_quantize
 from .patch import custom_patch
 
 
 @custom_patch(
-    name="awq.modules.linear.gemm.WQLinearMMFunction.forward",
-    reason="",
+    name="awq.modules.linear.gemm.WQLinear_GEMM",
+    reason="applying custom fake quantize operation",
     required=True,
-    env_var_to_disable="DISABLE_AUTO_AWQ_WQLINEARMMFUNCTION_PATCH",
+    env_var_to_disable="DISABLE_AUTO_AWQ_WQLINEAR_GEMM_PATCH",
 )
 def patch_wqlinear_mm_func_forward() -> None:
     def patched_wqlinear_mm_func_forward(
@@ -37,13 +37,9 @@ def patch_wqlinear_mm_func_forward() -> None:
         bias=None,
         out_features=0,
     ):
-        ctx.save_for_backward(x, qweight, qzeros, scales, bias)
-        ctx.out_features = out_features
-
         out_shape = x.shape[:-1] + (out_features,)
-        x = x.to(torch.float16)
 
-        out = dequantize_gemm(qweight, qzeros, scales, w_bit, group_size)
+        out = ditto_fake_quantize(qweight, w_bit, False, scales.dtype, scales, qzeros, group_size)
         out = torch.matmul(x, out)
 
         out = out + bias if bias is not None else out
@@ -54,4 +50,22 @@ def patch_wqlinear_mm_func_forward() -> None:
 
         return out
 
+    def patched_gemm_forward(self: WQLinear_GEMM, x: torch.Tensor) -> torch.Tensor:
+        out_shape = x.shape[:-1] + (self.out_features,)
+
+        with torch.no_grad():
+            out = WQLinearMMFunction.apply(
+                x,
+                self.unpacked_weight,
+                self.unpacked_zeros,
+                self.scales,
+                self.w_bit,
+                self.group_size,
+                self.bias,
+                self.out_features,
+            )
+
+        return out.reshape(out_shape)
+
     WQLinearMMFunction.forward = patched_wqlinear_mm_func_forward
+    WQLinear_GEMM.forward = patched_gemm_forward

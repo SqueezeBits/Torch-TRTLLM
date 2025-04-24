@@ -43,7 +43,7 @@ from .fx import generate_trtllm_engine_config
 from .fx.utils import find_output_node
 from .inline import inline
 from .literals import DTypeLiteral
-from .quantization import GlobalQuantConfig, resolve_qlinear_device_map
+from .quantization import GlobalQuantConfig, preprocess_qlinear_module
 from .transform import transform
 from .types import BuiltInConstant, verify
 
@@ -131,8 +131,8 @@ def trtllm_build(
         mapping=mapping,
     )
 
-    resolve_qlinear_device_map(model)
-    global_quant_config = GlobalQuantConfig.create_from(model.config)
+    if (global_quant_config := GlobalQuantConfig.create_from(model.config)) is not None:
+        preprocess_qlinear_module(model, global_quant_config)
     graph_module = trtllm_export(model, argument_hint)
 
     for rank, transformed_graph_module in transform(
