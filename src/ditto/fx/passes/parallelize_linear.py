@@ -21,6 +21,7 @@ from torch.fx import Graph, GraphModule, Node
 from ...configs import TRTLLMMapping
 from ...constants import INPUT_IDS
 from ...types import DataType
+from ..fake_tensor_prop import run_fake_tensor_prop
 from ..nodes import Expand, GetAttr, Permute, Reshape, Slice
 from ..subgraphs import FusedLinear, Linear
 from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs
@@ -134,13 +135,15 @@ def parallelize_column_linear(
     graph = linear.mm.node.graph
 
     if (fake_quantize := linear.weight_fake_quantize) is not None:
-        input_nodes: list[Node] = []
-        for dequant_input_node in linear.mm.other.all_input_nodes:
+        tensors_to_be_parallelized: list[Node | None] = [fake_quantize.x, fake_quantize.scale, fake_quantize.zeros]
+        for tensor_node in tensors_to_be_parallelized:
+            if tensor_node is None:
+                continue
             assert (
-                tensor := GetAttr.specialize_from(dequant_input_node)
-            ), "fake_quantize's input node is not specialized to GetAttr"
-            with graph.inserting_before(tensor.node):
-                parallelized_weight = GetAttr.create(
+                tensor := GetAttr.specialize_from(tensor_node)
+            ) is not None, "Node to be parallelized must be specialized to GetAttr"
+            with graph.inserting_before(tensor_node):
+                parallelized_tensor = GetAttr.create(
                     graph,
                     get_name_of_attr(tensor.target, mapping.tp_rank),
                     tensor.tensor
@@ -153,36 +156,20 @@ def parallelize_column_linear(
                         is_transposed=False,
                     ),
                 )
-                propagate_metadata_from(tensor, to=parallelized_weight)
-            dequant_input_node.replace_all_uses_with(parallelized_weight.node)
-            input_nodes.append(parallelized_weight.node)
-        parallelized_fake_quantize = fake_quantize.target.model_copy(
-            update={
-                "output_shape": torch.Size(
-                    [fake_quantize.target.output_shape[0], fake_quantize.target.output_shape[1] // mapping.tp_size]
-                )
-            }
-        )
-        with graph.inserting_before(linear.mm.other):
-            parallelized_fake_quantize_node = graph.call_function(parallelized_fake_quantize, tuple(input_nodes))
-            propagate_metadata_from(linear.mm.other, to=parallelized_fake_quantize_node)
-        linear.mm.other.replace_all_uses_with(parallelized_fake_quantize_node)
-        if inplace:
-            linear.mm.other = parallelized_fake_quantize_node
+            propagate_metadata_from(tensor, to=parallelized_tensor)
+            tensor_node.replace_all_uses_with(parallelized_tensor.node)
+        run_fake_tensor_prop(fake_quantize.node)
     else:
         assert (
             weight := GetAttr.specialize_from(linear.weight_node)
         ) is not None, "weight node is not specialized to GetAttr"
-        weight_tensor = weight.tensor
-        if linear.has_transposed_weight:
-            weight_tensor = weight_tensor.T
 
         with linear.mm.node.graph.inserting_before(weight.node):
             parallelized_weight = GetAttr.create(
                 linear.mm.node.graph,
                 get_name_of_attr(weight.target, mapping.tp_rank),
                 parallelize_2d_tensor(
-                    weight_tensor,
+                    weight.tensor,
                     tp_size=mapping.tp_size,
                     tp_rank=mapping.tp_rank,
                     is_column=True,
@@ -251,13 +238,15 @@ def parallelize_row_linear(
     """
     graph = linear.mm.node.graph
     if (fake_quantize := linear.weight_fake_quantize) is not None:
-        input_nodes: list[Node] = []
-        for dequant_input_node in linear.mm.other.all_input_nodes:
+        tensors_to_be_parallelized: list[Node | None] = [fake_quantize.x, fake_quantize.scale, fake_quantize.zeros]
+        for tensor_node in tensors_to_be_parallelized:
+            if tensor_node is None:
+                continue
             assert (
-                tensor := GetAttr.specialize_from(dequant_input_node)
-            ), "fake_quantize's input node is not specialized to GetAttr"
-            with graph.inserting_before(tensor.node):
-                parallelized_weight = GetAttr.create(
+                tensor := GetAttr.specialize_from(tensor_node)
+            ) is not None, "Node to be parallelized must be specialized to GetAttr"
+            with graph.inserting_before(tensor_node):
+                parallelized_tensor = GetAttr.create(
                     graph,
                     get_name_of_attr(tensor.target, mapping.tp_rank),
                     tensor.tensor
@@ -270,20 +259,9 @@ def parallelize_row_linear(
                         is_transposed=False,
                     ),
                 )
-                propagate_metadata_from(tensor, to=parallelized_weight)
-            dequant_input_node.replace_all_uses_with(parallelized_weight.node)
-            input_nodes.append(parallelized_weight.node)
-        parallelized_fake_quantize = fake_quantize.target.model_copy(
-            update={
-                "output_shape": torch.Size(
-                    [fake_quantize.target.output_shape[0] // mapping.tp_size, fake_quantize.target.output_shape[1]]
-                )
-            }
-        )
-        with graph.inserting_before(linear.mm.other):
-            parallelized_fake_quantize_node = graph.call_function(parallelized_fake_quantize, tuple(input_nodes))
-            propagate_metadata_from(linear.mm.other, to=parallelized_fake_quantize_node)
-        linear.mm.other.replace_all_uses_with(parallelized_fake_quantize_node)
+            propagate_metadata_from(tensor, to=parallelized_tensor)
+            tensor_node.replace_all_uses_with(parallelized_tensor.node)
+        run_fake_tensor_prop(fake_quantize.node)
     else:
         assert (
             weight := GetAttr.specialize_from(linear.weight_node)

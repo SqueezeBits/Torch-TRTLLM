@@ -16,6 +16,7 @@ import os
 from collections.abc import Callable, Generator
 from typing import TypeAlias
 
+import modelopt.torch.quantization as mtq
 import torch
 from loguru import logger
 from peft import LoraConfig, PeftModel
@@ -131,9 +132,10 @@ def trtllm_build(
         mapping=mapping,
     )
 
-    if (global_quant_config := GlobalQuantConfig.create_from(model.config)) is not None:
+    if (global_quant_config := GlobalQuantConfig.create_from(model)) is not None:
         preprocess_qlinear_module(model, global_quant_config)
-    graph_module = trtllm_export(model, argument_hint)
+    with mtq.utils.export_torch_mode():
+        graph_module = trtllm_export(model, argument_hint)
 
     for rank, transformed_graph_module in transform(
         graph_module,
