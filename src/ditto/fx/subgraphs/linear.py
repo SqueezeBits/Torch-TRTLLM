@@ -38,6 +38,7 @@ from ..nodes import (
     Fp8RowwiseGemm,
     Gemm,
     Reshape,
+    SmoothQuantGemm,
     WeightOnlyGroupwiseQuantMatmul,
     WeightOnlyQuantMatmul,
 )
@@ -45,7 +46,7 @@ from ..targets import ActivationQuantization, LoraProto, OutputQuantization
 from ..utils import get_val
 from .subgraph import Subgraph
 
-MMType = MM | Fp8RowwiseGemm | Gemm | WeightOnlyGroupwiseQuantMatmul | WeightOnlyQuantMatmul
+MMType = MM | Fp8RowwiseGemm | Gemm | SmoothQuantGemm | WeightOnlyGroupwiseQuantMatmul | WeightOnlyQuantMatmul
 
 
 # pylint: disable-next=too-many-public-methods
@@ -162,6 +163,7 @@ class Linear(Subgraph):
                 mm := MM.specialize_from(node)
                 or Fp8RowwiseGemm.specialize_from(node)
                 or Gemm.specialize_from(node)
+                or SmoothQuantGemm.specialize_from(node)
                 or WeightOnlyGroupwiseQuantMatmul.specialize_from(node)
                 or WeightOnlyQuantMatmul.specialize_from(node)
             )

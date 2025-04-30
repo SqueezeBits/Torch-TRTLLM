@@ -12,41 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# pylint: disable=too-many-positional-arguments
-
 from typing import Any
 
 import numpy as np
 import tensorrt as trt
 import torch
-from tensorrt_llm.functional import QuantMode
 
 from ...types import DataType
 from .fake_tensor_mode import is_in_fake_tensor_mode
 from .plugin import Plugin
 
 
-class RmsnormQuantizationPlugin(Plugin):
-    """TensorRT plugin implementation of RmsnormQuantization.
+class SmoothQuantGemmPlugin(Plugin):
+    """TensorRT plugin for SmoothQuantGemm.
 
     Attributes:
-        eps (float): Epsilon value for RMS normalization
-        dyn_act_scaling (bool): Whether to use dynamic activation scaling
-        sum_per_token (bool): Whether to sum per token
-        clamp_enabled (bool): Whether to clamp the output
-        quant_mode (QuantMode): Quantization mode
-        type_id (trt.DataType): Data type of the input tensor
-        out_type_id (trt.DataType): Data type of the output tensor
+        has_per_channel_scaling (bool): Whether to use per-channel scaling.
+        has_per_token_scaling (bool): Whether to use per-token scaling.
+        type_id (trt.DataType): Data type for the model.
     """
 
     # the order of the attributes does matter!
-    eps: float
-    dyn_act_scaling: bool
-    sum_per_token: bool
-    clamp_enabled: bool
-    quant_mode: QuantMode
+    has_per_channel_scaling: bool
+    has_per_token_scaling: bool
     type_id: trt.DataType
-    out_type_id: trt.DataType
 
     @classmethod
     def get_field_dtype(cls, name: str, value: Any) -> type[np.number]:
@@ -59,7 +48,7 @@ class RmsnormQuantizationPlugin(Plugin):
         Returns:
             type[np.number]: numpy dtype for the value
         """
-        if name in ("dyn_act_scaling", "sum_per_token", "clamp_enabled"):
+        if name in ("has_per_channel_scaling", "has_per_token_scaling"):
             return np.int32
         return super().get_field_dtype(name, value)
 
@@ -67,16 +56,22 @@ class RmsnormQuantizationPlugin(Plugin):
         self,
         x: torch.Tensor,
         weight: torch.Tensor,
-        bias: torch.Tensor,
-        scale: torch.Tensor,
-        clamp_val: torch.Tensor | None = None,
+        scale_tokens: torch.Tensor,
+        scale_channels: torch.Tensor,
         **kwargs: Any,
-    ) -> tuple[torch.Tensor, ...]:
+    ) -> torch.Tensor:
+        """Perform matrix multiplication between input tensors.
+
+        Args:
+            x (torch.Tensor): First input tensor
+            weight (torch.Tensor): Second input tensor (weight matrix)
+            scale_tokens (torch.Tensor): Scaling factor for per-tensor or per-token scaling
+            scale_channels (torch.Tensor): Scaling factor for per-channel scaling
+            **kwargs (Any): Additional keyword arguments
+
+        Returns:
+            torch.Tensor: Result of matrix multiplication
+        """
         if is_in_fake_tensor_mode():
-            output = [torch.zeros_like(x, dtype=DataType(self.out_type_id).to(torch.dtype))]
-            if self.dyn_act_scaling:
-                output.append(torch.zeros((x.shape[0], 1), dtype=torch.float32))
-            if self.sum_per_token:
-                output.append(torch.zeros((x.shape[0], 1), dtype=torch.float32))
-            return tuple(output)
+            return torch.zeros((x.shape[0], weight.shape[0]), dtype=DataType(self.type_id).to(torch.dtype))
         raise NotImplementedError(f"{type(self).__name__} doesn't have implementation")

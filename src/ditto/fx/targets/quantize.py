@@ -70,3 +70,12 @@ class QuantizePerTokenPlugin(Plugin):
                 output.append(torch.zeros((x.shape[0], 1), dtype=torch.float32))
             return tuple(output)
         raise NotImplementedError(f"{type(self).__name__} doesn't have implementation")
+
+
+class QuantizeTensorPlugin(Plugin):
+    """TensorRT plugin implementation of QuantizeTensor."""
+
+    def __call__(self, x: torch.Tensor, scale: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+        if is_in_fake_tensor_mode():
+            return torch.zeros_like(x, dtype=torch.int8)
+        raise NotImplementedError(f"{type(self).__name__} doesn't have implementation")

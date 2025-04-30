@@ -35,9 +35,11 @@ from ..fx.targets import (
     MixtureOfExpertsPlugin,
     Plugin,
     QuantizePerTokenPlugin,
+    QuantizeTensorPlugin,
     RecvPlugin,
     RmsnormQuantizationPlugin,
     SendPlugin,
+    SmoothQuantGemmPlugin,
     TopkLastDimPlugin,
     WeightOnlyGroupwiseQuantMatmulPlugin,
     WeightOnlyQuantMatmulPlugin,
@@ -255,6 +257,34 @@ def convert_quantize_per_token_plugin(
 
 
 @dynamo_tensorrt_converter(
+    QuantizeTensorPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_quantize_tensor_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a QuantizeTensorPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The QuantizeTensorPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, QuantizeTensorPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="quantize_tensor")
+
+
+@dynamo_tensorrt_converter(
     RecvPlugin,
     supports_dynamic_shapes=True,
 )
@@ -336,6 +366,34 @@ def convert_send_plugin(
     """
     assert isinstance(target, SendPlugin)
     return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="send")
+
+
+@dynamo_tensorrt_converter(
+    SmoothQuantGemmPlugin,
+    supports_dynamic_shapes=True,
+)
+@enable_plugin_debug_info_hook
+def convert_smoothquant_gemm_plugin(
+    ctx: ConversionContext,
+    target: Target,
+    args: tuple[Argument, ...],
+    kwargs: dict[str, Argument],
+    name: str,
+) -> trt.ITensor | Sequence[trt.ITensor]:
+    """Convert a SmoothQuantGemmPlugin target to a TensorRT plugin layer.
+
+    Args:
+        ctx (ConversionContext): The conversion context
+        target (Target): The SmoothQuantGemmPlugin target to convert
+        args (tuple[Argument, ...]): Positional arguments to the plugin
+        kwargs (dict[str, Argument]): Keyword arguments to the plugin
+        name (str): Name for the plugin layer
+
+    Returns:
+        trt.ITensor | Sequence[trt.ITensor]: Output tensor(s) from the plugin layer
+    """
+    assert isinstance(target, SmoothQuantGemmPlugin)
+    return _convert_plugin(ctx, target, args, kwargs, name, plugin_name="smooth_quant_gemm")
 
 
 @dynamo_tensorrt_converter(

@@ -26,6 +26,7 @@ def fake_quantize(
     scale: torch.Tensor | None = None,
     zeros: torch.Tensor | None = None,
     group_size: int | None = None,
+    smoother: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Fake-quantize the input tensor.
 
@@ -39,6 +40,7 @@ def fake_quantize(
         scale (torch.Tensor | None): The scale tensor. Defaults to None.
         zeros (torch.Tensor | None): The zeros tensor. Defaults to None.
         group_size (int | None): The group size. Defaults to None.
+        smoother (torch.Tensor | None): The smoothing factor tensor. Defaults to None.
 
     Returns:
         torch.Tensor: The fake-quantized weight tensor.
@@ -55,6 +57,7 @@ def _(
     scale: torch.Tensor | None = None,
     zeros: torch.Tensor | None = None,
     group_size: int | None = None,
+    smoother: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Fake ditto::fake_quantize the input tensor.
 
@@ -68,6 +71,7 @@ def _(
         scale (torch.Tensor | None): The scale tensor. Defaults to None.
         zeros (torch.Tensor | None): The zeros tensor. Defaults to None.
         group_size (int | None): The group size. Defaults to None.
+        smoother (torch.Tensor | None): The smoothing factor tensor. Defaults to None.
 
     Returns:
         torch.Tensor: The fake-quantized weight tensor.

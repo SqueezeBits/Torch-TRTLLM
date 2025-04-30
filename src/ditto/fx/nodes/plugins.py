@@ -23,6 +23,7 @@ from ..targets import (
     GPTAttentionPlugin,
     QuantizePerTokenPlugin,
     RmsnormQuantizationPlugin,
+    SmoothQuantGemmPlugin,
     WeightOnlyGroupwiseQuantMatmulPlugin,
     WeightOnlyQuantMatmulPlugin,
 )
@@ -162,6 +163,35 @@ class RmsnormQuantization(CallFunction):
     @classmethod
     def validate_node(cls, node: Node) -> bool:
         return isinstance(node.target, RmsnormQuantizationPlugin)
+
+
+class SmoothQuantGemm(CallFunction):
+    """A plugin specialization representing a weight-only groupwise quantized matrix multiplication node.
+
+    Attributes:
+        this (Node): The first input node
+        other (Node): The second input node (expected to be a weight tensor)
+        input_scale (Node): The input scale node
+        weight_scale (Node): The weight scale node
+    """
+
+    this: Node
+    other: Node
+    input_scale: Node
+    weight_scale: Node
+
+    @property
+    def target(self) -> SmoothQuantGemmPlugin:
+        assert isinstance(t := super().target, SmoothQuantGemmPlugin)
+        return t
+
+    @classmethod
+    def possible_targets(cls) -> tuple[Callable[..., Any], ...]:
+        return ()
+
+    @classmethod
+    def validate_node(cls, node: Node) -> bool:
+        return isinstance(node.target, SmoothQuantGemmPlugin)
 
 
 class WeightOnlyQuantMatmul(CallFunction):

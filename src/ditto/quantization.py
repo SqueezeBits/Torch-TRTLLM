@@ -209,7 +209,28 @@ class GlobalQuantConfig(StrictlyTyped):
                             f"Unsupported quantization mode: {input_quant_scheme.mode}, {weight_quant_scheme.mode}"
                         )
                 else:
-                    raise NotImplementedError(f"Unsupported input/weight quantization type: {quantize_type=}")
+                    if (input_quant_scheme.mode, weight_quant_scheme.mode) == (
+                        QuantizeMode.PER_TENSOR,
+                        QuantizeMode.PER_TENSOR,
+                    ):
+                        trtllm_quant_algo = QuantAlgo.W8A8_SQ_PER_TENSOR_PLUGIN
+                    elif (input_quant_scheme.mode, weight_quant_scheme.mode) == (
+                        QuantizeMode.PER_TENSOR,
+                        QuantizeMode.PER_CHANNEL,
+                    ):
+                        trtllm_quant_algo = QuantAlgo.W8A8_SQ_PER_CHANNEL_PER_TENSOR_PLUGIN
+                    elif (input_quant_scheme.mode, weight_quant_scheme.mode) == (
+                        QuantizeMode.PER_TOKEN,
+                        QuantizeMode.PER_TENSOR,
+                    ):
+                        trtllm_quant_algo = QuantAlgo.W8A8_SQ_PER_TENSOR_PER_TOKEN_PLUGIN
+                    elif (input_quant_scheme.mode, weight_quant_scheme.mode) == (
+                        QuantizeMode.PER_TOKEN,
+                        QuantizeMode.PER_CHANNEL,
+                    ):
+                        trtllm_quant_algo = QuantAlgo.W8A8_SQ_PER_CHANNEL_PER_TOKEN_PLUGIN
+                    else:
+                        raise NotImplementedError(f"Unsupported input/weight quantization type: {quantize_type=}")
 
             trtllm_kv_cache_quant_algo: QuantAlgo = QuantAlgo.NO_QUANT
             if output_quant_scheme is not None:
@@ -394,7 +415,15 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
         elif isinstance(module, QuantLinear):
             if module.weight_quantizer.is_enabled:
                 if (
-                    module.weight_quantizer._enable_pre_quant_scale
+                    global_quant_config.trtllm_quant_algo
+                    not in (
+                        QuantAlgo.W8A8_SQ_PER_CHANNEL,
+                        QuantAlgo.W8A8_SQ_PER_TENSOR_PLUGIN,
+                        QuantAlgo.W8A8_SQ_PER_TENSOR_PER_TOKEN_PLUGIN,
+                        QuantAlgo.W8A8_SQ_PER_CHANNEL_PER_TOKEN_PLUGIN,
+                        QuantAlgo.W8A8_SQ_PER_CHANNEL_PER_TENSOR_PLUGIN,
+                    )
+                    and module.weight_quantizer._enable_pre_quant_scale
                     and module.input_quantizer._enable_pre_quant_scale
                     and hasattr(module.input_quantizer, "_pre_quant_scale")
                 ):
@@ -589,9 +618,9 @@ def get_modelopt_quantization_scheme(
         input_quant_scheme: QuantScheme | None = None
         weight_quant_scheme: QuantScheme | None = None
         if module.input_quantizer.is_enabled:
-            assert (bits := module.input_quantizer.num_bits) == (
-                4,
-                3,
+            assert (bits := module.input_quantizer.num_bits) in (
+                (4, 3),
+                8,
             ), f"Unsupported bits for activation quantization: {bits=}"
             assert (
                 module.input_quantizer.axis is None or module.input_quantizer._dynamic
@@ -599,7 +628,7 @@ def get_modelopt_quantization_scheme(
             input_quant_scheme = QuantScheme(
                 bits=8,
                 mode=(QuantizeMode.PER_TOKEN if module.input_quantizer._dynamic else QuantizeMode.PER_TENSOR),
-                type=QuantizeType.FLOAT,
+                type=QuantizeType.FLOAT if bits == (4, 3) else QuantizeType.INT,
                 has_zero_point=False,
                 dynamic=module.input_quantizer._dynamic,
             )
@@ -631,7 +660,7 @@ def get_modelopt_quantization_scheme(
             assert (bits := module.output_quantizer.num_bits) in (
                 8,
                 (4, 3),
-            ), f"Unsupported bits for weight quantization: {bits=}"
+            ), f"Unsupported bits for output quantization: {bits=}"
             assert (
                 module.output_quantizer.axis is None and not module.output_quantizer._dynamic
             ), "Only per-tensor quantization is supported for output quantization"

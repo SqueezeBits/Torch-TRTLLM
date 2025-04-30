@@ -27,8 +27,8 @@ class Fp8RowwiseGemmPlugin(Plugin):
     """TensorRT plugin for Fp8RowwiseGemm.
 
     Attributes:
-        has_per_channel_scaling (bool): Whether to use per-channel scaling. Defaults to False.
-        has_per_token_scaling (bool): Whether to use per-token scaling. Defaults to False.
+        has_per_channel_scaling (bool): Whether to use per-channel scaling.
+        has_per_token_scaling (bool): Whether to use per-token scaling.
         type_id (trt.DataType): Data type for the model.
     """
 

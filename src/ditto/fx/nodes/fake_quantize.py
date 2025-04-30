@@ -34,6 +34,7 @@ class FakeQuantize(FinalCallFunction):
         scale (Node | None): The scale tensor node. Defaults to None.
         zeros (Node | None): The unpacked zeros tensor node, if any. Defaults to None.
         group_size (int | None): The group size, if any. Defaults to None.
+        smoother (Node | None): The smoothing factor tensor node, if any. Defaults to None.
     """
 
     x: Node
@@ -43,6 +44,7 @@ class FakeQuantize(FinalCallFunction):
     scale: Node | None = None
     zeros: Node | None = None
     group_size: int | None = None
+    smoother: Node | None = None
 
     @property
     def input_tensor(self) -> torch.Tensor | None:

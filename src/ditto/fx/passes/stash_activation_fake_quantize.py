@@ -15,7 +15,7 @@
 from torch.fx import Node
 
 from ...quantization import GlobalQuantConfig, QuantizeType
-from ..nodes import FakeQuantize
+from ..nodes import FakeQuantize, GetAttr
 from ..subgraphs import Linear
 from ..targets import ActivationQuantization
 from ..utils import get_nodes_with_depth
@@ -37,7 +37,7 @@ class StashActivationFakeQuantize(NodewiseOptimizationPass):
             and len(self.global_quant_config.quant_configs) == 1
             and (input_quant_scheme := self.global_quant_config.quant_configs[0].input_quant_scheme) is not None
             and input_quant_scheme.bits == 8
-            and input_quant_scheme.type == QuantizeType.FLOAT  # Note: only support FP8 quantization for now
+            and input_quant_scheme.type in (QuantizeType.FLOAT, QuantizeType.INT)
             and (fake_quantize := FakeQuantize.specialize_from(node))
             and fake_quantize.bits == 8
             and (
@@ -51,12 +51,17 @@ class StashActivationFakeQuantize(NodewiseOptimizationPass):
         ):
             return {}
 
-        assert (scale := fake_quantize.scale_tensor) is None or scale.ndim in (
-            0,
-            1,
-        ), "per-token activation quantization is not supported yet"
+        assert (
+            (scale := fake_quantize.scale_tensor) is not None and scale.ndim in (0, 1)
+        ) or fake_quantize.dynamic, "Only per-tensor or dynamic activation quantization is supported"
 
         for linear in linears:
+            smoother = (
+                gattr.tensor
+                if fake_quantize.smoother is not None
+                and (gattr := GetAttr.specialize_from(fake_quantize.smoother)) is not None
+                else None
+            )
             linear.activation_quantization = ActivationQuantization(
                 bits=input_quant_scheme.bits,
                 type=input_quant_scheme.type,
@@ -64,6 +69,7 @@ class StashActivationFakeQuantize(NodewiseOptimizationPass):
                 scale=scale,
                 zero_point=fake_quantize.zeros_tensor,
                 dynamic=fake_quantize.dynamic,
+                smoother=smoother,
             )
 
         return {fake_quantize.node: ReplaceAllUses(by=fake_quantize.x)}

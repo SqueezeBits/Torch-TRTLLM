@@ -25,6 +25,7 @@ from .plugins import (
     GPTAttention,
     QuantizePerToken,
     RmsnormQuantization,
+    SmoothQuantGemm,
     WeightOnlyGroupwiseQuantMatmul,
     WeightOnlyQuantMatmul,
 )

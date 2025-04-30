@@ -34,6 +34,9 @@ def patch_quantize_forward() -> None:
                 self.input_quantizer._dynamic,
                 inp.dtype,
                 self.input_scale if self.input_quantizer._dynamic is False else None,
+                None,
+                None,
+                getattr(self.input_quantizer, "pre_quant_scale", None),
             )
         if self.weight_quantizer.is_enabled:
             weight = ditto_fake_quantize(

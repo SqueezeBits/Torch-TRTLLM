@@ -29,6 +29,9 @@ class ActivationQuantization(StrictlyTyped):
         scale (torch.Tensor | None): Scale tensor
         zero_point (torch.Tensor | None): Zero point tensor
         dynamic (bool): Whether the quantization is dynamic
+        smoother (torch.Tensor | None): Smoothing factor tensor
+
+    smoother = (weight_amax)^(1-alpha) / (activation_amax)^alpha
     """
 
     quant_mode: QuantizeMode
@@ -37,6 +40,7 @@ class ActivationQuantization(StrictlyTyped):
     scale: torch.Tensor | None = Field(default=None, exclude=True)
     zero_point: torch.Tensor | None = Field(default=None, exclude=True)
     dynamic: bool = False
+    smoother: torch.Tensor | None = Field(default=None, exclude=True)
 
 
 class OutputQuantization(StrictlyTyped):

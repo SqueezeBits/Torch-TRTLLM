@@ -29,7 +29,7 @@ from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses,
 class ReplaceMMByFp8RowwiseGemmPlugin(NodewiseOptimizationPass):
     """Replace torch.ops.aten.mm.default by Fp8RowwiseGemmPlugin (required for trtllm).
 
-    This pass must be run after ReplaceRmsNormByFp8RmsNormPlugin.
+    This pass must be run after ReplaceRmsNormByRmsNormQuantPlugin.
     """
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
