@@ -179,7 +179,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
             )
 
             with graph.inserting_before(node):
-                plugin_inputs = global_plugin_inputs.model_dump()
+                plugin_inputs = global_plugin_inputs.model_dump(exclude_none=True)
                 if isinstance(attn, MHA):
                     qkv = attn.qkv
                 else:
