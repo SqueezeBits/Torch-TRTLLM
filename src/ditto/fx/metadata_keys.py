@@ -13,6 +13,7 @@
 # limitations under the License.
 
 ACTIVATION_QUANTIZATION = "activation_quantization"
+OUTPUT_QUANTIZATION = "output_quantization"
 FREE_LORA_PROTO = "free_lora_proto"
 LORA_PREFIX = "lora_prefix"
 LAYER_INDEX = "layer_index"

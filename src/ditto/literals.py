@@ -126,6 +126,7 @@ PassName = Literal[
     "RewriteSplitAsSlices",
     "StashActivationFakeQuantize",
     "StashLoraSubgraphs",
+    "StashOutputFakeQuantize",
     "WrapRoPESubgraphs",
     "WrapSDPASubgraphs",
 ]

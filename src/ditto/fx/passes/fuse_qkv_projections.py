@@ -64,7 +64,7 @@ class FuseMLAQKVProjections(FuseProjections):
 
     def preprocess(self, graph_module: GraphModule) -> None:
         super().preprocess(graph_module)
-        save_for_debug("before_qkv_fusion", graph_module)
+        save_for_debug("before_mlaqkv_fusion", graph_module)
 
     def find_projections(self, node: Node) -> list[Linear]:
         if not (

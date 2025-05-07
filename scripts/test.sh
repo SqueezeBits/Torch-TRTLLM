@@ -56,16 +56,16 @@ main() {
         # 'fbaldassarri/TinyLlama_TinyLlama_v1.1-autogptq-int8-gs128-sym --dtype float16 --skip-native --print-output'
         # 'fbaldassarri/TinyLlama_TinyLlama_v1.1-autogptq-int8-gs128-asym --dtype float16 --skip-native --print-output'
         # FP8 per-tensor quantization (compressed-tensor)
-        'neuralmagic/Llama-3.2-1B-Instruct-FP8 --ckpt-args "--use_fp8"  --build-args "--gemm_plugin fp8"'
+        'RedHatAI/Llama-3.2-1B-Instruct-FP8 --ckpt-args "--use_fp8"  --build-args "--gemm_plugin fp8"'
         'nm-testing/TinyLlama-1.1B-Chat-v1.0-FP8-e2e --ckpt-args "--use_fp8"  --build-args "--gemm_plugin fp8"'
-        # 'neuralmagic/gemma-2-2b-it-FP8 --skip-native --print-output'
-        # 'neuralmagic/starcoder2-3b-FP8 --skip-native --print-output'
+        # 'RedHatAI/gemma-2-2b-it-FP8 --skip-native --print-output'
+        # 'RedHatAI/starcoder2-3b-FP8 --skip-native --print-output'
         # 'nm-testing/Phi-3-mini-128k-instruct-FP8 --skip-native --print-output'
         # FP8 row-wise (compressed-tensor)
-        'neuralmagic/Llama-3.2-1B-Instruct-FP8-dynamic --ckpt-args "--use_fp8_rowwise"'
+        'RedHatAI/Llama-3.2-1B-Instruct-FP8-dynamic --ckpt-args "--use_fp8_rowwise"'
         'nm-testing/TinyLlama-1.1B-Chat-v1.0-FP8-Dynamic-compressed --ckpt-args "--use_fp8_rowwise"'
         'nm-testing/Mistral-7B-Instruct-v0.3-FP8-Dynamic --model-type llama --ckpt-args "--use_fp8_rowwise"'
-        # 'neuralmagic/Qwen2.5-0.5B-FP8-dynamic --skip-native --print-output'
+        # 'RedHatAI/Qwen2.5-0.5B-FP8-dynamic --skip-native --print-output'
     )
 
     for MODEL_SPECIFIC_ARG in "${MODEL_SPECIFIC_ARGS[@]}"; do

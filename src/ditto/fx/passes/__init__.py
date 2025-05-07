@@ -70,5 +70,6 @@ from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
 from .rewrite_split_as_slices import RewriteSplitAsSlices
 from .stash_activation_fake_quantize import StashActivationFakeQuantize
 from .stash_lora_subgraphs import StashLoraSubgraphs
+from .stash_output_fake_quantize import StashOutputFakeQuantize
 from .wrap_rope_subgraphs import WrapRoPESubgraphs
 from .wrap_sdpa_subgraphs import WrapSDPASubgraphs

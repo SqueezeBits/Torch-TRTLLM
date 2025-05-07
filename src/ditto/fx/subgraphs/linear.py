@@ -29,6 +29,7 @@ from ..metadata_keys import (
     LINEAR_TYPE,
     LORA_PREFIX,
     LORA_PROTOS,
+    OUTPUT_QUANTIZATION,
 )
 from ..nodes import (
     MM,
@@ -40,7 +41,7 @@ from ..nodes import (
     WeightOnlyGroupwiseQuantMatmul,
     WeightOnlyQuantMatmul,
 )
-from ..targets import ActivationQuantization, LoraProto
+from ..targets import ActivationQuantization, LoraProto, OutputQuantization
 from ..utils import get_val
 from .subgraph import Subgraph
 
@@ -250,6 +251,17 @@ class Linear(Subgraph):
         """Set the activation quantization for this linear layer."""
         assert ACTIVATION_QUANTIZATION not in self.mm.meta, f"Activation quantization already set for {self.mm}"
         self.mm.meta[ACTIVATION_QUANTIZATION] = value
+
+    @property
+    def output_quantization(self) -> OutputQuantization | None:
+        """The output quantization associated with this linear layer."""
+        return verify(self.mm.meta.get(OUTPUT_QUANTIZATION, None), as_type=OutputQuantization)
+
+    @output_quantization.setter
+    def output_quantization(self, value: OutputQuantization) -> None:
+        """Set the output quantization for this linear layer."""
+        assert OUTPUT_QUANTIZATION not in self.mm.meta, f"Output quantization already set for {self.mm}"
+        self.mm.meta[OUTPUT_QUANTIZATION] = value
 
     def mark_linear_type_as(self, linear_type: LinearTypeLiteral) -> None:
         """Mark the linear type of this linear layer if it is a part of a MoE layer."""
