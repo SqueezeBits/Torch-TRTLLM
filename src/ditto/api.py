@@ -140,10 +140,10 @@ def trtllm_build(
         and global_quant_config.trtllm_kv_cache_quant_algo in (QuantAlgo.INT8, QuantAlgo.FP8)
         and plugin_config.use_paged_context_fmha
     ):
-        raise RuntimeError(
+        logger.warning(
             "Paged Context FMHA is not compatible with int8/fp8 KV cache. "
             "Enabling it may lead to incorrect results or even a crash. "
-            "To disable Paged Context FMHA, Use `--no-use-paged-context-fmha`."
+            "To disable Paged Context FMHA, use `--no-use-paged-context-fmha`."
         )
 
     with mtq.utils.export_torch_mode():
