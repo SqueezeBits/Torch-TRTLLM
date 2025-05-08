@@ -127,11 +127,11 @@ def generate_trtllm_pretrained_config(
         mapping=mapping,
     )
     pretrained_config.quantization = TRTLLMQuantConfig.create_from(global_quant_config) if global_quant_config else None
-    if "qwen" in pretrained_config.architecture.lower() and isinstance(
-        hf_config := graph_module.meta.get("pretrained_config"), PretrainedConfig
-    ):
-        # pylint: disable-next=unsupported-assignment-operation
-        pretrained_config.extra_fields["qwen_type"] = hf_config.model_type
+    if isinstance(hf_config := graph_module.meta.get("pretrained_config"), PretrainedConfig):
+        if "qwen" in pretrained_config.architecture.lower():
+            pretrained_config.extra_fields["qwen_type"] = hf_config.model_type
+        if "gemma2" in pretrained_config.architecture.lower():
+            pretrained_config.extra_fields["query_pre_attn_scalar"] = hf_config.query_pre_attn_scalar
     if (moe_config := graph_module.meta.pop(MOE_CONFIG, None)) is not None:
         pretrained_config.moe = TRTLLMMoEConfig.model_validate(moe_config)
     return pretrained_config
