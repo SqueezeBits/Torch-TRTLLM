@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .fake_quantize import ditto_fake_quantize
+from .quant_linear import QuantLinear

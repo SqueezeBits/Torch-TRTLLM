@@ -22,7 +22,7 @@ from compressed_tensors.quantization import (
 )
 from compressed_tensors.quantization.lifecycle import forward
 
-from ..custom_ops import ditto_fake_quantize
+from ..torch.ops import ditto_fake_quantize
 from .patch import custom_patch
 
 

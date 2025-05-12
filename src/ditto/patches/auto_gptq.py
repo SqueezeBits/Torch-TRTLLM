@@ -16,7 +16,7 @@ import warnings
 
 import torch
 
-from ..custom_ops import ditto_fake_quantize
+from ..torch.ops import ditto_fake_quantize
 from .patch import custom_patch
 
 warnings.simplefilter("ignore", FutureWarning)
