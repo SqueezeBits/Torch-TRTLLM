@@ -463,7 +463,7 @@ def create_fake_quant_linear(module: _QuantLinear) -> QuantLinear:
         )
 
     if module.output_quantizer.is_enabled:
-        assert module.output_quantizer._dynamic is True, "Dynamic output quantization is not supported"
+        assert module.output_quantizer._dynamic is False, "Dynamic output quantization is not supported"
         assert (
             isinstance(amax := module.output_quantizer.amax, torch.Tensor) and amax.numel() == 1
         ), "Only per-tensor quantization for output is supported"
