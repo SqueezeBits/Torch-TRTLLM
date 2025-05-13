@@ -22,7 +22,7 @@ from compressed_tensors.linear.compressed_linear import CompressedLinear
 from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy, QuantizationType
 from loguru import logger
 from modelopt.torch.quantization.model_calib import disable_pre_quant_scale_and_resmooth
-from modelopt.torch.quantization.nn.modules.quant_linear import _QuantLinear as QuantLinear
+from modelopt.torch.quantization.nn.modules.quant_linear import _QuantLinear
 from peft import PeftModel
 from tensorrt_llm.quantization import QuantAlgo
 from tensorrt_llm.quantization.functional import unpack_int32_into_int8
@@ -37,6 +37,7 @@ from transformers.utils.quantization_config import (
 from typing_extensions import Self
 
 from .literals import QuantizeMethod
+from .torch.modules import QuantLinear
 from .types import StrictlyTyped
 
 
@@ -340,7 +341,8 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
         model (torch.nn.Module): The model to preprocess
         global_quant_config (GlobalQuantConfig): The global quantization config
     """
-    for _, module in model.named_modules():
+    replace_modules: dict[str, QuantLinear] = {}
+    for name, module in model.named_modules():
         if isinstance(module, qlinear_cuda_old.QuantLinear | WQLinear_GEMM):
             bits = module.bits if isinstance(module, qlinear_cuda_old.QuantLinear) else module.w_bit
             module.register_buffer(
@@ -391,41 +393,96 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
             )
             del module.weight_scale
 
-        elif isinstance(module, QuantLinear):
-            if module.weight_quantizer.is_enabled:
-                if (
-                    module.weight_quantizer._enable_pre_quant_scale
-                    and module.input_quantizer._enable_pre_quant_scale
-                    and hasattr(module.input_quantizer, "_pre_quant_scale")
-                ):
-                    disable_pre_quant_scale_and_resmooth(module, True)
-                weight, scale = export_modelopt_weight_and_scale(module)
-                module.register_buffer("unpacked_weight", weight)
-                module.register_buffer("unpacked_zeros", None)
-                module.register_buffer("scales", scale)
-                del module.weight
-            if module.input_quantizer.is_enabled and not module.input_quantizer._dynamic:
-                assert (
-                    isinstance(amax := module.input_quantizer.amax, torch.Tensor) and amax.numel() == 1
-                ), "Only per-tensor quantization for activation is supported"
-                maxbound = torch.tensor([module.input_quantizer.maxbound])
-                input_scale = amax.float() / maxbound.to(amax.device)
-                module.register_buffer("input_scale", input_scale)
+        elif isinstance(module, _QuantLinear):
+            replace_modules[name] = create_fake_quant_linear(module)
 
-            if module.output_quantizer.is_enabled:
-                assert (
-                    isinstance(amax := module.output_quantizer.amax, torch.Tensor) and amax.numel() == 1
-                ), "Only per-tensor quantization for output is supported"
-                maxbound = torch.tensor([module.output_quantizer.maxbound])
-                output_scale = amax.float() / maxbound.to(amax.device)
-                module.register_buffer("output_scale", output_scale)
+    def set_module(model: torch.nn.Module | torch.nn.ModuleList, module_path: str, new_module: torch.nn.Module) -> None:
+        parts = module_path.split(".")
+        for part in parts[:-1]:
+            if part.isdigit():
+                if isinstance(model, torch.nn.ModuleList):
+                    model = model[int(part)]
+                else:
+                    raise TypeError(f"Module at '{'.'.join(parts[: parts.index(part)])}' is not indexable.")
+            else:
+                if not hasattr(model, part):
+                    raise AttributeError(f"Module '{model.__class__.__name__}' does not have attribute '{part}'")
+                model = getattr(model, part)
+        setattr(model, parts[-1], new_module)
+
+    for name, replace_module in replace_modules.items():
+        set_module(model, name, replace_module)
 
 
-def export_modelopt_weight_and_scale(module: QuantLinear) -> tuple[torch.Tensor, torch.Tensor]:
+def create_fake_quant_linear(module: _QuantLinear) -> QuantLinear:
+    """Create a fake QuantLinear module.
+
+    Args:
+        module (_QuantLinear): The QuantLinear module of ModelOpt to create a new one from
+
+    Returns:
+        QuantLinear: The fake QuantLinear module
+    """
+    new_quant_linear = QuantLinear()
+    if module.weight_quantizer.is_enabled:
+        if (
+            module.weight_quantizer._enable_pre_quant_scale
+            and module.input_quantizer._enable_pre_quant_scale
+            and hasattr(module.input_quantizer, "_pre_quant_scale")
+        ):
+            disable_pre_quant_scale_and_resmooth(module, True)
+        weight, scale = export_modelopt_weight_and_scale(module)
+
+        new_quant_linear.enable_weight_quantizer(
+            weight=weight,
+            num_bits=8 if module.weight_quantizer.num_bits == (4, 3) else module.weight_quantizer.num_bits,
+            dynamic=module.weight_quantizer._dynamic,
+            block_size=module.weight_quantizer.block_sizes.get(-1, None),
+            scale=scale,
+            zero_point=None,
+        )
+    else:
+        new_quant_linear.weight = module.weight.data if isinstance(module.weight, torch.nn.Parameter) else module.weight
+
+    if module.input_quantizer.is_enabled:
+        if not module.input_quantizer._dynamic:
+            assert (
+                isinstance(amax := module.input_quantizer.amax, torch.Tensor) and amax.numel() == 1
+            ), "Only per-tensor quantization for activation is supported"
+            maxbound = torch.tensor([module.input_quantizer.maxbound])
+            input_scale = amax.float() / maxbound.to(amax.device)
+        else:
+            input_scale = None
+
+        new_quant_linear.enable_input_quantizer(
+            8 if module.input_quantizer.num_bits == (4, 3) else module.input_quantizer.num_bits,
+            module.input_quantizer._dynamic,
+            scale=input_scale,
+        )
+
+    if module.output_quantizer.is_enabled:
+        assert module.output_quantizer._dynamic is True, "Dynamic output quantization is not supported"
+        assert (
+            isinstance(amax := module.output_quantizer.amax, torch.Tensor) and amax.numel() == 1
+        ), "Only per-tensor quantization for output is supported"
+        maxbound = torch.tensor([module.output_quantizer.maxbound])
+        output_scale = amax.float() / maxbound.to(amax.device)
+
+        new_quant_linear.enable_output_quantizer(
+            8 if module.output_quantizer.num_bits == (4, 3) else module.output_quantizer.num_bits,
+            module.output_quantizer._dynamic,
+            scale=output_scale,
+        )
+
+    new_quant_linear.bias = module.bias
+    return new_quant_linear
+
+
+def export_modelopt_weight_and_scale(module: _QuantLinear) -> tuple[torch.Tensor, torch.Tensor]:
     """Export the weight and scale of the QuantLinear module for ModelOpt.
 
     Args:
-        module (QuantLinear): The QuantLinear module to export
+        module (_QuantLinear): The QuantLinear module to export
 
     Returns:
         tuple[torch.Tensor, torch.Tensor]: The unpacked weight and scale
@@ -556,7 +613,7 @@ def is_quantized_by_modelopt(model: PreTrainedModel | PeftModel) -> bool:
         bool: True if the model is quantized by ModelOpt, False otherwise
     """
     for _, module in model.named_modules():
-        if isinstance(module, QuantLinear):
+        if isinstance(module, _QuantLinear):
             return True
     return False
 
@@ -577,7 +634,7 @@ def get_modelopt_quantization_scheme(
     output_quant_schemes: list[QuantScheme] = []
     for _, module in model.named_modules():
         if not (
-            isinstance(module, QuantLinear)
+            isinstance(module, _QuantLinear)
             and (
                 module.input_quantizer.is_enabled
                 or module.weight_quantizer.is_enabled

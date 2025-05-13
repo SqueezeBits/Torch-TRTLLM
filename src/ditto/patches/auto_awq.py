@@ -15,7 +15,7 @@
 import torch
 from awq.modules.linear.gemm import WQLinear_GEMM, WQLinearMMFunction
 
-from ..custom_ops import ditto_fake_quantize
+from ..torch.ops import ditto_fake_quantize
 from .patch import custom_patch
 
 
