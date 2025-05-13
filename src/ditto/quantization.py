@@ -437,7 +437,9 @@ def create_fake_quant_linear(module: _QuantLinear) -> QuantLinear:
             weight=weight,
             num_bits=8 if module.weight_quantizer.num_bits == (4, 3) else module.weight_quantizer.num_bits,
             dynamic=module.weight_quantizer._dynamic,
-            block_size=module.weight_quantizer.block_sizes.get(-1, None),
+            block_size=module.weight_quantizer.block_sizes.get(-1, None)
+            if module.weight_quantizer.block_sizes is not None
+            else None,
             scale=scale,
             zero_point=None,
         )
