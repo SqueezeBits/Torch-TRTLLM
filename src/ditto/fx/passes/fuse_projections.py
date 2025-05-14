@@ -94,9 +94,10 @@ class FuseProjections(NodewiseOptimizationPass):
 
             if output_quantizations := [linear.output_quantization for linear in linears if linear.output_quantization]:
                 assert self.fused_lora_prefix == "attn_qkv"
-                assert len(output_quantizations) == len(
-                    linears
-                ), "All output quantizations for Q, K, and V must be provided"
+                assert len(output_quantizations) in (
+                    len(linears),
+                    len(linears) - 1,
+                ), "Output quantizations for K and V must be provided"
                 fused_node.meta[OUTPUT_QUANTIZATION] = max(output_quantizations, key=lambda q: q.scale.item())
 
             if all(linear.bias_node is not None for linear in linears):

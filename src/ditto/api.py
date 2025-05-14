@@ -45,7 +45,7 @@ from .fx import generate_trtllm_engine_config
 from .fx.utils import find_output_node
 from .inline import inline
 from .literals import DTypeLiteral
-from .quantization import GlobalQuantConfig, preprocess_qlinear_module
+from .quantization import GlobalQuantConfig, preprocess_qlinear_module, update_kv_cache_scales
 from .transform import transform
 from .types import BuiltInConstant, verify
 
@@ -134,7 +134,9 @@ def trtllm_build(
     )
 
     if (global_quant_config := GlobalQuantConfig.create_from(model)) is not None:
-        preprocess_qlinear_module(model, global_quant_config)
+        preprocess_qlinear_module(model, global_quant_config.quant_method)
+        update_kv_cache_scales(model, global_quant_config.quant_method, global_quant_config.trtllm_kv_cache_quant_algo)
+
     if (
         global_quant_config is not None
         and global_quant_config.trtllm_kv_cache_quant_algo in (QuantAlgo.INT8, QuantAlgo.FP8)

@@ -22,6 +22,7 @@ declare REBUILD_NATIVE=false
 declare RERUN_NATIVE=false
 declare TP_SIZE=1
 declare PP_SIZE=1
+declare NO_USE_PAGED_CONTEXT_FMHA=false
 declare CKPT_ARGS=""
 declare BUILD_ARGS=""
 declare CLEANUP_CKPT=false
@@ -76,45 +77,46 @@ print_help() {
     echo "  [PEFT_ID1 PEFT_ID2 ...]  Optional PEFT model identifiers to apply"
     echo
     echo "Options:"
-    echo "  -h, --help             Show this help message and exit"
-    echo "  -v, --verbose          Show all terminal outputs"
-    echo "  -d, --debug            Enable debug mode"
-    echo "  --prompt TEXT          Input prompt (default: \"Hey, are you conscious?\")"
-    echo "  --trtllm-repo PATH     Path to TensorRT-LLM repository"
-    echo "                         (default: clone at user cache directory with version from pyproject.toml)"
-    echo "  --dtype DTYPE          Data type for model conversion (default: auto)"
-    echo "  --model-type TYPE      Model type for finding convert_checkpoint.py (default: auto-detected)"
-    echo "  --tp-size SIZE         Tensor parallel size (default: 1)"
-    echo "  --pp-size SIZE         Pipeline parallel size (default: 1)"
-    echo "  --trust-remote-code    Trust remote code when loading models from Hugging Face"
+    echo "  -h, --help                      Show this help message and exit"
+    echo "  -v, --verbose                   Show all terminal outputs"
+    echo "  -d, --debug                     Enable debug mode"
+    echo "  --prompt TEXT                   Input prompt (default: \"Hey, are you conscious?\")"
+    echo "  --trtllm-repo PATH              Path to TensorRT-LLM repository"
+    echo "                                  (default: clone at user cache directory with version from pyproject.toml)"
+    echo "  --dtype DTYPE                   Data type for model conversion (default: auto)"
+    echo "  --model-type TYPE               Model type for finding convert_checkpoint.py (default: auto-detected)"
+    echo "  --tp-size SIZE                  Tensor parallel size (default: 1)"
+    echo "  --pp-size SIZE                  Pipeline parallel size (default: 1)"
+    echo "  --trust-remote-code             Trust remote code when loading models from Hugging Face"
+    echo "  --no-use-paged-context-fmha     Disable paged context FMHA (default: false)"
     echo
-    echo "  --skip                 Equivalent to --skip-build --skip-run"
-    echo "  --skip-build           Equivalent to --skip-ditto-build --skip-native-build"
-    echo "  --skip-run             Equivalent to --skip-ditto-run --skip-native-run"
-    echo "  --skip-ditto           Equivalent to --skip-ditto-build --skip-ditto-run"
-    echo "  --skip-ditto-build     Skip building Ditto engine"
-    echo "  --skip-ditto-run       Skip running Ditto engine"
-    echo "  --skip-native          Equivalent to --skip-native-build --skip-native-run"
-    echo "  --skip-native-build    Skip building native TensorRT-LLM engine"
-    echo "  --skip-native-run      Skip running native TensorRT-LLM engine"
-    echo "  --print-output         Print output of Ditto and TensorRT-LLM engines"
+    echo "  --skip                          Equivalent to --skip-build --skip-run"
+    echo "  --skip-build                    Equivalent to --skip-ditto-build --skip-native-build"
+    echo "  --skip-run                      Equivalent to --skip-ditto-run --skip-native-run"
+    echo "  --skip-ditto                    Equivalent to --skip-ditto-build --skip-ditto-run"
+    echo "  --skip-ditto-build              Skip building Ditto engine"
+    echo "  --skip-ditto-run                Skip running Ditto engine"
+    echo "  --skip-native                   Equivalent to --skip-native-build --skip-native-run"
+    echo "  --skip-native-build             Skip building native TensorRT-LLM engine"
+    echo "  --skip-native-run               Skip running native TensorRT-LLM engine"
+    echo "  --print-output                  Print output of Ditto and TensorRT-LLM engines"
     echo
-    echo "  --redo                 Equivalent to --rebuild --rerun"
-    echo "  --rebuild              Equivalent to --rebuild-ditto --rebuild-native"
-    echo "  --rerun                Equivalent to --rerun-ditto --rerun-native"
-    echo "  --redo-ditto           Equivalent to --rebuild-ditto --rerun-ditto"
-    echo "  --rebuild-ditto        Rebuild Ditto engine even if it already exists"
-    echo "  --rerun-ditto          Run Ditto engine even if output files exist"
-    echo "  --redo-native          Equivalent to --rebuild-native --rerun-native"
-    echo "  --rebuild-native       Rebuild native TensorRT-LLM engine even if it already exists"
-    echo "  --rerun-native         Run native TensorRT-LLM engine even if output files exist"
+    echo "  --redo                          Equivalent to --rebuild --rerun"
+    echo "  --rebuild                       Equivalent to --rebuild-ditto --rebuild-native"
+    echo "  --rerun                         Equivalent to --rerun-ditto --rerun-native"
+    echo "  --redo-ditto                    Equivalent to --rebuild-ditto --rerun-ditto"
+    echo "  --rebuild-ditto                 Rebuild Ditto engine even if it already exists"
+    echo "  --rerun-ditto                   Run Ditto engine even if output files exist"
+    echo "  --redo-native                   Equivalent to --rebuild-native --rerun-native"
+    echo "  --rebuild-native                Rebuild native TensorRT-LLM engine even if it already exists"
+    echo "  --rerun-native                  Run native TensorRT-LLM engine even if output files exist"
     echo
-    echo "  --ckpt-args            Additional arguments to pass to the checkpoint conversion script"
-    echo "  --build-args           Additional arguments to pass to the engine build script"
+    echo "  --ckpt-args                     Additional arguments to pass to the checkpoint conversion script"
+    echo "  --build-args                    Additional arguments to pass to the engine build script"
     echo
-    echo "  --cleanup              Equivalent to --cleanup-ckpt --cleanup-engine"
-    echo "  --cleanup-ckpt         Cleanup checkpoint directory after comparison"
-    echo "  --cleanup-engine       Cleanup engine directory after comparison"
+    echo "  --cleanup                       Equivalent to --cleanup-ckpt --cleanup-engine"
+    echo "  --cleanup-ckpt                  Cleanup checkpoint directory after comparison"
+    echo "  --cleanup-engine                Cleanup engine directory after comparison"
     echo
     echo "[Example: Simply run meta-llama/Llama-2-7b-chat-hf]"
     echo "  $0 meta-llama/Llama-2-7b-chat-hf"
@@ -287,6 +289,10 @@ parse_args() {
                     exit 1
                 fi
                 shift 2
+                ;;
+            --no-use-paged-context-fmha)
+                NO_USE_PAGED_CONTEXT_FMHA=true
+                shift
                 ;;
             --ckpt-args)
                 CKPT_ARGS="$2"
@@ -472,6 +478,10 @@ ditto_build() {
 
     if [ "$TRUST_REMOTE_CODE" = true ]; then
         cmd="$cmd --trust-remote-code"
+    fi
+
+    if [ "$NO_USE_PAGED_CONTEXT_FMHA" = true ]; then
+        cmd="$cmd --no-use-paged-context-fmha"
     fi
 
     DEBUG_ARTIFACTS_DIR=$DITTO_ARTIFACTS_DIR rich_execute "$cmd" "$DITTO_ENGINE_DIR/build.log" "build Ditto engine"
