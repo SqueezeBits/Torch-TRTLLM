@@ -20,6 +20,7 @@ from awq.modules.linear.gemm import WQLinear_GEMM
 from compressed_tensors.compressors.quantized_compressors.pack_quantized import unpack_from_int32
 from compressed_tensors.linear.compressed_linear import CompressedLinear
 from compressed_tensors.quantization import QuantizationScheme, QuantizationStrategy, QuantizationType
+from compressed_tensors.quantization.lifecycle import KVCacheScaleType, is_attention_module
 from loguru import logger
 from modelopt.torch.quantization.model_calib import disable_pre_quant_scale_and_resmooth
 from modelopt.torch.quantization.nn.modules.quant_linear import _QuantLinear
@@ -178,6 +179,7 @@ class GlobalQuantConfig(StrictlyTyped):
         """
         input_quant_scheme: QuantScheme | None = None
         weight_quant_scheme: QuantScheme | None = None
+        output_quant_scheme: QuantScheme | None = None
 
         if is_quantized_by_modelopt(model):
             input_quant_scheme, weight_quant_scheme, output_quant_scheme = get_modelopt_quantization_scheme(model)
@@ -282,7 +284,9 @@ class GlobalQuantConfig(StrictlyTyped):
             )
 
         if isinstance(quantization_config, CompressedTensorsConfig):
-            input_quant_scheme, weight_quant_scheme = get_compressed_tensors_quantization_scheme(quantization_config)
+            input_quant_scheme, weight_quant_scheme, output_quant_scheme = get_compressed_tensors_quantization_scheme(
+                quantization_config
+            )
 
             trtllm_quant_algo = QuantAlgo.NO_QUANT
             if input_quant_scheme is None:
@@ -318,9 +322,16 @@ class GlobalQuantConfig(StrictlyTyped):
                 else:
                     raise NotImplementedError(f"Unsupported input/weight quantization type: {quantize_type=}")
 
+            if output_quant_scheme is not None:
+                logger.info("Output quantizations are found, which enables KV cache quantization")
+                trtllm_kv_cache_quant_algo = (
+                    QuantAlgo.INT8 if output_quant_scheme.type == QuantizeType.INT else QuantAlgo.FP8
+                )
+
             return cls(
                 quant_method=quantization_config.quantization_config.quant_method,
                 trtllm_quant_algo=trtllm_quant_algo,
+                trtllm_kv_cache_quant_algo=trtllm_kv_cache_quant_algo,
                 clamp_val=[-1200.0, 1200.0] if trtllm_quant_algo == QuantAlgo.FP8_PER_CHANNEL_PER_TOKEN else None,
                 quant_configs=[
                     TargetQuantConfig(
@@ -334,25 +345,53 @@ class GlobalQuantConfig(StrictlyTyped):
         raise RuntimeError(f"Unsupported quantization algorithm: {quantization_config}")
 
 
-def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_config: GlobalQuantConfig) -> None:
+def update_kv_cache_scales(
+    model: PreTrainedModel | PeftModel, quant_method: QuantizeMethod, kv_cache_quant_algo: QuantAlgo
+) -> None:
+    """Updating the KV cache scales into CompressedLinear modules.
+
+    Args:
+        model (PreTrainedModel | PeftModel): The model to update the KV cache scales
+        quant_method (QuantizeMethod): The quantization method used
+        kv_cache_quant_algo (QuantAlgo): The quantization algorithm used for the KV cache
+    """
+    if quant_method == "compressed-tensors" and kv_cache_quant_algo in (QuantAlgo.INT8, QuantAlgo.FP8):
+        for _, parent in model.named_modules():
+            if not is_attention_module(parent):
+                continue
+
+            assert isinstance(
+                k_scale := getattr(parent, KVCacheScaleType.KEY.value), torch.nn.Parameter
+            ) and isinstance(
+                v_scale := getattr(parent, KVCacheScaleType.VALUE.value), torch.nn.Parameter
+            ), "KV cache scales are not found in the attention module"
+            # Note: We use literal string comparison for module name since compressed-tensors's is_attention_module()
+            # function checks for these specific key names ("k_proj", "v_proj", "qkv_proj") to identify modules
+            for name, child in parent.named_children():
+                key = name.split(".")[-1]
+                if key == "k_proj":
+                    child.register_buffer("output_scale", k_scale.data)
+                elif key == "v_proj":
+                    child.register_buffer("output_scale", v_scale.data)
+                elif key == "qkv_proj":
+                    child.register_buffer("output_scale", torch.max(k_scale.data, v_scale.data))
+
+
+def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, quant_method: QuantizeMethod) -> None:
     """Unpacking the packed weight and zeros of the QLinear modules.
 
     Args:
         model (torch.nn.Module): The model to preprocess
-        global_quant_config (GlobalQuantConfig): The global quantization config
+        quant_method (QuantizeMethod): The quantization method used
     """
     replace_modules: dict[str, QuantLinear] = {}
     for name, module in model.named_modules():
         if isinstance(module, qlinear_cuda_old.QuantLinear | WQLinear_GEMM):
             bits = module.bits if isinstance(module, qlinear_cuda_old.QuantLinear) else module.w_bit
-            module.register_buffer(
-                "unpacked_weight", unpack_qweight(module.qweight, bits, global_quant_config.quant_method)
-            )
+            module.register_buffer("unpacked_weight", unpack_qweight(module.qweight, bits, quant_method))
             module.register_buffer(
                 "unpacked_zeros",
-                unpack_zeros(module.qzeros, bits, global_quant_config.quant_method)
-                if isinstance(module.qzeros, torch.Tensor)
-                else None,
+                unpack_zeros(module.qzeros, bits, quant_method) if isinstance(module.qzeros, torch.Tensor) else None,
             )
             if module.bias is not None and module.bias.dtype != model.dtype:
                 module.bias = module.bias.to(model.dtype)
@@ -366,9 +405,9 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, global_quant_c
                 assert isinstance(packed_weight := module.weight_packed, torch.Tensor)
                 assert isinstance(weight_shape := module.weight_shape, torch.Tensor)
                 bits = 32 // (weight_shape[1].item() // packed_weight.shape[1])
-                unpacked_weight = unpack_qweight(packed_weight, bits, global_quant_config.quant_method).T.contiguous()
+                unpacked_weight = unpack_qweight(packed_weight, bits, quant_method).T.contiguous()
                 unpacked_zeros = (
-                    unpack_zeros(packed_zero, bits, global_quant_config.quant_method)
+                    unpack_zeros(packed_zero, bits, quant_method)
                     if hasattr(module, "weight_zero_point")
                     and isinstance(packed_zero := module.weight_zero_point, torch.Tensor)
                     else None
@@ -723,14 +762,15 @@ def get_modelopt_quantization_scheme(
 
 def get_compressed_tensors_quantization_scheme(
     compressed_tensors_config: CompressedTensorsConfig,
-) -> tuple[QuantScheme | None, QuantScheme | None]:
+) -> tuple[QuantScheme | None, QuantScheme | None, QuantScheme | None]:
     """Get the quantization schemes for the model quantized by CompressedTensors.
 
     Args:
         compressed_tensors_config (CompressedTensorsConfig): The compressed-tensors config
 
     Returns:
-        tuple[QuantScheme | None, QuantScheme | None]: The quantization schemes of input and weight for the model
+        tuple[QuantScheme | None, QuantScheme | None, QuantScheme | None]:
+            The quantization schemes of input, weight, and output for the model
     """
     assert (
         compressed_tensors_config.quantization_config is not None
@@ -749,6 +789,7 @@ def get_compressed_tensors_quantization_scheme(
 
     input_quant_scheme: QuantScheme | None = None
     weight_quant_scheme: QuantScheme | None = None
+    output_quant_scheme: QuantScheme | None = None
 
     if config.input_activations is not None:
         assert (
@@ -779,4 +820,18 @@ def get_compressed_tensors_quantization_scheme(
             dynamic=config.weights.dynamic,
         )
 
-    return input_quant_scheme, weight_quant_scheme
+    if (kv_cache_config := compressed_tensors_config.quantization_config.kv_cache_scheme) is not None:
+        assert (
+            kv_cache_config.strategy is not None
+            and kv_cache_config.num_bits == 8
+            and kv_cache_config.strategy == QuantizationStrategy.TENSOR
+            and kv_cache_config.symmetric is True
+            and kv_cache_config.dynamic is False
+        )
+        output_quant_scheme = QuantScheme(
+            bits=kv_cache_config.num_bits,
+            mode=QuantizeMode.PER_TENSOR,
+            type=QuantizeType.from_quant_type(kv_cache_config.type),
+        )
+
+    return input_quant_scheme, weight_quant_scheme, output_quant_scheme
