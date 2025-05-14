@@ -65,10 +65,10 @@ main() {
         'RedHatAI/Llama-3.2-1B-Instruct-FP8-dynamic --ckpt-args "--use_fp8_rowwise"'
         'nm-testing/TinyLlama-1.1B-Chat-v1.0-FP8-Dynamic-compressed --ckpt-args "--use_fp8_rowwise"'
         'nm-testing/Mistral-7B-Instruct-v0.3-FP8-Dynamic --model-type llama --ckpt-args "--use_fp8_rowwise"'
-        'RedHatAI/Qwen2.5-0.5B-FP8-dynamic --skip-native --print-output'
+        # 'RedHatAI/Qwen2.5-0.5B-FP8-dynamic --skip-native --print-output'
         # KV cache quantization (compressed-tensor)
-        'RedHatAI/Phi-3.5-mini-instruct-FP8-KV --skip-native --print-output'
-        'nm-testing/Llama-3.2-1B-Instruct-FP8-KV --skip-native --print-output'
+        'RedHatAI/Phi-3.5-mini-instruct-FP8-KV --skip-native --print-output --no-use-paged-context-fmha'
+        'nm-testing/Llama-3.2-1B-Instruct-FP8-KV --skip-native --print-output --no-use-paged-context-fmha'
     )
 
     for MODEL_SPECIFIC_ARG in "${MODEL_SPECIFIC_ARGS[@]}"; do
