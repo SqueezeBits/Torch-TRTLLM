@@ -12,15 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections import OrderedDict
+from copy import deepcopy
+
 import torch
+from compressed_tensors import quantization
 from compressed_tensors.linear.compressed_linear import CompressedLinear
 from compressed_tensors.quantization import (
     QuantizationArgs,
+    QuantizationConfig,
     QuantizationScheme,
     QuantizationStatus,
     QuantizationStrategy,
 )
 from compressed_tensors.quantization.lifecycle import forward
+from compressed_tensors.quantization.lifecycle.apply import (
+    find_name_or_class_matches,
+    fix_fsdp_module_name,
+    iter_named_quantizable_modules,
+    process_quantization_config,
+)
+from compressed_tensors.quantization.lifecycle.initialize import _initialize_attn_scales, is_attention_module
+from compressed_tensors.quantization.utils.helpers import KV_CACHE_TARGETS
 
 from ..torch.ops import ditto_fake_quantize
 from .patch import custom_patch
@@ -70,6 +83,10 @@ def patch_compressed_linear_process() -> None:
             self.quantization_scheme.weights.group_size,
         )
         out = torch.nn.functional.linear(input, unpacked_weight.T, self.bias if self.bias is not None else None)
+
+        if hasattr(self, "output_scale"):
+            out = ditto_fake_quantize(out, 8, False, self.output_scale.dtype, self.output_scale)
+
         return out
 
     @torch.no_grad()
@@ -94,6 +111,33 @@ def patch_compressed_linear_process() -> None:
 
         return out
 
+    origin_apply_quantization_config = quantization.apply_quantization_config
+
+    def patched_apply_quantization_config(
+        model: torch.nn.Module, config: QuantizationConfig | None, run_compressed: bool = False
+    ) -> OrderedDict:
+        if config is None:
+            return OrderedDict()
+
+        config = deepcopy(org_config := config)
+        target_to_scheme = OrderedDict()
+        config = process_quantization_config(config)
+        for scheme in config.config_groups.values():
+            for target in scheme.targets:
+                target_to_scheme[target] = scheme
+
+        attn_name_to_submodule: dict[str, torch.nn.Module] = {}
+        for name, submodule in iter_named_quantizable_modules(model, include_children=True, include_attn=True):
+            name = fix_fsdp_module_name(name)
+            targets = find_name_or_class_matches(name, submodule, target_to_scheme)
+
+            if targets == KV_CACHE_TARGETS and is_attention_module(submodule):
+                attn_name_to_submodule[name] = submodule
+                _initialize_attn_scales(submodule)
+
+        return origin_apply_quantization_config(model, org_config, run_compressed)
+
     CompressedLinear.from_linear = patched_from_linear
     CompressedLinear.forward = patched_forward
     forward.forward_quantize = patched_forward_quantize
+    quantization.apply_quantization_config = patched_apply_quantization_config
