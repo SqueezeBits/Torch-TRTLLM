@@ -18,6 +18,7 @@ from inspect import isclass
 from loguru import logger
 from pydantic import Field
 from torch.fx import GraphModule
+from torch_tensorrt.dynamo import CompilationSettings
 
 from ....constants import FX_TRANSFORM_MAXIMUM_ITERATION
 from ....debug import get_memory_footprint
@@ -25,7 +26,7 @@ from ....types import StrictlyTyped
 from .graph_pass import GraphOptimizationPass
 from .pass_result import PassResult
 
-PassType = Callable[[GraphModule], PassResult] | type[GraphOptimizationPass]
+PassType = Callable[[GraphModule, CompilationSettings], PassResult] | type[GraphOptimizationPass]
 
 
 class PassManager(StrictlyTyped):
@@ -41,7 +42,7 @@ class PassManager(StrictlyTyped):
     passes: list[PassType] = Field(default_factory=list)
     warn_on_partial_convergence: bool = True
 
-    def __call__(self, graph_module: GraphModule) -> PassResult:
+    def __call__(self, graph_module: GraphModule, settings: CompilationSettings | None = None) -> PassResult:
         logger.opt(lazy=True).trace("Memory Footprint: {m}", m=get_memory_footprint)
         overall_modified = False
         for step in range(self.steps):
@@ -49,7 +50,7 @@ class PassManager(StrictlyTyped):
             logger.debug(f"Running iteration {step + 1}")
             # pylint: disable-next=not-an-iterable
             for p in self.passes:
-                res = p(graph_module)
+                res = p(graph_module, settings or CompilationSettings())
                 graph_module = res.graph_module
                 modified = modified or res.modified
             overall_modified = overall_modified or modified
@@ -77,11 +78,11 @@ class PassManager(StrictlyTyped):
             return
         self.passes.append(p)
 
-    def as_transform(self) -> Callable[[GraphModule], GraphModule]:
+    def as_transform(self) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
         """Convert the manager to a callable that applies the passes to a graph module.
 
         Returns:
-            Callable[[GraphModule], GraphModule]: The callable that takes a graph module and
-                returns the transformed graph module.
+            Callable[[GraphModule, CompilationSettings], GraphModule]: The callable that takes a graph module
+                and returns the transformed graph module.
         """
-        return lambda graph_module: self(graph_module).graph_module
+        return lambda graph_module, settings: self(graph_module, settings).graph_module

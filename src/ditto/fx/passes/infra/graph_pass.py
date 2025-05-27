@@ -17,6 +17,7 @@ from collections.abc import Callable
 
 from loguru import logger
 from torch.fx import GraphModule, Node
+from torch_tensorrt.dynamo import CompilationSettings
 
 from ....debug import get_memory_footprint
 from ....types import StrictlyTyped
@@ -87,7 +88,7 @@ class GraphOptimizationPass(StrictlyTyped, ABC):
             PassResult: The result of the pass.
         """
 
-    def __call__(self, graph_module: GraphModule) -> PassResult:
+    def __call__(self, graph_module: GraphModule, settings: CompilationSettings) -> PassResult:
         self.preprocess(graph_module)
         logger.debug(f"{self.indent}Running pass {type(self).__name__}")
         result = self.call(graph_module)
@@ -101,11 +102,11 @@ class GraphOptimizationPass(StrictlyTyped, ABC):
         logger.opt(lazy=True).trace("Memory Footprint: {m}", m=get_memory_footprint)
         return result
 
-    def as_transform(self) -> Callable[[GraphModule], GraphModule]:
+    def as_transform(self) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
         """Convert the pass to a callable that takes a graph module and returns the transformed graph module.
 
         Returns:
-            Callable[[GraphModule], GraphModule]: The callable that takes a graph module and
+            Callable[[GraphModule, CompilationSettings], GraphModule]: The callable that takes a graph module and
                 returns the transformed graph module.
         """
-        return lambda graph_module: self(graph_module).graph_module
+        return lambda graph_module, settings: self(graph_module, settings).graph_module

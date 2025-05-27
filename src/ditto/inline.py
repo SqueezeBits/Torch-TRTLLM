@@ -15,6 +15,7 @@
 from loguru import logger
 from torch.export import ExportedProgram
 from torch.fx import GraphModule
+from torch_tensorrt.dynamo import CompilationSettings
 from torch_tensorrt.dynamo.lowering import get_decompositions
 from torch_tensorrt.dynamo.lowering.passes import (
     ATEN_PRE_LOWERING_PASSES,
@@ -46,7 +47,7 @@ def inline(
     graph_module: GraphModule
     with ignore_symbolic_shapes_warning():
         logger.debug("Running pre-inlining passes")
-        _ = pre_inline_pass_manager(exported_program.graph_module)
+        _ = pre_inline_pass_manager(exported_program.graph_module, CompilationSettings())
         logger.debug("Running aten decomposition passes")
         exported_program = exported_program.run_decompositions(get_decompositions(enable_experimental_decompositions))
         logger.debug("Inlining the exported program")

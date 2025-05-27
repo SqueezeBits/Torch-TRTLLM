@@ -178,7 +178,11 @@ with warnings.catch_warnings():
         Attributes:
             explicit_batch (Literal[True]): Whether to use explicit batch.
             strongly_typed (bool): Whether to use strongly typed.
+            prefer_aot_python_plugins (bool): Whether to use the AOT implementation.
+            prefer_jit_python_plugins (bool): Whether to use the JIT implementation.
         """
 
         explicit_batch: Literal[True] = True
         strongly_typed: bool = True
+        prefer_aot_python_plugins: bool = False
+        prefer_jit_python_plugins: bool = False

@@ -17,6 +17,7 @@ from collections.abc import Callable
 import torch
 from loguru import logger
 from torch.fx import GraphModule
+from torch_tensorrt.dynamo import CompilationSettings
 
 from ..arguments import TRTLLMArgumentHint
 from ..configs import TRTLLMModelConfig
@@ -91,7 +92,7 @@ from .passes.infra import GraphOptimizationPass, PassManager
 def get_preoptimization_transform(
     argument_hint: TRTLLMArgumentHint,
     global_quant_config: GlobalQuantConfig | None,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Get the pre-optimization transform.
 
     Args:
@@ -99,7 +100,7 @@ def get_preoptimization_transform(
         global_quant_config (GlobalQuantConfig | None): the global quantization configuration
 
     Returns:
-        Callable[[GraphModule], GraphModule]: the pre-optimization transform
+        Callable[[GraphModule, CompilationSettings], GraphModule]: the pre-optimization transform
     """
     mark_linears_for_tp = [MarkMoELinears, MarkMLALinears]
 
@@ -131,7 +132,7 @@ def get_optimization_transform(
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
     run_routers_in_model_dtype: bool = False,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Optimize the given graph module inplace.
 
     Args:
@@ -149,7 +150,8 @@ def get_optimization_transform(
             dtype instead of FP32. Defaults to False.
 
     Returns:
-        Callable[[GraphModule], GraphModule]: the function that applies FX optimization passes to the given graph module
+        Callable[[GraphModule, CompilationSettings], GraphModule]: the function that applies FX optimization passes
+            to the given graph module
     """
     return compose(
         get_trtllm_conversion_transform(
@@ -167,19 +169,22 @@ def get_optimization_transform(
     )
 
 
-def compose(*transforms: Callable[[GraphModule], GraphModule]) -> Callable[[GraphModule], GraphModule]:
+def compose(
+    *transforms: Callable[[GraphModule, CompilationSettings], GraphModule],
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Compose multiple transforms into a single transform.
 
     Args:
-        *transforms (Callable[[GraphModule], GraphModule]): The transforms to compose
+        *transforms (Callable[[GraphModule, CompilationSettings], GraphModule]): The transforms to compose
 
     Returns:
-        Callable[[GraphModule], GraphModule]: A function that applies all the given transforms to a graph module
+        Callable[[GraphModule, CompilationSettings], GraphModule]: A function that applies all the given transforms
+            to a graph module
     """
 
-    def composed_transform(graph_module: GraphModule) -> GraphModule:
+    def composed_transform(graph_module: GraphModule, settings: CompilationSettings) -> GraphModule:
         for transform in transforms:
-            graph_module = transform(graph_module)
+            graph_module = transform(graph_module, settings)
         return graph_module
 
     return composed_transform
@@ -247,7 +252,7 @@ def get_trtllm_conversion_transform(
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
     run_routers_in_model_dtype: bool = False,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Create a transform that converts a graph module to TensorRT-LLM compatible format.
 
     Args:
@@ -262,7 +267,8 @@ def get_trtllm_conversion_transform(
             dtype instead of FP32. Defaults to False.
 
     Returns:
-        Callable[[GraphModule], GraphModule]: A function that applies TRT-LLM conversion passes to a graph module
+        Callable[[GraphModule, CompilationSettings], GraphModule]: A function that applies TRT-LLM conversion passes
+            to a graph module
     """
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
         *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
@@ -317,14 +323,15 @@ def get_trtllm_conversion_transform(
 
 def get_level1_transform(
     skipped_optimizers: list[PassName] | None = None,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Create a transform that applies level 1 optimization passes.
 
     Args:
         skipped_optimizers (list[PassName] | None, optional): Names of optimization passes to skip. Defaults to None.
 
     Returns:
-        Callable[[GraphModule], GraphModule]: A function that applies level 1 optimization passes to a graph module
+        Callable[[GraphModule, CompilationSettings], GraphModule]: A function that applies level 1 optimization passes
+            to a graph module
     """
     return get_transform(
         *LEVEL1_PASSES,
@@ -334,14 +341,15 @@ def get_level1_transform(
 
 def get_level2_transform(
     skipped_optimizers: list[PassName] | None = None,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Create a transform that applies level 2 optimization passes.
 
     Args:
         skipped_optimizers (list[PassName] | None, optional): Names of optimization passes to skip. Defaults to None.
 
     Returns:
-        Callable[[GraphModule], GraphModule]: A function that applies level 2 optimization passes to a graph module
+        Callable[[GraphModule, CompilationSettings], GraphModule]: A function that applies level 2 optimization passes
+            to a graph module
     """
     return get_transform(
         *LEVEL1_PASSES,
@@ -355,7 +363,7 @@ def get_transform(
     skipped_optimizers: list[PassName] | None = None,
     steps: int = FX_TRANSFORM_MAXIMUM_ITERATION,
     warn_on_partial_convergence: bool = True,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Get transform out of the given FX passes.
 
     Args:

@@ -18,6 +18,7 @@ from copy import copy, deepcopy
 import torch
 from loguru import logger
 from torch.fx import GraphModule
+from torch_tensorrt.dynamo import CompilationSettings
 from torch_tensorrt.dynamo.lowering.passes import (
     ATEN_POST_LOWERING_PASSES,
     DynamoPassManager,
@@ -82,18 +83,14 @@ def transform(
         [
             ResetCodeGen().as_transform(),
             ForgetSubmodules().as_transform(),
-            *(
-                f
-                for f in ATEN_POST_LOWERING_PASSES.passes
-                if f.__name__ not in ("constant_fold", "lower_linear", "view_to_reshape")
-            ),
+            *(f for f in ATEN_POST_LOWERING_PASSES.passes if f.__name__ not in ("constant_fold", "view_to_reshape")),
             get_level1_transform(skipped_optimizers),
         ]
     )
 
     logger.debug("Running post-inlining passes")
     with fake_tensor_prop_on_node_creation(graph_module), ignore_symbolic_shapes_warning():
-        graph_module = post_inline_pass_manager(graph_module)
+        graph_module = post_inline_pass_manager(graph_module, CompilationSettings())
     update_argument_hint(argument_hint, graph_module, dtype)
 
     save_for_debug("initial_graph_module", graph_module)
@@ -108,7 +105,7 @@ def transform(
         )
         logger.debug(f"Running pre-custom passes for rank {rank}")
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
-            copied_graph_module = pre_custom_pass_manager(copied_graph_module)
+            copied_graph_module = pre_custom_pass_manager(copied_graph_module, CompilationSettings())
 
         save_for_debug(f"preopt_graph_module_rank{rank}", copied_graph_module)
 
@@ -129,14 +126,14 @@ def transform(
         )
         logger.debug(f"Running custom passes for rank {rank}")
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
-            copied_graph_module = custom_pass_manager(copied_graph_module)
+            copied_graph_module = custom_pass_manager(copied_graph_module, CompilationSettings())
 
         post_pass_manager = DynamoPassManager.build_from_passlist(
             [ParallelizePipeline(argument_hint=argument_hint).as_transform()]
         )
         logger.debug(f"Running post-custom passes for rank {rank}")
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
-            yield rank, post_pass_manager(copied_graph_module)
+            yield rank, post_pass_manager(copied_graph_module, CompilationSettings())
 
 
 def copy_graph_module(graph_module: GraphModule) -> GraphModule:

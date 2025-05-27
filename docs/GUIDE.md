@@ -3,12 +3,13 @@
 ## A. Installation
 
 Note that `pip` may complain about dependency mismatch due to `torch-tensorrt`, even if you follow the instructions below without any mistakes.
-However, you are ***completely OK*** to ignore these messages as we've tested out `torch-tensorrt==2.5.0` to be compatible with `tensorrt-cu12*==10.7.0`.
+However, you are ***completely OK*** to ignore these messages as we've tested out `torch-tensorrt==2.6.0` to be compatible with `tensorrt-cu12*==10.9.0.34`.
 ```
 ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
-torch-tensorrt 2.5.0 requires tensorrt-cu12==10.3.0, but you have tensorrt-cu12 10.7.0 which is incompatible.
-torch-tensorrt 2.5.0 requires tensorrt-cu12-bindings==10.3.0, but you have tensorrt-cu12-bindings 10.7.0 which is incompatible.
-torch-tensorrt 2.5.0 requires tensorrt-cu12-libs==10.3.0, but you have tensorrt-cu12-libs 10.7.0 which is incompatible.
+torch-tensorrt 2.6.0 has requirement tensorrt<10.8.0,>=10.7.0.post1, but you have tensorrt 10.9.0.34.
+torch-tensorrt 2.6.0 has requirement tensorrt-cu12<10.8.0,>=10.7.0.post1, but you have tensorrt-cu12 10.9.0.34.
+torch-tensorrt 2.6.0 has requirement tensorrt-cu12-bindings<10.8.0,>=10.7.0, but you have tensorrt-cu12-bindings 10.9.0.34.
+torch-tensorrt 2.6.0 has requirement tensorrt-cu12-libs<10.8.0,>=10.7.0, but you have tensorrt-cu12-libs 10.9.0.34.
 ```
 
 ### I. Using conda (recommended)
