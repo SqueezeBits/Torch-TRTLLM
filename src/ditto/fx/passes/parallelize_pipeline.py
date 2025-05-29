@@ -96,7 +96,6 @@ class ParallelizePipeline(GraphOptimizationPass):
                 graph_output_node.replace_all_uses_with(send_node)
 
             gpt_attn_plugin.layer_idx = gpt_attn_plugin.layer_idx - layers_to_be_parallelized[0]
-            gpt_attn_plugin.layer_idx_in_cache_pool = gpt_attn_plugin.layer_idx
             overall_modified = True
 
         if overall_modified:

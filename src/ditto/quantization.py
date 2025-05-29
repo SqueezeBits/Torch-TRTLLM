@@ -322,6 +322,7 @@ class GlobalQuantConfig(StrictlyTyped):
                 else:
                     raise NotImplementedError(f"Unsupported input/weight quantization type: {quantize_type=}")
 
+            trtllm_kv_cache_quant_algo: QuantAlgo = QuantAlgo.NO_QUANT
             if output_quant_scheme is not None:
                 logger.info("Output quantizations are found, which enables KV cache quantization")
                 trtllm_kv_cache_quant_algo = (
