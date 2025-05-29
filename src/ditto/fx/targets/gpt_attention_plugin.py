@@ -441,7 +441,7 @@ class GPTAttentionPlugin(Plugin):
         vision_start (int): Starting position for vision tokens. Defaults to -1.
         vision_length (int): Length of vision tokens. Defaults to -1.
         num_kv_heads (int): Number of key/value heads
-        layer_idx_in_cache_pool (int): Layer index in the KV cache pool
+        num_kv_heads_origin (int): The origin number of key/value heads, without the process of TP
         head_size (int): Size of each attention head
         unidirectional (int): Whether attention is unidirectional. Defaults to 1.
         q_scaling (float): Query scaling factor. Defaults to 1.0.
@@ -458,6 +458,7 @@ class GPTAttentionPlugin(Plugin):
         tp_size (int): Tensor parallel size. Defaults to 1.
         tp_rank (int): Tensor parallel rank. Defaults to 0.
         unfuse_qkv_gemm (bool): Whether to unfuse QKV GEMM. Defaults to False.
+        use_logn_scaling (bool): Whether to use log(n) attention scaling. Defaults to False.
         context_fmha_type (ContextFMHAType): Type of context FMHA. Defaults to enabled.
         kv_cache_quant_mode (QuantMode): Quantization mode for KV cache. Defaults to QuantMode(0).
         remove_input_padding (bool): Whether to remove input padding. Defaults to True.
@@ -488,11 +489,11 @@ class GPTAttentionPlugin(Plugin):
         qk_nope_head_dim (int): Head dimension for QK without position embeddings. Defaults to 0.
         qk_rope_head_dim (int): Head dimension for QK with RoPE. Defaults to 0.
         v_head_dim (int): Head dimension for value. Defaults to 0.
+        fuse_fp4_quant (bool): Whether to fuse FP4 quantization into attention kernel. Defaults to False.
         skip_attn (bool): Whether to skip attention. Defaults to False.
         cp_size (int): Checkpoint size. Defaults to 1.
         cp_rank (int): Checkpoint rank. Defaults to 0.
         cp_group (int): Checkpoint group. Defaults to 0.
-        use_logn_scaling (bool): Whether to use log(n) attention scaling. Defaults to False.
     """
 
     # the order of the attributes does matter!
@@ -501,7 +502,7 @@ class GPTAttentionPlugin(Plugin):
     vision_start: int = -1
     vision_length: int = -1
     num_kv_heads: int
-    layer_idx_in_cache_pool: int
+    num_kv_heads_origin: int
     head_size: int  # this field is actually `hidden_size_per_head`
     unidirectional: int = 1
     q_scaling: float = 1.0
@@ -518,6 +519,7 @@ class GPTAttentionPlugin(Plugin):
     tp_size: int = 1
     tp_rank: int = 0
     unfuse_qkv_gemm: bool = False
+    use_logn_scaling: bool = False
     context_fmha_type: ContextFMHAType = ContextFMHAType.enabled
     kv_cache_quant_mode: QuantMode = QuantMode(0)
     remove_input_padding: bool = True
@@ -548,11 +550,11 @@ class GPTAttentionPlugin(Plugin):
     qk_nope_head_dim: int = 0
     qk_rope_head_dim: int = 0
     v_head_dim: int = 0
+    fuse_fp4_quant: bool = False
     skip_attn: bool = False
     cp_size: int = 1
     cp_rank: int = 0
     cp_group: int = 0
-    use_logn_scaling: bool = False
 
     @classmethod
     def get_field_dtype(cls, name: str, value: Any) -> type[np.number]:

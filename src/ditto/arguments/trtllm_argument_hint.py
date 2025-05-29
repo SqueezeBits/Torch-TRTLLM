@@ -284,7 +284,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @computed_field
     @property
     def host_kv_cache_pool_mapping(self) -> TensorTypeHint:
-        """Tensor type hint for host KV cache pool mapping with shape (num_attn_layers_per_pipeline,)."""
+        """Tensor type hint for host KV cache pool mapping with shape (num_attn_layers_per_pipeline, 2)."""
         return TensorTypeHint(
             shape=(
                 DynamicDimension(
@@ -293,6 +293,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
                     opt=self.num_attn_layers_per_pipeline,
                     max=self.num_attn_layers_per_pipeline,
                 ),
+                2,
             ),
             dtype=torch.int32,
         )

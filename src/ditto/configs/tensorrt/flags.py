@@ -113,6 +113,8 @@ with warnings.catch_warnings():
             refit_individual (bool): Whether to use refit individual. Defaults to False.
             strict_nans (bool): Whether to use strict nans. Defaults to False.
             monitor_memory (bool): Whether to use monitor memory. Defaults to False.
+            fp4 (bool): Whether to enable plugins with FP4 input/output. Defaults to False.
+            editable_timing_cache (bool): Whether to enable editable timing cache. Defaults to False.
         """
 
         fp16: bool = False
