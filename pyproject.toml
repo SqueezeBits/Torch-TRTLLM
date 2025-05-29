@@ -36,9 +36,9 @@ classifiers = [
 dependencies = [
     "torch==2.6.*",
     "mpi4py==3.*",
-    "peft>=0.14.0",
-    "tensorrt-llm==0.18.2",
-    # "torch-tensorrt == 2.5.0",
+    "peft",
+    "tensorrt-llm==0.19.0",
+    # "torch-tensorrt == 2.6.0",
     "loguru",
     "typer",
     "autoawq @ git+https://github.com/casper-hansen/AutoAWQ.git@710fe050a938fb73e08d0882245a212389605a90",
