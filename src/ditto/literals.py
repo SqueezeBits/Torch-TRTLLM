@@ -117,6 +117,7 @@ PassName = Literal[
     "ReplaceMMByGemmPlugin",
     "ReplaceMMByWoQGemmPlugin",
     "ReplaceRmsNormByFp8RmsNormPlugin",
+    "ReplaceSafeSoftmaxBySoftmax",
     "ReplaceSDPAByGPTAttentionPlugin",
     "ReplaceTopkByTopkLastDimPlugin",
     "ReplaceViewByReshape",
