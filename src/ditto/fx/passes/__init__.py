@@ -52,6 +52,7 @@ from .parallelize_linear import ParallelizeLinear
 from .parallelize_pipeline import ParallelizePipeline
 from .pop_lora_plugins import PopLoraPlugins
 from .propagate_tensor_parallelism import PropagateTensorParallelism
+from .replace_embedding_by_ptuning_embedding import ReplaceEmbeddingByPTuningEmbedding
 from .replace_mm_by_fp8_gemm_plugin import ReplaceMMByFp8GemmPlugin
 from .replace_mm_by_fp8_rowwise_gemm_plugin import ReplaceMMByFp8RowwiseGemmPlugin
 from .replace_mm_by_gemm_plugin import ReplaceMMByGemmPlugin

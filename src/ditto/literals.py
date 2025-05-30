@@ -110,6 +110,7 @@ PassName = Literal[
     "ParallelizePipeline",
     "PopLoraPlugins",
     "PropagateTensorParallelism",
+    "ReplaceEmbeddingByPTuningEmbedding",
     "ReplaceMoEByMoEPlugin",
     "ReplaceMMByFp8GemmPlugin",
     "ReplaceMMByFp8RowwiseGemmPlugin",
