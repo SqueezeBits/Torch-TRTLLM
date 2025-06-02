@@ -327,16 +327,15 @@ class MHA(StrictlyTyped):
             and (value := get_tensor_metadata(sdpa.value))
             and (embed_dim := expect_identical(query.shape[-1], key.shape[-1], value.shape[-1])) is not None
             and (num_kv_heads := expect_identical(key.shape[-3], value.shape[-3])) is not None
+            and (q_rope := find_nearest(Rope, sdpa.query, follow_first_only=False))
+            and (k_rope := find_nearest(Rope, sdpa.key, follow_first_only=False))
         ):
             return None
 
-        q_seq = TrailingReformatPath.configure_from(sdpa.query)
         k_seq = TrailingReformatPath.configure_from(sdpa.key)
         v_seq = TrailingReformatPath.configure_from(sdpa.value)
-        q_rope = q_seq.top
-        k_rope = k_seq.top
-        q = TrailingReformatPath.configure_from(q_rope.all_input_nodes[0]).top
-        k = TrailingReformatPath.configure_from(k_rope.all_input_nodes[0]).top
+        q = TrailingReformatPath.configure_from(q_rope.node.all_input_nodes[0]).top
+        k = TrailingReformatPath.configure_from(k_rope.node.all_input_nodes[0]).top
         v = v_seq.top
 
         if not (
