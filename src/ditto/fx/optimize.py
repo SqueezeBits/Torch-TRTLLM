@@ -288,6 +288,7 @@ def get_trtllm_conversion_transform(
         RewriteIndexAsSingleSlice,
         ReplaceSDPAByGPTAttentionPlugin(
             dtype=dtype,
+            argument_hint=argument_hint,
             mapping=argument_hint.mapping,
             plugin_config=model_config.plugin_config,
             global_quant_config=global_quant_config,

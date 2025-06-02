@@ -30,8 +30,10 @@ from torch.fx import Graph, Node
 from transformers import PretrainedConfig
 from typing_extensions import Self
 
+from ...arguments import TensorTypeHint, TRTLLMArgumentHint
 from ...constants import DEFAULT_ROTARY_EMBEDDING_ORIGINAL_MAX_POSITIONS
 from ...debug import open_debug_artifact
+from ...fx.nodes import Placeholder
 from ...types import StrictlyTyped
 from .fake_tensor_mode import is_in_fake_tensor_mode
 from .plugin import Plugin
@@ -72,6 +74,7 @@ class ROPEConfig(StrictlyTyped):
         rotary_embedding_long_m_scale (float): Scale for long-range rotary embeddings. Defaults to 1.0.
         rotary_embedding_max_positions (int): Maximum positions for rotary embeddings. Defaults to 1024.
         rotary_embedding_original_max_positions (int): Original maximum positions. Defaults to 1024.
+        mrope_section (list[int]): Multimodal rope section. Defaults to [].
         llama3_scaling_config (Llama3ScalingConfig): Configuration for Llama3 specific scaling.
             Defaults to Llama3ScalingConfig().
     """
@@ -85,6 +88,7 @@ class ROPEConfig(StrictlyTyped):
     rotary_embedding_long_m_scale: float = 1.0
     rotary_embedding_max_positions: int = 1024
     rotary_embedding_original_max_positions: int = 1024
+    mrope_section: list[int] = Field(default_factory=list)
     llama3_scaling_config: Llama3ScalingConfig = Field(default_factory=Llama3ScalingConfig, exclude=True)
     rotary_embedding_beta_fast: int | None = Field(default=None, exclude=True)
     rotary_embedding_beta_slow: int | None = Field(default=None, exclude=True)
@@ -246,6 +250,15 @@ class ROPEConfig(StrictlyTyped):
         """
         self._long_rope_rotary_cos_sin = value
 
+    @property
+    def is_mrope(self) -> bool:
+        """Check if the RoPE configuration is for mRoPE.
+
+        Returns:
+            bool: True if the RoPE configuration is for mRoPE, False otherwise.
+        """
+        return self.rotary_embedding_scale_type == RotaryScalingType.mrope
+
     @classmethod
     def from_pretrained_config(
         cls,
@@ -311,8 +324,6 @@ class ROPEConfig(StrictlyTyped):
                 "original_max_position_embeddings", DEFAULT_ROTARY_EMBEDDING_ORIGINAL_MAX_POSITIONS
             )
             rotary_scaling_type: str | None = rope_scaling.get("type", rope_scaling.get("rope_type", None))
-            if rotary_scaling_type is not None:
-                rope_config.rotary_embedding_scale_type = RotaryScalingType.from_string(rotary_scaling_type)
             rope_config.llama3_scaling_config = Llama3ScalingConfig(**rope_scaling)
             if rotary_scaling_type == "longrope":
                 assert all(factor in rope_scaling for factor in ("short_factor", "long_factor"))
@@ -329,6 +340,9 @@ class ROPEConfig(StrictlyTyped):
                 rope_config.rotary_embedding_original_max_positions = original_max_position_embeddings
                 rope_config.longrope_scaling_short_factors = rope_scaling["short_factor"]
                 rope_config.longrope_scaling_long_factors = rope_scaling["long_factor"]
+            elif rotary_scaling_type == "default" and rope_scaling.get("mrope_section", None):
+                rotary_scaling_type = "mrope"
+                rope_config.mrope_section = rope_scaling["mrope_section"]
             if model_type == "deepseek_v2":
                 rope_config.position_embedding_type = PositionEmbeddingType.learned_absolute
                 rope_config.rotary_embedding_beta_fast = rope_scaling.get("beta_fast", None)
@@ -336,6 +350,9 @@ class ROPEConfig(StrictlyTyped):
                 rope_config.rotary_embedding_mscale = rope_scaling.get("mscale", None)
                 rope_config.rotary_embedding_mscale_all_dim = rope_scaling.get("mscale_all_dim", None)
                 rope_config.rotary_embedding_dim = 0
+
+            if rotary_scaling_type is not None:
+                rope_config.rotary_embedding_scale_type = RotaryScalingType.from_string(rotary_scaling_type)
 
         return rope_config
 
@@ -617,6 +634,8 @@ class GPTAttentionPluginInputs(StrictlyTyped):
         rotary_inv_freq (Node | None): Inverse frequency tensor for RoPE. Defaults to None.
         rotary_cos_sin (Node | None): Cosine/sine tensor for RoPE. Defaults to None.
         host_context_lengths (Node): Context lengths on host
+        mrope_rotary_cos_sin (Node | None): Cosine/sine tensor for MROPE. Defaults to None.
+        mrope_position_deltas (Node | None): Position deltas tensor for MROPE. Defaults to None.
         host_runtime_perf_knobs (Node): Runtime performance knobs on host
         host_context_progress (Node): Context progress on host
     """
@@ -637,25 +656,54 @@ class GPTAttentionPluginInputs(StrictlyTyped):
     rotary_inv_freq: Node | None = None
     rotary_cos_sin: Node | None = None
     host_context_lengths: Node
+    mrope_rotary_cos_sin: Node | None = None
+    mrope_position_deltas: Node | None = None
     host_runtime_perf_knobs: Node
     host_context_progress: Node
 
     @classmethod
-    def find_from(cls, graph: Graph, is_rope: bool) -> Self:
-        """Find plugin input nodes from a graph.
+    def create_and_sync(cls, graph: Graph, argument_hint: TRTLLMArgumentHint, rope_config: ROPEConfig) -> Self:
+        """Create and find plugin input nodes from a graph and synchronize them with argument hint.
 
         Args:
             graph (Graph): FX graph to search for input nodes
-            is_rope (bool): Whether RoPE inputs should be included
+            argument_hint (TRTLLMArgumentHint): Argument hint for the model
+            rope_config (ROPEConfig): RoPE configuration
 
         Returns:
             Self: GPTAttentionPluginInputs instance with found nodes
         """
+        if rope_config.is_mrope:
+            argument_hint.mrope_input_hints.update(
+                {
+                    "mrope_rotary_cos_sin": TensorTypeHint(
+                        shape=(
+                            argument_hint.num_tokens,
+                            rope_config.rotary_embedding_max_positions * rope_config.rotary_embedding_dim,
+                        ),
+                        dtype=torch.float32,
+                    ),
+                    "mrope_position_deltas": TensorTypeHint(
+                        shape=(argument_hint.num_tokens, 1),
+                        dtype=torch.int32,
+                    ),
+                }
+            )
+            with graph.inserting_after(list(graph.find_nodes(op="placeholder"))[-1]):
+                Placeholder.create(
+                    graph, "mrope_rotary_cos_sin", argument_hint.mrope_input_hints["mrope_rotary_cos_sin"]
+                )
+                Placeholder.create(
+                    graph, "mrope_position_deltas", argument_hint.mrope_input_hints["mrope_position_deltas"]
+                )
+
         existing_placeholders = {p.name: p for p in graph.find_nodes(op="placeholder")}
         get_attr_nodes = {n.name: n for n in graph.nodes if n.op == "get_attr"}
         excluded: set[str] = {"kv_orig_quant_scale", "kv_quant_orig_scale"}
-        if not is_rope:
+        if not rope_config.is_rope:
             excluded.update({"rotary_inv_freq", "rotary_cos_sin"})
+        if not rope_config.is_mrope:
+            excluded.update({"mrope_rotary_cos_sin", "mrope_position_deltas"})
         nodes = {
             name: node
             # pylint: disable-next=bad-reversed-sequence

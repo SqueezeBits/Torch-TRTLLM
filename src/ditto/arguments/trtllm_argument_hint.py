@@ -59,6 +59,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
     lora_input_hints: dict[str, TensorTypeHint] = Field(default_factory=dict, exclude=True)
     hidden_size: int | None = Field(default=None, exclude=True)
     hidden_dtype: torch.dtype | None = Field(default=None, exclude=True)
+    mrope_input_hints: dict[str, TensorTypeHint] = Field(default_factory=dict, exclude=True)
     _one: DynamicDimension = PrivateAttr(default=DynamicDimension(name="one", min=1, opt=1, max=1))
 
     @classmethod
@@ -336,8 +337,9 @@ class TRTLLMArgumentHint(StrictlyTyped):
             original_serializer (Callable[[Self], dict[str, TensorTypeHint | None]]): Original serializer function
 
         Returns:
-            dict[str, TensorTypeHint | None]: Serialized model with LoRA hints
+            dict[str, TensorTypeHint | None]: Serialized model with LoRA and MRoPE hints
         """
         data = original_serializer(self)
         data.update(self.lora_input_hints)
+        data.update(self.mrope_input_hints)
         return data
