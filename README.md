@@ -3,7 +3,7 @@
 <img src="./docs/assets/ditto_logo.png" alt="Ditto logo" width="200" />
 
 [![tensorrt-llm](https://img.shields.io/badge/tensorrt--llm-0.19.0-green)](https://github.com/NVIDIA/TensorRT-LLM)
-[![torch-tensorrt](https://img.shields.io/badge/torch--tensorrt-2.6.0-lightgreen)](https://github.com/pytorch/TensorRT)
+[![torch-tensorrt](https://img.shields.io/badge/torch--tensorrt-2.6.1-lightgreen)](https://github.com/pytorch/TensorRT)
 [![version](https://img.shields.io/badge/version-0.2.1-purple)](#)
 [![license](https://img.shields.io/badge/license-Apache%202-red)](./LICENSE)
 
