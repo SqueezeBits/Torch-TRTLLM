@@ -23,7 +23,7 @@ from setuptools.command.install import install
 
 def install_torch_tensorrt_with_no_deps() -> None:
     """torch-tensorrt package should be installed with the --no-deps flag due to its broken dependencies."""
-    if pip.main(["install", "torch-tensorrt==2.6.0", "--no-deps"]):
+    if pip.main(["install", "torch-tensorrt==2.6.1", "--no-deps"]):
         raise SystemError("Failed to install torch-tensorrt")
 
 

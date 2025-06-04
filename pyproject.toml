@@ -38,7 +38,7 @@ dependencies = [
     "mpi4py==3.*",
     "peft",
     "tensorrt-llm==0.19.0",
-    # "torch-tensorrt == 2.6.0",
+    # "torch-tensorrt == 2.6.1",
     "loguru",
     "typer",
     "autoawq @ git+https://github.com/casper-hansen/AutoAWQ.git@710fe050a938fb73e08d0882245a212389605a90",
