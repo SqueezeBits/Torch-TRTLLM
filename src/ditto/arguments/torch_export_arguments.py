@@ -19,7 +19,7 @@ from typing_extensions import Self
 from ..constants import DEFAULT_DEVICE
 from ..contexts import brief_tensor_repr
 from ..types import BuiltInConstant, DeviceLikeType, ExportDim, StrictlyTyped
-from .dynamic_dim import DynamicDimensionType
+from .dynamic_dim import DynamicDimension, DynamicDimensionType
 from .tensor_type_hint import TensorTypeHint
 
 
@@ -94,7 +94,13 @@ class TorchExportArguments(StrictlyTyped):
                     continue
                 assert (constraint := constraints[name]) is not None
                 if not isinstance(export_dim := s.export_dim, int):
-                    constraint[dim] = export_dim
+                    # Note: The reason for multiplying by 2 is to satisfy the constraint
+                    # imposed by some layers in `torch.export` (e.g., torch.split).
+                    # This scale factor may be adjusted in the future if additional constraints arise.
+                    if isinstance(s, DynamicDimension) and s.given_name in ("num_tokens"):
+                        constraint[dim] = 2 * export_dim
+                    else:
+                        constraint[dim] = export_dim
 
             if not constraints[name]:
                 constraints[name] = None

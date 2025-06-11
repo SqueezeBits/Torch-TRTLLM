@@ -97,10 +97,7 @@ class TRTLLMArgumentHint(StrictlyTyped):
             opt=profile_config.opt_seq_len,
             max=profile_config.max_seq_len,
         )
-        # Note: The reason for multiplying by 2 is to satisfy the constraint
-        # imposed by some layers in `torch.export` (e.g., torch.split).
-        # This scale factor may be adjusted in the future if additional constraints arise.
-        num_tokens = 2 * DynamicDimension(
+        num_tokens = DynamicDimension(
             name="num_tokens",
             min=1,
             opt=profile_config.opt_num_tokens,
