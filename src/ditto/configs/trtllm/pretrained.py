@@ -445,6 +445,8 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
         num_attention_heads (int): Number of attention heads
         num_key_value_heads (int): Number of key/value heads
         intermediate_size (int): Size of intermediate layers
+        rotary_embedding_dim (int): Size of rotary embedding dimension
+        max_position_embeddings (int): Maximum position embeddings
         mapping (TRTLLMMapping): Parallel mapping configuration. Defaults to TRTLLMMapping().
         quantization (TRTLLMQuantConfig | None): Quantization configuration. Defaults to None.
         moe (TRTLLMMoEConfig | None): MoE configuration. Defaults to None.
@@ -459,6 +461,8 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
     num_attention_heads: int
     num_key_value_heads: int
     intermediate_size: int
+    rotary_embedding_dim: int
+    max_position_embeddings: int
     mapping: TRTLLMMapping = Field(default_factory=TRTLLMMapping)
     quantization: TRTLLMQuantConfig | None = None
     moe: TRTLLMMoEConfig | None = None

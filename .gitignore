@@ -235,3 +235,5 @@ nohup.out
 # debug artifacts and engines
 artifacts/*
 engines
+*/artifacts/
+*/engines/

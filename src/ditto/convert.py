@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import overload
+
 import tensorrt as trt
 from loguru import logger
 from tensorrt_llm._common import _is_building
@@ -21,7 +23,7 @@ from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from torch_tensorrt.dynamo.conversion import UnsupportedOperatorException
 from torch_tensorrt.logging import TRT_LOGGER
 
-from .arguments import TRTLLMArgumentHint
+from .arguments import TensorTypeHint, TRTLLMArgumentHint
 from .configs import TensorRTConfig
 from .debug import save_for_debug, should_save_debug_artifacts
 from .interpreter import TRTLLMInterpreter
@@ -29,33 +31,63 @@ from .interpreter import TRTLLMInterpreter
 CURRENT_DEVICE = Device._current_device()
 
 
-@_is_building  # type: ignore
+@overload
 def convert(
     graph_module: GraphModule,
     argument_hint: TRTLLMArgumentHint,
     trt_config: TensorRTConfig,
     *,
+    output_names: list[str],
     engine_cache: BaseEngineCache | None = None,
     network_name: str | None = None,
-    debug_node_names: list[str] | None = None,
+) -> bytes:
+    ...
+
+
+@overload
+def convert(
+    graph_module: GraphModule,
+    hints: dict[str, TensorTypeHint],
+    trt_config: TensorRTConfig,
+    *,
+    output_names: list[str],
+    engine_cache: BaseEngineCache | None = None,
+    network_name: str | None = None,
+) -> bytes:
+    ...
+
+
+@_is_building  # type: ignore
+def convert(
+    graph_module: GraphModule,
+    argument_hint: TRTLLMArgumentHint | dict[str, TensorTypeHint],
+    trt_config: TensorRTConfig,
+    *,
+    output_names: list[str],
+    engine_cache: BaseEngineCache | None = None,
+    network_name: str | None = None,
 ) -> bytes:
     """Convert an graph module to a TensorRT engine."""
-    all_tensor_hints = argument_hint.as_dict()
-    input_specs = tuple(
-        all_tensor_hints[p.name].as_spec(p.name) for p in graph_module.graph.find_nodes(op="placeholder")
-    )
+    if isinstance(argument_hint, TRTLLMArgumentHint):
+        all_tensor_hints = argument_hint.as_dict()
+        assert (rank := argument_hint.mapping.rank) is not None, "rank is not set"
+        input_specs = tuple(
+            all_tensor_hints[p.name].as_spec(p.name) for p in graph_module.graph.find_nodes(op="placeholder")
+        )
+    else:
+        rank = 0
+        input_specs = tuple(
+            argument_hint[p.name].as_spec(p.name) for p in graph_module.graph.find_nodes(op="placeholder")
+        )
     logger.opt(lazy=True).debug("input_specs:\n{x}", x=lambda: "\n".join(str(spec) for spec in input_specs))
 
-    output_names = ["logits" if argument_hint.mapping.is_last_pp_rank() else "hidden_states_output"]
-    if debug_node_names:
-        output_names.extend(debug_node_names)
     try:
         interpreter = TRTLLMInterpreter(
             graph_module,
             input_specs,
             builder_config=trt_config.builder_config,
             network_flags=trt_config.network_creation_flags,
-            rank=argument_hint.mapping.rank,
+            rank=rank,
             engine_cache=engine_cache,
             network_name=network_name,
             output_names=output_names,
@@ -63,7 +95,7 @@ def convert(
         engine = interpreter.run().serialized_engine
         if should_save_debug_artifacts():
             save_for_debug(
-                f"trt_engine_rank{argument_hint.mapping.rank}",
+                f"trt_engine_rank{rank}",
                 trt.Runtime(TRT_LOGGER).deserialize_cuda_engine(engine),
             )
         return engine

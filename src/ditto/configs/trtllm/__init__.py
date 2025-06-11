@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .build import TRTLLMBuildConfig
+from .build import TRTLLMBuildConfig, TRTMultiModalBuildConfig
 from .engine import TRTLLMEngineConfig
 from .lora import TRTLLMLoraConfig
 from .model import TRTLLMModelConfig
