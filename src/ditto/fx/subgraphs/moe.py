@@ -118,7 +118,8 @@ class MoESubgraph(Subgraph):
     Attributes:
         hidden_states (Node): The input hidden states node.
         router (Linear): The router linear layer for expert selection.
-        router_logits (Node): The router logits node before softmax.
+        token_scores (Node | None): The scores of selected experts.
+        token_selected_experts (Node): The index of selected experts.
         top_k (int): Number of experts to select per token.
         experts (list[Expert]): List of Expert objects representing each expert network.
         shared_experts (list[tuple[Linear, Linear, Linear]]): List of shared expert weight tuples.
@@ -130,6 +131,8 @@ class MoESubgraph(Subgraph):
     hidden_states: Node
     router: Linear
     router_logits: Node
+    token_scores: Node | None
+    token_selected_experts: Node
     top_k: int
     experts: list[Expert]
     shared_experts: list[tuple[Linear, Linear, Linear]]
@@ -246,7 +249,10 @@ class MoESubgraph(Subgraph):
 
         if Softmax.specialize_from(topk.this):
             # greedy
+            assert topk.output_values is not None and topk.output_indices is not None
             router_logits = softmax.this
+            token_scores = topk.output_values.this
+            token_selected_experts = topk.output_indices.this
         else:
             # group_limited_greedy
             # This topk method is used in DeepSeek-V2. Deepseek-V2-Lite uses greedy method.
@@ -256,10 +262,13 @@ class MoESubgraph(Subgraph):
             router_logits = topk.this
         experts.sort(key=lambda expert: expert.index)
         final_hidden_states = experts[-1].final_hidden_states
+        assert token_scores is not None and token_selected_experts is not None
         return cls(
             hidden_states=expert_hidden_states.this,
             router=router,
             router_logits=router_logits,
+            token_scores=token_scores,
+            token_selected_experts=token_selected_experts,
             top_k=int(topk.k),
             experts=experts,
             shared_experts=shared_experts,

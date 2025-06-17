@@ -60,16 +60,16 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
 
         moe_plugin = MixtureOfExpertsPlugin(
             number_of_experts=moe.number_of_experts,
-            top_k=moe.top_k,
+            experts_per_token=moe.top_k,
             expert_hidden_size=moe.expert_hidden_size,
             expert_inter_size=moe.expert_inter_size,
-            normalization_mode=get_moe_normalization_mode(pretrained_config),
             activation_type=get_moe_activation_type(),
             type_id=DataType(self.dtype).to(trt.DataType),
             weight_type_id=DataType(self.dtype).to(trt.DataType),
-            output_type_id=DataType(self.dtype).to(trt.DataType),
+            use_final_scales=moe.token_scores is not None,
             tp_size=self.tp_size,
             tp_rank=self.tp_rank,
+            use_lora=False,
         )
         moe_plugin._shared_expert_intermediate_size = moe.shared_expert_intermediate_size
         if self.plugin is None:
@@ -107,7 +107,5 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
             graph_module.meta[MOE_CONFIG] = {
                 "num_experts": self.plugin.number_of_experts,
                 "shared_expert_intermediate_size": self.plugin._shared_expert_intermediate_size,
-                "top_k": self.plugin.top_k,
-                "normalization_mode": self.plugin.normalization_mode,
-                "sparse_mixer_epsilon": self.plugin.sparse_mixer_epsilon,
+                "experts_per_token": self.plugin.experts_per_token,
             }
