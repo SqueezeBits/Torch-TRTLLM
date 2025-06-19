@@ -349,9 +349,6 @@ class MHA(StrictlyTyped):
             and (q_proj := find_nearest(Linear, sdpa.query))
             and (k_proj := find_nearest(Linear, sdpa.key))
             and (v_proj := find_nearest(Linear, sdpa.value))
-            and q_proj.output_node == k_proj.output_node == v_proj.output_node
-            and (fused_linear := FusedLinear.configure_from(q_proj.mm.node))
-            and tuple(s.node for s in fused_linear.slices) == (q, k, v)
             and (
                 rope_config := expect_identical(
                     q_rope.meta.get("rope_config"),
@@ -364,8 +361,34 @@ class MHA(StrictlyTyped):
         ):
             return None
 
+        if q_proj.output_node == k_proj.output_node == v_proj.output_node:
+            if not (
+                (fused_linear := FusedLinear.configure_from(q_proj.mm.node))
+                and tuple(s.node for s in fused_linear.slices) == (q, k, v)
+            ):
+                # Note: It looks like a fused QKV projection, but something is wrong.
+                return None
+            return cls(
+                qkv=q_proj.output_node,
+                rope_config=rope_config,
+                num_attn_groups=num_attn_groups,
+                num_heads=query.shape[-3],
+                embed_dim=embed_dim,
+                num_kv_heads=num_kv_heads,
+                output_shape=(*query.shape[:-1], value.shape[-1]),
+            )
+
+        # Note: The Q, K, and V are not fused. We needs to create a new fused node.
+        cat_nodes: list[Node] = []
+        for proj, out in zip((q_proj, k_proj, v_proj), (q, k, v)):
+            assert (metadata := get_tensor_metadata(proj.output_node)) is not None
+            with out.graph.inserting_after(out):
+                cat_nodes.append(Reshape.create(out.graph, out, (-1, metadata.shape[-1])).node)
+        with cat_nodes[0].graph.inserting_after(max(cat_nodes)):
+            qkv = Cat.create(cat_nodes[0].graph, tuple(cat_nodes), -1).node
+
         return cls(
-            qkv=q_proj.output_node,
+            qkv=qkv,
             rope_config=rope_config,
             num_attn_groups=num_attn_groups,
             num_heads=query.shape[-3],

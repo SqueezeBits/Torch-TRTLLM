@@ -17,7 +17,7 @@ from torch.fx import GraphModule, Node
 from ...debug import save_for_debug
 from ...literals import LoraPluginInputPrefix
 from ..nodes import ScaledDotProductAttention
-from ..subgraphs import Linear, TrailingReformatPath
+from ..subgraphs import Linear, RmsNormSubgraph, TrailingReformatPath
 from ..utils import find_nearest
 from .fuse_projections import FuseProjections
 from .replace_sdpa_by_gpt_attention_plugin import MLA
@@ -44,6 +44,11 @@ class FuseQKVProjections(FuseProjections):
             and (k_proj := find_nearest(Linear, sdpa.key))
             and (v_proj := find_nearest(Linear, sdpa.value))
         ):
+            return []
+        if find_nearest(RmsNormSubgraph, sdpa.query, max_depth=4) or find_nearest(
+            RmsNormSubgraph, sdpa.key, max_depth=10
+        ):
+            # Note: If there are q_norm and k_norm, we don't fuse the projections.
             return []
         attn_dense.bind_free_lora_proto(with_prefix="attn_dense")
         if q_proj.mm.node == k_proj.mm.node == v_proj.mm.node:
