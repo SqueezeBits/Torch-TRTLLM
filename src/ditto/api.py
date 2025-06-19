@@ -323,8 +323,9 @@ def save_component(
 
     if isinstance(component, TRTLLMEngineConfig):
         logger.info(f"Writing engine config at {component_path}")
+        exclude = {"pretrained_config": {"moe"}} if component.pretrained_config.moe is None else None
         with open(component_path, "w") as f:
-            f.write(component.model_dump_json(indent=2))
+            f.write(component.model_dump_json(indent=2, exclude=exclude))
     elif isinstance(component, LoraConfig):
         logger.info(f"Writing lora config at {component_path}")
         component.save_pretrained(os.path.dirname(component_path))
@@ -366,7 +367,7 @@ def add_outputs(names: list[str]) -> Callable[[GraphModule], GraphModule]:
         node = find_output_node(gm)
 
         try:
-            outputs = node.args[0] + tuple(nodes[name] for name in names)
+            outputs = node.args[0] + tuple(nodes[name] for name in names)  # type: ignore
         except KeyError as e:
             gm.print_readable()
             raise RuntimeError(f"Failed to find all of the extra output nodes: {', '.join(names)}") from e

@@ -24,9 +24,9 @@ from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class ReplaceTopkByTopkLastDimPlugin(NodewiseOptimizationPass):
-    """Pass that replaces torch.topk operations with TopkLastDimPlugin.
+    """Pass that replaces torch.topk in MoE subgraphs operations with TopkLastDimPlugin.
 
-    This pass identifies topk operations that can be replaced with TopkLastDimPlugin.
+    This pass identifies topk operations in MoE subgraphs that can be replaced with TopkLastDimPlugin.
     """
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
@@ -41,15 +41,13 @@ class ReplaceTopkByTopkLastDimPlugin(NodewiseOptimizationPass):
         Raises:
             NotImplementedError: If input tensor has dimensions other than 2
         """
-        # NOTE: Currently, this pass only converts topk operations in group_limited_greedy method of MoE,
-        #       because TopkLastDimPlugin in trtllm is not an always-enabled plugin, which is enabled
-        #       by prefer_plugin flag. It's True for the topk operations in group_limited_greedy.
+        # TODO: This pass might be able to be generalized to all topk operations.
         if not (
             isinstance(node.target, MixtureOfExpertsPlugin)
-            and (group_topk := find_nearest(TopK, node, follow_first_only=False))
-            and (input_ndim := group_topk.input_ndim)
-            and (group_topk.dim in (-1, input_ndim - 1))
-            and (input_metadata := get_tensor_metadata(group_topk.this))
+            and (topk := find_nearest(TopK, node, follow_first_only=False))
+            and (input_ndim := topk.input_ndim)
+            and (topk.dim in (-1, input_ndim - 1))
+            and (input_metadata := get_tensor_metadata(topk.this))
         ):
             return {}
 
@@ -60,13 +58,13 @@ class ReplaceTopkByTopkLastDimPlugin(NodewiseOptimizationPass):
 
         graph = node.graph
         topk_last_dim_plugin = TopkLastDimPlugin(
-            k=int(group_topk.k),
+            k=int(topk.k),
             type_id=DataType(input_metadata.dtype).to(trt.DataType),
         )
-        with graph.inserting_after(group_topk.this):
+        with graph.inserting_after(topk.this):
             plugin_node = graph.call_function(
                 topk_last_dim_plugin,
-                (group_topk.this,),
+                (topk.this,),
             )
 
-        return {group_topk.node: ReplaceAllUses(by=plugin_node)}
+        return {topk.node: ReplaceAllUses(by=plugin_node)}

@@ -23,9 +23,8 @@ from ..targets import (
     MixtureOfExpertsPlugin,
     MixtureOfExpertsPluginInputs,
     get_moe_activation_type,
-    get_moe_normalization_mode,
 )
-from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, get_pretrained_config
+from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
 class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
@@ -56,7 +55,6 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
             return {}
 
         graph = node.graph
-        pretrained_config = get_pretrained_config(graph)
 
         moe_plugin = MixtureOfExpertsPlugin(
             number_of_experts=moe.number_of_experts,
@@ -107,5 +105,5 @@ class ReplaceMoEByMoEPlugin(NodewiseOptimizationPass):
             graph_module.meta[MOE_CONFIG] = {
                 "num_experts": self.plugin.number_of_experts,
                 "shared_expert_intermediate_size": self.plugin._shared_expert_intermediate_size,
-                "experts_per_token": self.plugin.experts_per_token,
+                "top_k": self.plugin.experts_per_token,
             }

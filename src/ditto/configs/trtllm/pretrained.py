@@ -461,7 +461,7 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
     intermediate_size: int
     mapping: TRTLLMMapping = Field(default_factory=TRTLLMMapping)
     quantization: TRTLLMQuantConfig | None = None
-    moe: TRTLLMMoEConfig | None = Field(default=None, exclude=lambda v: v is None)
+    moe: TRTLLMMoEConfig | None = None
     extra_fields: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
     @model_serializer(mode="wrap")
