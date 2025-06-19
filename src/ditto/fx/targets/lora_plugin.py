@@ -243,7 +243,7 @@ class LoraPluginInputPair(StrictlyTyped):
             weights_pointers = Placeholder.create(
                 graph,
                 f"{prefix}_lora_weights_pointers_{layer_idx}",
-                hint=(weights_pointer_hint := TensorTypeHint(dtype=torch.int64, shape=(batch_size, 2))),
+                hint=(weights_pointer_hint := TensorTypeHint(dtype=torch.int64, shape=(batch_size, 3))),
             )
             ranks = Placeholder.create(
                 graph,
