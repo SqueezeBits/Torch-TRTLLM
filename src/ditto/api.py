@@ -61,6 +61,7 @@ def build_multimodal_engine(
     *,
     input_specs: list[TensorTypeHint],
     max_batch_size: int,
+    tp_size: int = 1,
     network_name: str | None = None,
     input_names: list[str] | None = None,
     output_names: list[str] | None = None,
@@ -74,12 +75,15 @@ def build_multimodal_engine(
         output_dir (str): Directory to save the engine and config files
         input_specs (list[TensorTypeHint]): List of input specs
         max_batch_size (int): Maximum batch size for TensorRT engine
+        tp_size (int): Tensor parallel size
         network_name (str | None): Name of the network. Defaults to None.
         input_names (list[str] | None): List of input names. Defaults to None.
         output_names (list[str] | None): List of output names. Defaults to None.
         model_type (str): Type of the model. Defaults to "".
         trt_config (TensorRTConfig | None): TensorRT builder configuration. Defaults to None.
     """
+    if tp_size > 1:
+        raise NotImplementedError("Tensor parallel is currently not supported for multimodal models")
     if input_names is None:
         input_names = []
         for i in range(len(input_specs)):
@@ -101,7 +105,7 @@ def build_multimodal_engine(
         model_type=model_type,
         dtype=model.dtype,
         max_batch_size=max_batch_size,
-        tensor_parallel=1,  # TODO: support tensor parallel
+        tensor_parallel=tp_size,
     )
 
     for filename, component in build_multimodal_engine_components(
