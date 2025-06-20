@@ -67,7 +67,7 @@ def build_multimodal_engine(
     model_type: str = "",
     trt_config: TensorRTConfig | None = None,
 ) -> None:
-    """Build a TensorRT engine for a multimodel model.
+    """Build a TensorRT engine for a multimodal model.
 
     Args:
         model (PreTrainedModel | PeftModel): The PyTorch model to convert
@@ -312,7 +312,7 @@ def build_multimodal_engine_components(
     network_name: str | None = None,
     debug_node_names: list[str] | None = None,
 ) -> Generator[tuple[str, EngineComponent], None, None]:
-    """Build TensorRT engine components for a multimodel model.
+    """Build TensorRT engine components for a multimodal model.
 
     Args:
         graph_module (GraphModule): The graph module to convert to TensorRT engines

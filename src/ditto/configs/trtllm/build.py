@@ -74,7 +74,7 @@ class TRTLLMBuildConfig(RuntimeTRTLLMOptimizationProfileConfig, TRTLLMModelConfi
 
 
 class TRTMultiModalBuildConfig(StrictlyTyped):
-    """Configuration for building TensorRT engines for a multimodel model.
+    """Configuration for building TensorRT engines for a multimodal model.
 
     Args:
         model_name (str): The name of the model.
