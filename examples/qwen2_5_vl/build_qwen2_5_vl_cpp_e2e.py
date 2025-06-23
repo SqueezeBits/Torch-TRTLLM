@@ -15,7 +15,8 @@ MODEL_ID = "Qwen/Qwen2.5-VL-3B-Instruct"
 OUTPUT_DIR = "engines/qwen2.5-vl"
 DTYPE = torch.float16
 IMAGE_SIZE = (504, 504)
-
+MAX_BATCH_SIZE = 4
+VISION_FEATURE_SIZE = 324  # for image size (504, 504)
 
 class Qwen2_5VLLLMWrapper(torch.nn.Module):
     def __init__(self, model: Qwen2_5_VLForConditionalGeneration):
@@ -99,10 +100,10 @@ class Qwen2_5VLVisionBlockOpt(Qwen2_5_VLVisionBlock):
 
 
 class Qwen2_5VisionTransformerPretrainedModelOpt(Qwen2_5_VisionTransformerPretrainedModel):
-    def __init__(self, config) -> None:
+    def __init__(self, config, image_size: tuple[int, int]) -> None:
         super().__init__(config)
         self.blocks = torch.nn.ModuleList([Qwen2_5VLVisionBlockOpt(config) for _ in range(config.depth)])
-        self.height, self.width = IMAGE_SIZE[0], IMAGE_SIZE[1]
+        self.height, self.width = image_size[0], image_size[1]
         self.patch_size = 14
         self.merge_size = 2
         self.temporal_patch_size = 2
@@ -181,6 +182,7 @@ class Qwen2_5VLVisionWrapper(torch.nn.Module):
         self.visual = Qwen2_5VisionTransformerPretrainedModelOpt._from_config(
             model.config.vision_config,
             torch_dtype=DTYPE,
+            image_size=image_size,
         ).to("cuda")
         self.visual.load_state_dict(model.visual.state_dict())
         self.dtype = model.visual.dtype
@@ -239,41 +241,40 @@ class Qwen2_5VLVisionWrapper(torch.nn.Module):
         )
         return img_features.view(batch_size, -1, img_features.shape[-1])
 
+if __name__ == "__main__":
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(MODEL_ID, torch_dtype=DTYPE, device_map="auto")
+    processor = AutoProcessor.from_pretrained(MODEL_ID)
 
-model = Qwen2_5_VLForConditionalGeneration.from_pretrained(MODEL_ID, torch_dtype=DTYPE, device_map="auto")
-processor = AutoProcessor.from_pretrained(MODEL_ID)
-max_batch_size = 4
-vision_feature_size = 324  # for image shape == [504, 504]
-vision_wrapper = Qwen2_5VLVisionWrapper(model, IMAGE_SIZE, max_batch_size)
+    vision_wrapper = Qwen2_5VLVisionWrapper(model, IMAGE_SIZE, MAX_BATCH_SIZE)
 
-# build language model
-build_llm_engine(
-    Qwen2_5VLLLMWrapper(model),
-    f"{OUTPUT_DIR}/llm",
-    network_name=Qwen2_5_VLForConditionalGeneration.__name__,
-    max_batch_size=max_batch_size,
-    max_seq_len=8192,
-    max_prompt_embedding_table_size=max_batch_size * vision_feature_size,
-)
+    # build language model
+    build_llm_engine(
+        Qwen2_5VLLLMWrapper(model),
+        f"{OUTPUT_DIR}/llm",
+        network_name=Qwen2_5_VLForConditionalGeneration.__name__,
+        max_batch_size=MAX_BATCH_SIZE,
+        max_seq_len=8192,
+        max_prompt_embedding_table_size=MAX_BATCH_SIZE * VISION_FEATURE_SIZE,
+    )
 
-# build vision encoder
-input_specs = [
-    TensorTypeHint(
-        shape=(
-            DynamicDimension(name="vl_batch_size", min=1, opt=max(1, max_batch_size // 2), max=max_batch_size),
-            3,
-            504,
-            504,
+    # build vision encoder
+    input_specs = [
+        TensorTypeHint(
+            shape=(
+                DynamicDimension(name="vl_batch_size", min=1, opt=max(1, MAX_BATCH_SIZE // 2), max=MAX_BATCH_SIZE),
+                3,
+                504,
+                504,
+            ),
+            dtype=vision_wrapper.dtype,
         ),
-        dtype=vision_wrapper.dtype,
-    ),
-]
-build_multimodal_engine(
-    vision_wrapper,
-    f"{OUTPUT_DIR}/vision",
-    max_batch_size=max_batch_size,
-    input_specs=input_specs,
-    input_names=["input"],
-    output_names=["encoder_output"],
-    model_type="qwen2_5_vl",
-)
+    ]
+    build_multimodal_engine(
+        vision_wrapper,
+        f"{OUTPUT_DIR}/vision",
+        max_batch_size=MAX_BATCH_SIZE,
+        input_specs=input_specs,
+        input_names=["input"],
+        output_names=["encoder_output"],
+        model_type="qwen2_5_vl",
+    )
