@@ -18,6 +18,7 @@ IMAGE_SIZE = (504, 504)
 MAX_BATCH_SIZE = 4
 VISION_FEATURE_SIZE = 324  # for image size (504, 504)
 
+
 class Qwen2_5VLLLMWrapper(torch.nn.Module):
     def __init__(self, model: Qwen2_5_VLForConditionalGeneration):
         super().__init__()
@@ -241,6 +242,7 @@ class Qwen2_5VLVisionWrapper(torch.nn.Module):
         )
         return img_features.view(batch_size, -1, img_features.shape[-1])
 
+
 if __name__ == "__main__":
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(MODEL_ID, torch_dtype=DTYPE, device_map="auto")
     processor = AutoProcessor.from_pretrained(MODEL_ID)
@@ -253,7 +255,6 @@ if __name__ == "__main__":
         f"{OUTPUT_DIR}/llm",
         network_name=Qwen2_5_VLForConditionalGeneration.__name__,
         max_batch_size=MAX_BATCH_SIZE,
-        max_seq_len=8192,
         max_prompt_embedding_table_size=MAX_BATCH_SIZE * VISION_FEATURE_SIZE,
     )
 
