@@ -17,17 +17,14 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import tensorrt as trt
 import torch
-from loguru import logger
 from pydantic import PrivateAttr
 from tensorrt_llm.functional import QuantMode, SideStreamIDType
-from tensorrt_llm.layers.moe import MoeConfig as TRTLLMMoeConfig
-from tensorrt_llm.layers.moe import activation_str_to_int_map
+from tensorrt_llm.layers.moe import MoeGroupwiseQuantParams, activation_str_to_int_map
 from torch.fx import Graph, Node
-from transformers import PretrainedConfig
 from typing_extensions import Self
 
 from ...types import StrictlyTyped
-from ..nodes import Cat, Permute, Stack, ToCopy
+from ..nodes import Cat, Permute, Stack
 from .fake_tensor_mode import is_in_fake_tensor_mode
 from .plugin import Plugin
 
@@ -41,48 +38,48 @@ class MixtureOfExpertsPlugin(Plugin):
     Attributes:
         remove_input_padding (bool): Whether to remove padding from input
         number_of_experts (int): Number of expert networks
-        top_k (int): Number of experts to route each token to
+        experts_per_token (int): Number of experts to route each token to
         expert_hidden_size (int): Hidden dimension size for each expert
         expert_inter_size (int): Intermediate dimension size for each expert
+        groupwise_quant_algo (int): Groupwise quantization algorithm
+        group_size (int): Group size for groupwise quantization
         activation_type (int): Type of activation function to use
         type_id (trt.DataType): Data type for general tensors
         weight_type_id (trt.DataType): Data type for weight tensors
-        output_type_id (trt.DataType): Data type for output tensors
         quant_mode (int): Quantization mode configuration
-        use_finished (bool): Whether to use finished states
+        use_final_scales (bool): Whether to use finished states
         use_bias (bool): Whether to use bias terms
         tp_size (int): Tensor parallel size
         tp_rank (int): Tensor parallel rank
         ep_size (int): Expert parallel size
         ep_rank (int): Expert parallel rank
-        normalization_mode (int): Mode for normalizing expert routing weights
-        sparse_mixer_epsilon (float): Small constant for numerical stability
-        force_determinism (bool): Whether to force deterministic behavior
         side_stream_id (int): ID for side stream
         use_lora (bool): Whether to use LoRA
+        lora_type_id (trt.DataType): Data type for LoRA weights
+        max_low_rank (int): Maximum low-rank for LoRA
     """
 
     remove_input_padding: bool = True
     number_of_experts: int
-    top_k: int
+    experts_per_token: int
     expert_hidden_size: int
     expert_inter_size: int
+    groupwise_quant_algo: int = MoeGroupwiseQuantParams().quant_algo
+    group_size: int = -1
     activation_type: int
     type_id: trt.DataType
     weight_type_id: trt.DataType
-    output_type_id: trt.DataType
     quant_mode: int = QuantMode(0)
-    use_finished: bool = False
+    use_final_scales: bool = False
     use_bias: bool = False
     tp_size: int = 1
     tp_rank: int = 0
     ep_size: int = 1
     ep_rank: int = 0
-    normalization_mode: int = TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
-    sparse_mixer_epsilon: float = 0.01
-    force_determinism: bool = False
     side_stream_id: int = SideStreamIDType.disable
     use_lora: bool = False
+    lora_type_id: trt.DataType = trt.DataType.FLOAT
+    max_low_rank: int = 0
     _shared_expert_intermediate_size: int = PrivateAttr(default=0)
 
     def __call__(self, **kwargs: Any) -> torch.Tensor:
@@ -112,7 +109,7 @@ class MixtureOfExpertsPlugin(Plugin):
         Returns:
             type[np.number]: numpy dtype for the value
         """
-        if name in ("remove_input_padding", "use_finished", "use_bias", "force_determinism", "use_lora"):
+        if name in ("remove_input_padding", "use_final_scales", "use_bias", "force_determinism", "use_lora"):
             return np.int32
         return super().get_field_dtype(name, value)
 
@@ -122,22 +119,23 @@ class MixtureOfExpertsPluginInputs(StrictlyTyped):
 
     Attributes:
         hidden_states (Node): Input hidden states
-        routing (Node): Expert routing weights
         expert_weights_1 (Node): First set of expert weights
         expert_weights_2 (Node): Second set of expert weights
+        token_selected_experts (Node): Index of selected experts
+        token_final_scales (Node | None): Final scales for rescaling the output of the experts
         expert_bias_1 (Node | None): First set of expert biases
         expert_bias_2 (Node | None): Second set of expert biases
-        finished (Node | None): Finished states
         hidden_states_raw (Node | None): Raw hidden states for side stream
     """
 
     hidden_states: Node
-    routing: Node
     expert_weights_1: Node
     expert_weights_2: Node
+    token_selected_experts: Node
+    token_final_scales: Node | None = None
     expert_bias_1: Node | None = None
     expert_bias_2: Node | None = None
-    finished: Node | None = None
+    # Note: inputs for LoRA are not supported yet
     hidden_states_raw: Node | None = None  # For side stream
 
     @classmethod
@@ -160,56 +158,18 @@ class MixtureOfExpertsPluginInputs(StrictlyTyped):
         up_weights = Stack.create(graph, [moe.extract_weights(expert)[0] for expert in moe.experts])
         gate_weights = Stack.create(graph, [moe.extract_weights(expert)[1] for expert in moe.experts])
         down_weights = Stack.create(graph, [moe.extract_weights(expert)[2] for expert in moe.experts])
-        expert_weights_1 = Cat.create(graph, [up_weights, gate_weights], -1)
+        expert_weights_1 = Cat.create(graph, [up_weights.node, gate_weights.node], -1)
         assert expert_weights_1.ndim == 3
         expert_weights_1 = Permute.create(graph, expert_weights_1, [0, 2, 1])  # type: ignore[assignment]
         expert_weights_2 = Permute.create(graph, down_weights, [0, 2, 1])
 
-        if moe.router_logits_dtype in (torch.bfloat16, torch.float16):
-            router_logits = ToCopy.create(graph, moe.router_logits, dtype=torch.float32).node
-        elif moe.router_logits_dtype == torch.float32:
-            router_logits = moe.router_logits
-        else:
-            logger.warning(
-                f"Router logits with dtype {moe.router_logits_dtype} might not be supported by the MoE plugin. "
-                "Add casting to float32 if it's not supported."
-            )
-            router_logits = moe.router_logits
-
         return cls(
             hidden_states=moe.hidden_states,
-            routing=router_logits,
             expert_weights_1=expert_weights_1.node,
             expert_weights_2=expert_weights_2.node,
+            token_selected_experts=moe.token_selected_experts,
+            token_final_scales=moe.token_scores,
         )
-
-
-# mypy: disable-error-code="union-attr"
-# pylint: disable=too-many-return-statements
-def get_moe_normalization_mode(pretrained_config: PretrainedConfig | None) -> int:
-    """Get the normalization mode for MoE plugin.
-
-    Returns:
-        int: The normalization mode enum value
-    """
-    model_type = pretrained_config.model_type if pretrained_config else None
-    # Following the rules defined in tensorrt_llm/models/{model_type}.
-    # Default is RENORMALIZE.
-    match model_type:
-        case "qwen2_moe":
-            return TRTLLMMoeConfig.ExpertScaleNormalizationMode.NONE
-        case "deepseek_v2":
-            if pretrained_config.topk_method == "group_limited_greedy":
-                if pretrained_config.num_experts_per_tok > 1 and pretrained_config.norm_topk_prob:
-                    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.DEVICE_LIMITED_RENORM
-                return TRTLLMMoeConfig.ExpertScaleNormalizationMode.DEVICE_LIMITED
-            if pretrained_config.topk_method == "greedy":
-                if pretrained_config.num_experts_per_tok > 1 and pretrained_config.norm_topk_prob:
-                    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
-                return TRTLLMMoeConfig.ExpertScaleNormalizationMode.NONE
-        case _:
-            return TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
-    return TRTLLMMoeConfig.ExpertScaleNormalizationMode.RENORMALIZE
 
 
 def get_moe_activation_type() -> int:

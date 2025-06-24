@@ -35,7 +35,6 @@ from .mixture_of_experts_plugin import (
     MixtureOfExpertsPlugin,
     MixtureOfExpertsPluginInputs,
     get_moe_activation_type,
-    get_moe_normalization_mode,
 )
 from .plugin import Plugin
 from .quantize_per_token import QuantizePerTokenPlugin

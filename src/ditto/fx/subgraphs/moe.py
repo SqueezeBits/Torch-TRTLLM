@@ -118,7 +118,9 @@ class MoESubgraph(Subgraph):
     Attributes:
         hidden_states (Node): The input hidden states node.
         router (Linear): The router linear layer for expert selection.
-        router_logits (Node): The router logits node before softmax.
+        softmax (Node): The softmax node.
+        token_scores (Node): The scores of selected experts.
+        token_selected_experts (Node): The index of selected experts.
         top_k (int): Number of experts to select per token.
         experts (list[Expert]): List of Expert objects representing each expert network.
         shared_experts (list[tuple[Linear, Linear, Linear]]): List of shared expert weight tuples.
@@ -129,7 +131,9 @@ class MoESubgraph(Subgraph):
 
     hidden_states: Node
     router: Linear
-    router_logits: Node
+    softmax: Node
+    token_scores: Node
+    token_selected_experts: Node
     top_k: int
     experts: list[Expert]
     shared_experts: list[tuple[Linear, Linear, Linear]]
@@ -183,15 +187,6 @@ class MoESubgraph(Subgraph):
         ) is not None, "shared expert weight's metadata is not found"
         return shared_expert_weight.shape[1]
 
-    @property
-    def router_logits_dtype(self) -> torch.dtype:
-        """Get the data type of the router logits.
-
-        Returns:
-            torch.dtype: The data type of the router logits tensor
-        """
-        return self.router_logits.meta["val"].dtype
-
     @classmethod
     def configure_from(cls, node: Node) -> Self | None:
         # The common pattern for Mixture of Experts (MoE) is:
@@ -244,22 +239,18 @@ class MoESubgraph(Subgraph):
                 linear.mark_linear_type_as("shared_expert")
             shared_experts.append(linears)
 
-        if Softmax.specialize_from(topk.this):
-            # greedy
-            router_logits = softmax.this
-        else:
-            # group_limited_greedy
-            # This topk method is used in DeepSeek-V2. Deepseek-V2-Lite uses greedy method.
-            #
-            # Currently, it only finds proper router logits and pattern matching
-            # for full group_limited_greedy graph is not implemented, as it's not necessary.
-            router_logits = topk.this
+        assert topk.output_values is not None and topk.output_indices is not None
+        token_scores = topk.output_values.node
+        token_selected_experts = topk.output_indices.node
         experts.sort(key=lambda expert: expert.index)
         final_hidden_states = experts[-1].final_hidden_states
+
         return cls(
             hidden_states=expert_hidden_states.this,
             router=router,
-            router_logits=router_logits,
+            softmax=softmax.node,
+            token_scores=token_scores,
+            token_selected_experts=token_selected_experts,
             top_k=int(topk.k),
             experts=experts,
             shared_experts=shared_experts,
