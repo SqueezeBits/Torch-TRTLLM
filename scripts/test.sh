@@ -19,6 +19,7 @@ main() {
         'upstage/SOLAR-10.7B-Instruct-v1.0 --model-type llama --build-args "--gemm_plugin auto"'
         '42dot/42dot_LLM-SFT-1.3B --dtype float16 --model-type llama --build-args "--gemm_plugin auto"'
         'LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct --dtype float16 --model-type llama --trust-remote-code --build-args "--gemm_plugin auto"'
+        'Qwen/Qwen3-1.7B --build-args "--gemm_plugin auto"'
         # LoRA
         'TinyLlama/TinyLlama-1.1B-Chat-v1.0 \
             givyboy/TinyLlama-1.1B-Chat-v1.0-mental-health-conversational \
