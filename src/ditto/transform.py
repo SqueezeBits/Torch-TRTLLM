@@ -158,7 +158,7 @@ def multimodal_transform(
             ResetCodeGen().as_transform(),
             ForgetSubmodules().as_transform(),
             *(f for f in ATEN_POST_LOWERING_PASSES.passes if f.__name__ not in ("constant_fold", "view_to_reshape")),
-            get_level2_transform(skipped_optimizers=["WrapSDPASubgraphs"]),
+            get_level2_transform(skipped_optimizers=["WrapSDPASubgraphs", "ResolveDynamicReshape"]),
             ReplaceSafeSoftmaxBySoftmax().as_transform(),
             ConstantFolding().as_transform(),
             *(extra_passes or []),
