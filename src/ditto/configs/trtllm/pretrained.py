@@ -478,6 +478,16 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
         Returns:
             dict[str, Any]: Serialized configuration with extra fields
         """
+        if self.quantization is not None:
+            self.quantization.quant_algo = (
+                None if self.quantization.quant_algo == QuantAlgo.NO_QUANT else self.quantization.quant_algo
+            )
+            self.quantization.kv_cache_quant_algo = (
+                None
+                if self.quantization.kv_cache_quant_algo == QuantAlgo.NO_QUANT
+                else self.quantization.kv_cache_quant_algo
+            )
+
         data = original_serializer(self)
         data.update(self.extra_fields)
         return data
