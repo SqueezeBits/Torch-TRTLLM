@@ -38,7 +38,7 @@ dependencies = [
     "mpi4py==3.*",
     "peft",
     "flashinfer-python==0.2.5",
-    "tensorrt-llm==0.19.0",
+    "tensorrt-llm @ https://ditto.sqzb-dev.com/tensorrt_llm-0.19.0-cp312-cp312-linux_x86_64.whl",
     # "torch-tensorrt == 2.6.1",
     "loguru",
     "typer",
