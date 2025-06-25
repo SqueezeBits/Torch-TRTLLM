@@ -146,4 +146,4 @@ LogLevelLiteral = Literal[
     "NOTSET",
 ]
 
-QuantizeMethod = Literal["gptq", "awq", "compressed-tensors", "modelopt", None]
+QuantizeMethod = Literal["awq", "compressed-tensors", "modelopt", None]
