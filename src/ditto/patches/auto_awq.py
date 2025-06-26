@@ -37,11 +37,12 @@ def patch_wqlinear_mm_func_forward() -> None:
         bias=None,
         out_features=0,
     ):
+        if isinstance(x.shape[0], int) and x.shape[0] == 1:
+            x = x.squeeze(0)
         out_shape = x.shape[:-1] + (out_features,)
 
         out = ditto_fake_quantize(qweight, w_bit, False, scales.dtype, scales, qzeros, group_size)
         out = torch.matmul(x, out)
-
         out = out + bias if bias is not None else out
         out = out.reshape(out_shape)
 

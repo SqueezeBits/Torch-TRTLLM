@@ -7,7 +7,7 @@ repos:
     hooks:
       - id: ruff
         args: ["--fix"]
-        exclude: &fixtures tests(/\w*)*/functional/|tests/input|doc/data/messages|tests(/\w*)*data/|scripts
+        exclude: &fixtures tests(/\w*)*/functional/|tests/input|doc/data/messages|tests(/\w*)*data/|scripts|examples
       - id: ruff
         name: ruff-doc
         files: doc/data/messages
@@ -47,7 +47,7 @@ repos:
         language: system
         types: [python]
         args: ["-rn", "-sn", "--rcfile=.pylintrc", "--fail-on=I"]
-        exclude: test(/\w*)|src/ditto/patches|scripts
+        exclude: test(/\w*)|src/ditto/patches|scripts|examples
       # We define an additional manual step to allow running pylint with a spelling
       # checker in CI.
       - id: pylint
@@ -57,7 +57,7 @@ repos:
         language: system
         types: [python]
         args: ["-rn", "-sn", "--rcfile=.pylintrc", "--fail-on=I", "--spelling-dict=en"]
-        exclude: test(/\w*)|src/ditto/patches|scripts
+        exclude: test(/\w*)|src/ditto/patches|scripts|examples
         stages: [manual]
       - id: check-newsfragments
         name: Check newsfragments
@@ -72,4 +72,4 @@ repos:
         language: system                                                                                                                                                                                           
         types: [python]
         args: [--config-file=.mypy.ini]
-        exclude: test(/\w*)|src/ditto/patches|scripts
+        exclude: test(/\w*)|src/ditto/patches|scripts|examples

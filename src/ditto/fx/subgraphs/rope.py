@@ -36,6 +36,7 @@ class RoPESubgraph(Subgraph):
         slices (tuple[Slice, Slice]): The slicing operations applied in the RoPE computation
         out (AddTensorTensor | Cat): The output node of the RoPE computation,
             which could be an addition or concatenation operation
+        is_mrope (bool): Whether the RoPE is for MROPE
     """
 
     x: Node
@@ -44,6 +45,7 @@ class RoPESubgraph(Subgraph):
     sin: Node
     slices: tuple[Slice, Slice]
     out: AddTensorTensor | Cat
+    is_mrope: bool = False
 
     @property
     def position_embedding_type(self) -> PositionEmbeddingType:
@@ -53,11 +55,14 @@ class RoPESubgraph(Subgraph):
         style RoPE implementation based on their slicing patterns:
 
         Returns:
-            PositionEmbeddingType: Either rope_gpt_neox or rope_gptj based on the detected slicing pattern.
+            PositionEmbeddingType: Position embedding type of this.
 
         Raises:
             NotImplementedError: If the slicing pattern doesn't match either GPT-NeoX or GPT-J style.
         """
+        if self.is_mrope:
+            return PositionEmbeddingType.mrope
+
         if Slice.are_consecutive(self.slices):
             return PositionEmbeddingType.rope_gpt_neox
 
@@ -66,7 +71,7 @@ class RoPESubgraph(Subgraph):
 
         raise NotImplementedError(f"RoPE type for {self} is not implemented yet.")
 
-    @classmethod
+    @classmethod  # pylint: disable-next=too-many-locals
     def configure_from(cls, node: Node) -> Self | None:
         """Match a RoPE subgraph pattern starting from the given node.
 
@@ -83,14 +88,27 @@ class RoPESubgraph(Subgraph):
         ):
             return None
 
-        if cat := TrailingReformatPath.traceback(Cat, mul_lhs.this) or TrailingReformatPath.traceback(
-            Cat, mul_lhs.other
-        ):
+        is_mrope = False
+        if (
+            cat := TrailingReformatPath.traceback(Cat, mul_lhs.this)
+            or TrailingReformatPath.traceback(Cat, mul_lhs.other)
+        ) and [n for n in cat.node.all_input_nodes if Neg.specialize_from(n)]:
             mul_cos, mul_sin = mul_rhs, mul_lhs
-        elif cat := TrailingReformatPath.traceback(Cat, mul_rhs.this) or TrailingReformatPath.traceback(
-            Cat, mul_rhs.other
-        ):
+            if (
+                another_cat := TrailingReformatPath.traceback(Cat, mul_rhs.this)
+                or TrailingReformatPath.traceback(Cat, mul_rhs.other)
+            ) and another_cat is not cat:
+                is_mrope = True
+        elif (
+            cat := TrailingReformatPath.traceback(Cat, mul_rhs.this)
+            or TrailingReformatPath.traceback(Cat, mul_rhs.other)
+        ) and [n for n in cat.node.all_input_nodes if Neg.specialize_from(n)]:
             mul_cos, mul_sin = mul_lhs, mul_rhs
+            if (
+                another_cat := TrailingReformatPath.traceback(Cat, mul_lhs.this)
+                or TrailingReformatPath.traceback(Cat, mul_lhs.other)
+            ) and another_cat is not cat:
+                is_mrope = True
         else:
             return None
 
@@ -135,4 +153,5 @@ class RoPESubgraph(Subgraph):
             sin=sin,
             slices=tuple(sorted([slice_1, slice_2], key=lambda s: s.start)),
             out=out,
+            is_mrope=is_mrope,
         )

@@ -34,6 +34,7 @@ class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
     max_beam_width: int = Field(default=1, gt=0)
     max_num_tokens: int = Field(default=8192, gt=0)
     opt_num_tokens: int = Field(default=8, gt=0)
+    max_prompt_embedding_table_size: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def check_runtime_attribute_dependencies(self) -> Self:
@@ -84,6 +85,7 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
         max_num_tokens: int = 8192,
         opt_num_tokens: int | None = None,
         max_beam_width: int = 1,
+        max_prompt_embedding_table_size: int = 0,
     ) -> Self:
         """Configure the optimization profile from given configurations.
 
@@ -96,6 +98,7 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             max_num_tokens (int): The maximum number of tokens
             opt_num_tokens (int | None): The optimized number of tokens
             max_beam_width (int): The maximum beam width
+            max_prompt_embedding_table_size (int): The maximum size of the prompt embedding table
 
         Returns:
             TRTLLMOptimizationProfileConfig: The optimization profile configuration
@@ -136,6 +139,7 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             opt_beam_width=max(1, (max_beam_width + 1) // 2),
             max_kv_cache_block_size=max_kv_cache_block_size,
             opt_kv_cache_block_size=opt_kv_cache_block_size,
+            max_prompt_embedding_table_size=max_prompt_embedding_table_size,
         )
 
     def runtime(self) -> RuntimeTRTLLMOptimizationProfileConfig:

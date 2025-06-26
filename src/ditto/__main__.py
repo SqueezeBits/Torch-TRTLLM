@@ -31,7 +31,7 @@ from transformers import (
 )
 from typer import Argument, Option, Typer
 
-from .api import trtllm_build
+from .api import build_llm_engine
 from .constants import DEFAULT_DEVICE
 from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
 from .literals import DTypeLiteral
@@ -220,7 +220,7 @@ def build(
 
     os.makedirs(output_dir, exist_ok=True)
     start_time = time.perf_counter()
-    trtllm_build(
+    build_llm_engine(
         model,
         output_dir,
         run_matmuls_in_fp32=run_matmuls_in_fp32,

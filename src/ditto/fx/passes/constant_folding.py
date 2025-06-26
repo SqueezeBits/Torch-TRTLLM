@@ -29,7 +29,7 @@ from .infra.cleanup import cleanup
 class ConstantFolding(GraphOptimizationPass):
     """Fold constant nodes in the graph."""
 
-    @torch.inference_mode()  # type: ignore[misc]
+    @torch.inference_mode()
     def call(self, graph_module: GraphModule) -> PassResult:
         graph = graph_module.graph
         foldable_nodes: dict[Node, torch.Tensor | list[torch.Tensor]] = {}
@@ -61,10 +61,17 @@ class ConstantFolding(GraphOptimizationPass):
             if (
                 specialized_op := ATenOp.specialize_from(node) or GetItem.specialize_from(node)
             ) and are_all_input_nodes_fetchable(node):
-                flat_inputs, spec = pytree.tree_flatten((node.args, node.kwargs))
-                flat_values = tuple(fetch_value(arg) if isinstance(arg, Node) else arg for arg in flat_inputs)
-                arg_values, kwarg_values = pytree.tree_unflatten(flat_values, spec)
-                foldable_nodes[node] = specialized_op.target(*arg_values, **kwarg_values)
+                try:
+                    flat_inputs, spec = pytree.tree_flatten((node.args, node.kwargs))
+                    flat_values = tuple(fetch_value(arg) if isinstance(arg, Node) else arg for arg in flat_inputs)
+                    arg_values, kwarg_values = pytree.tree_unflatten(flat_values, spec)
+                    foldable_nodes[node] = specialized_op.target(*arg_values, **kwarg_values)
+                except Exception as e:
+                    logger.debug(
+                        f"Failed to fold constant node {node.name} "
+                        f"even though the node is foldable due to an error: '{str(e)}'"
+                    )
+                    return False
                 return True
 
             return False

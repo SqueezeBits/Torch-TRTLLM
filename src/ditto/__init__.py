@@ -20,7 +20,7 @@ from .fx import PretrainedConfigGenerationError, generate_trtllm_engine_config
 from .convert import convert
 from .export import export
 from .inline import inline
-from .api import trtllm_build, trtllm_export
+from .api import build_llm_engine, build_multimodal_engine, export_graph_module
 from .arguments.dynamic_dim import DynamicDimension, DynamicDimensionType
 from .arguments.torch_export_arguments import TorchExportArguments
 from .configs import *

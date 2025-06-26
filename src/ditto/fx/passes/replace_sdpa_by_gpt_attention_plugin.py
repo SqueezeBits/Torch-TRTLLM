@@ -22,6 +22,7 @@ from tensorrt_llm.quantization import QuantAlgo, QuantMode
 from torch.fx import Graph, GraphModule, Node
 from typing_extensions import Self
 
+from ...arguments import TRTLLMArgumentHint
 from ...configs import TRTLLMMapping, TRTLLMPluginConfig
 from ...debug import save_for_debug
 from ...quantization import GlobalQuantConfig
@@ -56,11 +57,13 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
 
     Attributes:
         dtype (torch.dtype): The data type of the input tensor
+        argument_hint (TRTLLMArgumentHint): The argument hint of the model
         mapping (TRTLLMMapping): The mapping of the model
         plugin_config (TRTLLMPluginConfig): The plugin configuration
     """
 
     dtype: torch.dtype
+    argument_hint: TRTLLMArgumentHint
     mapping: TRTLLMMapping = Field(frozen=True)
     plugin_config: TRTLLMPluginConfig = Field(frozen=True)
     global_quant_config: GlobalQuantConfig | None = Field(default=None, frozen=True)
@@ -124,7 +127,9 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                         long_rope_rotary_inv_freq=global_rope_config.long_rope_rotary_inv_freq,
                         long_rope_rotary_cos_sin=global_rope_config.long_rope_rotary_cos_sin,
                     )
-                global_plugin_inputs = GPTAttentionPluginInputs.find_from(graph, global_rope_config.is_rope)
+                global_plugin_inputs = GPTAttentionPluginInputs.create_and_sync(
+                    graph, self.argument_hint, global_rope_config
+                )
                 logger.debug(f"Found GPTAttentionPluginInputs for layer {layer_idx}")
 
             kv_cache_quant_mode = QuantMode(0)
@@ -160,7 +165,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 layer_idx=layer_idx,
                 num_heads=attn.num_heads,
                 num_kv_heads=attn.num_kv_heads_per_group,
-                num_kv_heads_origin=attn.num_kv_heads,
+                num_kv_heads_origin=attn.num_kv_heads_per_group,
                 head_size=attn.embed_dim,
                 tp_size=self.mapping.tp_size,
                 tp_rank=self.mapping.tp_rank,
@@ -327,16 +332,15 @@ class MHA(StrictlyTyped):
             and (value := get_tensor_metadata(sdpa.value))
             and (embed_dim := expect_identical(query.shape[-1], key.shape[-1], value.shape[-1])) is not None
             and (num_kv_heads := expect_identical(key.shape[-3], value.shape[-3])) is not None
+            and (q_rope := find_nearest(Rope, sdpa.query, follow_first_only=False))
+            and (k_rope := find_nearest(Rope, sdpa.key, follow_first_only=False))
         ):
             return None
 
-        q_seq = TrailingReformatPath.configure_from(sdpa.query)
         k_seq = TrailingReformatPath.configure_from(sdpa.key)
         v_seq = TrailingReformatPath.configure_from(sdpa.value)
-        q_rope = q_seq.top
-        k_rope = k_seq.top
-        q = TrailingReformatPath.configure_from(q_rope.all_input_nodes[0]).top
-        k = TrailingReformatPath.configure_from(k_rope.all_input_nodes[0]).top
+        q = TrailingReformatPath.configure_from(q_rope.node.all_input_nodes[0]).top
+        k = TrailingReformatPath.configure_from(k_rope.node.all_input_nodes[0]).top
         v = v_seq.top
 
         if not (

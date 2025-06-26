@@ -46,6 +46,9 @@ class TRTLLMArgumentHint(StrictlyTyped):
             (Required only when pp_rank > 0)
         hidden_dtype (torch.dtype | None): Hidden dtype for hidden_states_input. Defaults to None.
             (Required only when pp_rank > 0)
+        mrope_input_hints (dict[str, TensorTypeHint]): MRoPE input tensor hints. Defaults to empty dict.
+        use_prompt_tuning (bool): Whether to use prompt tuning. Defaults to False.
+        p_embedding (DynamicDimensionType | None): Prompt embedding dimension. Defaults to None.
     """
 
     batch_size: DynamicDimensionType = Field(frozen=True, exclude=True)
@@ -59,6 +62,9 @@ class TRTLLMArgumentHint(StrictlyTyped):
     lora_input_hints: dict[str, TensorTypeHint] = Field(default_factory=dict, exclude=True)
     hidden_size: int | None = Field(default=None, exclude=True)
     hidden_dtype: torch.dtype | None = Field(default=None, exclude=True)
+    mrope_input_hints: dict[str, TensorTypeHint] = Field(default_factory=dict, exclude=True)
+    use_prompt_tuning: bool = Field(default=False, exclude=True)
+    p_embedding: DynamicDimensionType | None = Field(default=None, frozen=True, exclude=True)
     _one: DynamicDimension = PrivateAttr(default=DynamicDimension(name="one", min=1, opt=1, max=1))
 
     @classmethod
@@ -113,6 +119,14 @@ class TRTLLMArgumentHint(StrictlyTyped):
                 max=profile_config.max_beam_width,
             )
         )
+        p_embedding: DynamicDimensionType | None = None
+        if profile_config.max_prompt_embedding_table_size > 0:
+            p_embedding = DynamicDimension(
+                name="prompt_embedding_table",
+                min=1,
+                opt=profile_config.max_prompt_embedding_table_size // 2,
+                max=profile_config.max_prompt_embedding_table_size,
+            )
         return cls(
             batch_size=batch_size,
             max_len=max_len,
@@ -121,6 +135,8 @@ class TRTLLMArgumentHint(StrictlyTyped):
             beam_width=beam_width,
             mapping=mapping,
             gather_context_logits=gather_context_logits,
+            use_prompt_tuning=profile_config.max_prompt_embedding_table_size > 0,
+            p_embedding=p_embedding,
         )
 
     def as_dict(self) -> dict[str, TensorTypeHint]:
@@ -177,6 +193,31 @@ class TRTLLMArgumentHint(StrictlyTyped):
     def position_ids(self) -> TensorTypeHint:
         """Tensor type hint for position IDs with shape (num_tokens,)."""
         return TensorTypeHint(shape=(self.num_tokens,), dtype=torch.int32)
+
+    @computed_field
+    @property
+    def prompt_embedding_table(self) -> TensorTypeHint | None:
+        """Tensor type hint for prompt embedding table with shape (num_tokens, hidden_size)."""
+        return (
+            TensorTypeHint(shape=(self.p_embedding, self.hidden_size), dtype=self.hidden_dtype)
+            if self.use_prompt_tuning
+            and self.p_embedding is not None
+            and self.hidden_size is not None
+            and self.hidden_dtype is not None
+            else None
+        )
+
+    @computed_field
+    @property
+    def tasks(self) -> TensorTypeHint | None:
+        """Tensor type hint for tasks with shape (num_tokens,)."""
+        return TensorTypeHint(shape=(self.num_tokens,), dtype=torch.int32) if self.use_prompt_tuning else None
+
+    @computed_field
+    @property
+    def prompt_vocab_size(self) -> TensorTypeHint | None:
+        """Tensor type hint for prompt vocab size with shape (1,)."""
+        return TensorTypeHint(shape=(self._one,), dtype=torch.int32) if self.use_prompt_tuning else None
 
     @computed_field
     @property
@@ -336,8 +377,9 @@ class TRTLLMArgumentHint(StrictlyTyped):
             original_serializer (Callable[[Self], dict[str, TensorTypeHint | None]]): Original serializer function
 
         Returns:
-            dict[str, TensorTypeHint | None]: Serialized model with LoRA hints
+            dict[str, TensorTypeHint | None]: Serialized model with LoRA and MRoPE hints
         """
         data = original_serializer(self)
         data.update(self.lora_input_hints)
+        data.update(self.mrope_input_hints)
         return data

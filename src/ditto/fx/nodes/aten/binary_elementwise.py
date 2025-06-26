@@ -591,3 +591,39 @@ class EqScalar(Eq, FinalATenOp):
     @property
     def is_commutative(self) -> Literal[False]:
         return False
+
+
+class Gt(BinaryElementwise):
+    """Binary elementwise subtraction operation."""
+
+    @property
+    def is_commutative(self) -> Literal[False]:
+        return False
+
+
+@Gt.register(torch.ops.aten.gt.Tensor)
+class GtTensor(Gt, FinalATenOp):
+    """The final specialization of `torch.ops.aten.gt.Tensor`.
+
+    Attributes:
+        this (Node): The first tensor operand
+        other (Node): The second tensor operand
+    """
+
+    this: Node
+    other: Node
+
+
+@Gt.register(torch.ops.aten.gt.Scalar)
+class GtScalar(Gt, FinalATenOp):
+    """The final specialization of `torch.ops.aten.gt.Scalar`.
+
+    Compares a tensor with a scalar elementwise for greater than.
+
+    Attributes:
+        this (Node): The first tensor operand
+        other (Number): The second scalar operand
+    """
+
+    this: Node
+    other: Number

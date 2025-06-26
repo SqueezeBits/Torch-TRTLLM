@@ -445,6 +445,8 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
         num_attention_heads (int): Number of attention heads
         num_key_value_heads (int): Number of key/value heads
         intermediate_size (int): Size of intermediate layers
+        rotary_embedding_dim (int): Size of rotary embedding dimension
+        max_position_embeddings (int): Maximum position embeddings
         mapping (TRTLLMMapping): Parallel mapping configuration. Defaults to TRTLLMMapping().
         quantization (TRTLLMQuantConfig | None): Quantization configuration. Defaults to None.
         moe (TRTLLMMoEConfig | None): MoE configuration. Defaults to None.
@@ -459,6 +461,8 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
     num_attention_heads: int
     num_key_value_heads: int
     intermediate_size: int
+    rotary_embedding_dim: int
+    max_position_embeddings: int
     mapping: TRTLLMMapping = Field(default_factory=TRTLLMMapping)
     quantization: TRTLLMQuantConfig | None = None
     moe: TRTLLMMoEConfig | None = None
@@ -474,6 +478,16 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
         Returns:
             dict[str, Any]: Serialized configuration with extra fields
         """
+        if self.quantization is not None:
+            self.quantization.quant_algo = (
+                None if self.quantization.quant_algo == QuantAlgo.NO_QUANT else self.quantization.quant_algo
+            )
+            self.quantization.kv_cache_quant_algo = (
+                None
+                if self.quantization.kv_cache_quant_algo == QuantAlgo.NO_QUANT
+                else self.quantization.kv_cache_quant_algo
+            )
+
         data = original_serializer(self)
         data.update(self.extra_fields)
         return data

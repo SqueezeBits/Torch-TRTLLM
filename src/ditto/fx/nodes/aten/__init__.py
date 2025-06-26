@@ -45,6 +45,8 @@ from .binary_elementwise import (
     DivTensorTensor,
     EqScalar,
     EqTensor,
+    GtScalar,
+    GtTensor,
     Mul,
     MulDefault,
     MulScalar,
