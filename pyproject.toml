@@ -43,7 +43,6 @@ dependencies = [
     "loguru",
     "typer",
     "autoawq @ git+https://github.com/casper-hansen/AutoAWQ.git@710fe050a938fb73e08d0882245a212389605a90",
-    "auto-gptq",
     "compressed-tensors",
 ]
 dynamic = ["version"]
