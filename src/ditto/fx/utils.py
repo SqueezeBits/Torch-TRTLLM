@@ -369,6 +369,7 @@ def find_nearest(
             continue
         if not (next_nodes := list(node.all_input_nodes if follow_parent else node.users)):
             continue
+        next_nodes = [n for n in next_nodes if n.op != "get_attr"]
         if follow_first_only:
             queue.append((next_nodes[0], depth + 1))
         else:
