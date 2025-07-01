@@ -17,7 +17,7 @@ from typing import Any
 import numpy as np
 import tensorrt as trt
 import torch
-from tensorrt_llm.functional import AllReduceConfig, AllReduceFusionOp, AllReduceStrategy
+from tensorrt_llm.functional import AllReduceFusionOp, AllReduceStrategy
 from torch.fx import Graph, Node
 from typing_extensions import Self
 
@@ -33,7 +33,6 @@ class AllReducePlugin(Plugin):
         group (list[int]): The group of ranks to reduce from
         type_id (trt.DataType): The data type of the tensor to reduce
         strategy (AllReduceStrategy): The strategy to use for all reduce
-        config (AllReduceConfig): The configuration for all reduce
         fusion_op (AllReduceFusionOp): The fusion operation to use for all reduce
         eps (float): The epsilon value for all reduce
         affine (bool): Whether to apply affine transformation to the tensor
@@ -47,7 +46,6 @@ class AllReducePlugin(Plugin):
     group: list[int]
     type_id: trt.DataType
     strategy: AllReduceStrategy = AllReduceStrategy.AUTO
-    config: AllReduceConfig = AllReduceConfig(0)
     fusion_op: AllReduceFusionOp = AllReduceFusionOp.NONE
     eps: float = 1e-5
     affine: bool = False

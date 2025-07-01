@@ -15,7 +15,7 @@
 import tensorrt as trt
 import torch
 from pydantic import Field
-from tensorrt_llm.functional import AllReduceConfig, AllReduceFusionOp, AllReduceStrategy
+from tensorrt_llm.functional import AllReduceFusionOp, AllReduceStrategy
 from torch.fx import Graph, GraphModule, Node
 
 from ...configs import TRTLLMMapping
@@ -220,7 +220,6 @@ def parallelize_row_linear(
     mapping: TRTLLMMapping,
     *,
     strategy: AllReduceStrategy = AllReduceStrategy.AUTO,
-    config: AllReduceConfig = AllReduceConfig(0),  # noqa: B008
     fusion_op: AllReduceFusionOp = AllReduceFusionOp.NONE,
     eps: float = 1e-5,
 ) -> None:
@@ -231,7 +230,6 @@ def parallelize_row_linear(
         mapping (TRTLLMMapping): The tensor parallelism mapping configuration
         strategy (AllReduceStrategy, optional): The strategy of the allreduce plugin.
             Defaults to AllReduceStrategy.AUTO.
-        config (AllReduceConfig, optional): The config of the allreduce plugin. Defaults to AllReduceConfig(0).
         fusion_op (AllReduceFusionOp, optional): The fusion operation of the allreduce plugin.
             Defaults to AllReduceFusionOp.NONE.
         eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
@@ -286,7 +284,6 @@ def parallelize_row_linear(
         linear.mm.node,
         mapping.tp_group,
         strategy=strategy,
-        config=config,
         fusion_op=fusion_op,
         eps=eps,
     )
@@ -409,7 +406,6 @@ def insert_allreduce_plugin(
     group: list[int],
     *,
     strategy: AllReduceStrategy = AllReduceStrategy.AUTO,
-    config: AllReduceConfig = AllReduceConfig(0),  # noqa: B008
     fusion_op: AllReduceFusionOp = AllReduceFusionOp.NONE,
     eps: float = 1e-5,  # TODO: default eps value should be 1e-6.
     affine: bool = False,
@@ -422,7 +418,6 @@ def insert_allreduce_plugin(
         group (list[int]): The group of the allreduce plugin
         strategy (AllReduceStrategy, optional): The strategy of the allreduce plugin.
             Defaults to AllReduceStrategy.AUTO.
-        config (AllReduceConfig, optional): The config of the allreduce plugin. Defaults to AllReduceConfig(0).
         fusion_op (AllReduceFusionOp, optional): The fusion operation of the allreduce plugin.
             Defaults to AllReduceFusionOp.NONE.
         eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
@@ -433,7 +428,6 @@ def insert_allreduce_plugin(
         group=group,
         type_id=DataType(dtype=to_val.dtype).to(trt.DataType),
         strategy=strategy,
-        config=config,
         fusion_op=fusion_op,
         eps=eps,
         affine=affine,
