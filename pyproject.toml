@@ -34,10 +34,10 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "torch==2.7.0",
+    "torch @ https://download.pytorch.org/whl/cu128/torch-2.7.1%2Bcu128-cp312-cp312-manylinux_2_28_x86_64.whl",
     "mpi4py==3.*",
     "peft",
-    "tensorrt-llm==0.20.0",
+    "tensorrt-llm @ https://ditto.sqzb-dev.com/tensorrt_llm-0.20.0-cp312-cp312-linux_x86_64.whl",
     # "torch-tensorrt == 2.6.1",
     "loguru",
     "typer",

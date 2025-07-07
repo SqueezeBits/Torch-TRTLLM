@@ -184,7 +184,7 @@ class Qwen2_5VLVisionWrapper(torch.nn.Module):
             model.config.vision_config,
             torch_dtype=DTYPE,
             image_size=image_size,
-        ).to("cuda")
+        )
         self.visual.load_state_dict(model.visual.state_dict())
         self.dtype = model.visual.dtype
         self.device = model.visual.device
