@@ -2,9 +2,9 @@
 
 <img src="./docs/assets/ditto_logo.png" alt="Ditto logo" width="200" />
 
-[![tensorrt-llm](https://img.shields.io/badge/tensorrt--llm-0.19.0-green)](https://github.com/NVIDIA/TensorRT-LLM)
-[![torch-tensorrt](https://img.shields.io/badge/torch--tensorrt-2.6.1-lightgreen)](https://github.com/pytorch/TensorRT)
-[![version](https://img.shields.io/badge/version-0.2.1-purple)](#)
+[![tensorrt-llm](https://img.shields.io/badge/tensorrt--llm-0.20.0-green)](https://github.com/NVIDIA/TensorRT-LLM)
+[![torch-tensorrt](https://img.shields.io/badge/torch--tensorrt-2.7.0-lightgreen)](https://github.com/pytorch/TensorRT)
+[![version](https://img.shields.io/badge/version-0.3.0-purple)](#)
 [![license](https://img.shields.io/badge/license-Apache%202-red)](./LICENSE)
 
 <div align="left">
@@ -21,6 +21,7 @@ Ditto is an open-source framework that enables **direct conversion of HuggingFac
 - [2025/02] Blog post introducing Ditto is published! [[Blog](https://blog.squeezebits.com/the-missing-piece-of-tensorrtllm-42462)]
 - [2025/02] Ditto 0.1.0 released!
 - [2025/04] Ditto 0.2.0 released with new features - MoE, Quantization
+- [2025/07] Ditto 0.3.0 released with new features - Multimodal, Speculative Decoding
 
 ## Getting Started
 * [Installation](docs/GUIDE.md#a-installation)
@@ -188,14 +189,17 @@ Performance benchmarks were conducted using [TensorRT-LLM gptManagerBenchmark](h
 - SmolLM2-1.7B
 - Mixtral-8x7B
 - Qwen-MoE
-- DeepSeek-V1, V2
+- DeepSeek-V1
+- Qwen3, Qwen3-MoE
 - and many others that we haven't tested yet
 
 ### Features
 - Multi LoRA
 - Tensor Parallelism / Pipeline Parallelism
 - Mixture of Experts
-- Quantization - Weight-only & FP8 ([AutoAWQ](https://github.com/casper-hansen/AutoAWQ), [AutoGPTQ](https://github.com/AutoGPTQ/AutoGPTQ), [Compressed Tensors](https://github.com/neuralmagic/compressed-tensors))
+- Quantization - Weight-only & FP8 ([AutoAWQ](https://github.com/casper-hansen/AutoAWQ), [Compressed Tensors](https://github.com/neuralmagic/compressed-tensors))
+- Multimodal (Vision Language Models)
+- Speculative Decoding (Draft-Target Model)
 
 ## What's Next?
 Below features are planned to be supported in Ditto in the near future. Feel free to reach out if you have any questions or suggestions.
