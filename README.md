@@ -21,7 +21,7 @@ Ditto is an open-source framework that enables **direct conversion of HuggingFac
 - [2025/02] Blog post introducing Ditto is published! [[Blog](https://blog.squeezebits.com/the-missing-piece-of-tensorrtllm-42462)]
 - [2025/02] Ditto 0.1.0 released!
 - [2025/04] Ditto 0.2.0 released with new features - MoE, Quantization
-- [2025/07] Ditto 0.3.0 released with new features - Multimodal, Speculative Decoding
+- [2025/07] Ditto 0.3.0 released with new features - [Vision Language Model](docs/vlm-serving.md), [Draft-Target Model](docs/draft-target-model-serving.md)
 
 ## Getting Started
 * [Installation](docs/GUIDE.md#a-installation)
