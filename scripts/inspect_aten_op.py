@@ -2,14 +2,14 @@ import argparse
 import os
 
 import torch
-from torch._ops import OpOverload, OpOverloadPacket, _OpNamespace
+from torch._ops import OpOverload, OpOverloadPacket
 
 
 def main() -> None:
     available_aten_ops = {
         name: aten_op
         for name, aten_op in vars(torch.ops.aten).items()
-        if isinstance(aten_op, OpOverloadPacket | _OpNamespace)
+        if isinstance(aten_op, OpOverloadPacket)
     }
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -20,13 +20,12 @@ def main() -> None:
         print("Available ATen ops:\n")
         first_letter = None
         for name in sorted(available_aten_ops):
-            # f = "__" if name.startswith("__") else ("_" if name.startswith("_") else name[0])
-            # if first_letter != f:
-            #     first_letter = f
-            #     print_div(
-            #         first_letter.upper() if first_letter.isalpha() else {"_": "private", "__": "dunder"}[first_letter]
-            #     )
-            print(name)
+            f = "__" if name.startswith("__") else ("_" if name.startswith("_") else name[0])
+            if first_letter != f:
+                first_letter = f
+                print_div(
+                    first_letter.upper() if first_letter.isalpha() else {"_": "private", "__": "dunder"}[first_letter]
+                )
         return
 
     for op in args.ops:
