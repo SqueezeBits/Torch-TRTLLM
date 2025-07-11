@@ -81,6 +81,7 @@ from .reformatting import (
     Expand,
     Permute,
     Reshape,
+    ReshapeCopy,
     SingleDimensionReshape,
     SqueezeDim,
     Unsqueeze,

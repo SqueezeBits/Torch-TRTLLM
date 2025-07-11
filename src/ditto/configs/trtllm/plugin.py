@@ -39,7 +39,7 @@ class TRTLLMPluginConfig(StrictlyTyped):
         context_fmha (bool): Whether to use context FMHA. Default is True.
         paged_kv_cache (bool): Whether to use paged KV cache. Default is True.
         remove_input_padding (bool): Whether to remove input padding. Default is True.
-        tokens_per_block (int): Number of tokens per block. Default is 64.
+        tokens_per_block (int): Number of tokens per block. Default is 32.
         use_paged_context_fmha (bool): Whether to use paged context FMHA. Default is False.
         paged_state (bool): Whether to use paged state. Default is False.
     """
@@ -62,7 +62,7 @@ class TRTLLMPluginConfig(StrictlyTyped):
     context_fmha: bool = True
     paged_kv_cache: bool = True
     remove_input_padding: bool = True
-    tokens_per_block: int = 64
+    tokens_per_block: int = 32
     use_paged_context_fmha: bool = False
     paged_state: bool = False
 
@@ -72,7 +72,7 @@ class TRTLLMPluginConfig(StrictlyTyped):
         dtype: torch.dtype,
         world_size: int = 1,
         *,
-        tokens_per_block: int = 64,
+        tokens_per_block: int = 32,
         use_paged_context_fmha: bool = True,
     ) -> Self:
         """Create a plugin configuration from a given dtype and world size.

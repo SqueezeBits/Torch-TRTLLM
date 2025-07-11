@@ -15,7 +15,6 @@
 from enum import Enum, auto
 
 import torch
-from auto_gptq.nn_modules.qlinear import qlinear_cuda_old
 from awq.modules.linear.gemm import WQLinear_GEMM
 from compressed_tensors.compressors.quantized_compressors.pack_quantized import unpack_from_int32
 from compressed_tensors.linear.compressed_linear import CompressedLinear
@@ -387,8 +386,8 @@ def preprocess_qlinear_module(model: PreTrainedModel | PeftModel, quant_method: 
     """
     replace_modules: dict[str, QuantLinear] = {}
     for name, module in model.named_modules():
-        if isinstance(module, qlinear_cuda_old.QuantLinear | WQLinear_GEMM):
-            bits = module.bits if isinstance(module, qlinear_cuda_old.QuantLinear) else module.w_bit
+        if isinstance(module, WQLinear_GEMM):
+            bits = module.w_bit
             module.register_buffer("unpacked_weight", unpack_qweight(module.qweight, bits, quant_method))
             module.register_buffer(
                 "unpacked_zeros",

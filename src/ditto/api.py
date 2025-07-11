@@ -22,6 +22,7 @@ import torch
 from loguru import logger
 from peft import LoraConfig, PeftModel
 from safetensors.torch import save_file as save_as_safetensors
+from tensorrt_llm.models import SpeculativeDecodingMode
 from tensorrt_llm.quantization import QuantAlgo
 from torch.fx import GraphModule
 from torch.fx.graph import CodeGen
@@ -49,7 +50,7 @@ from .export import export
 from .fx import ReplaceEmbeddingByPTuningEmbedding, generate_trtllm_engine_config
 from .fx.utils import find_output_node
 from .inline import inline
-from .literals import DTypeLiteral
+from .literals import DTypeLiteral, SpeculativeDecodingModeLiteral
 from .quantization import GlobalQuantConfig, preprocess_qlinear_module, update_kv_cache_scales
 from .transform import multimodal_transform, transform
 from .types import BuiltInConstant, verify
@@ -145,6 +146,8 @@ def build_llm_engine(
     use_paged_context_fmha: bool = True,
     run_routers_in_model_dtype: bool = False,
     max_prompt_embedding_table_size: int = 0,
+    speculative_decoding_mode: SpeculativeDecodingModeLiteral = "none",
+    max_draft_len: int = 0,
 ) -> None:
     """Build a TensorRT-LLM engine from a PyTorch model.
 
@@ -178,6 +181,8 @@ def build_llm_engine(
         run_routers_in_model_dtype (bool): Whether to run linear layers for routers in MoE models in model dtype
             instead of FP32.
         max_prompt_embedding_table_size (int): Maximum size of the prompt embedding table.
+        speculative_decoding_mode (SpeculativeDecodingModeLiteral): Mode of speculative decoding.
+        max_draft_len (int): Maximum lengths of draft tokens for speculative decoding target model.
     """
     mapping = TRTLLMMapping(pp_size=pp_size, tp_size=tp_size)
     plugin_config = TRTLLMPluginConfig.create_from(
@@ -195,12 +200,16 @@ def build_llm_engine(
         opt_num_tokens=opt_num_tokens,
         max_beam_width=max_beam_width,
         max_prompt_embedding_table_size=max_prompt_embedding_table_size,
+        speculative_decoding_mode=SpeculativeDecodingMode.__members__[speculative_decoding_mode.upper()],
+        max_draft_len=max_draft_len,
     )
     model_config = TRTLLMModelConfig(
         plugin_config=plugin_config,
         gather_context_logits=gather_context_logits,
         gather_generation_logits=gather_generation_logits,
         logits_dtype=logits_dtype,
+        speculative_decoding_mode=SpeculativeDecodingMode.__members__[speculative_decoding_mode.upper()],
+        max_draft_len=max_draft_len,
     )
     argument_hint = TRTLLMArgumentHint.configure(
         profile_config,

@@ -133,7 +133,7 @@ class TRTLLMInterpreter(TRTInterpreter):
                 f"Conversion of function {torch.typename(target)} not currently supported!"
             )
 
-        converter, calling_convention = converter_packet
+        converter, calling_convention, *_ = converter_packet
 
         if calling_convention is CallingConvention.LEGACY:
             return converter(self.ctx.net, target, args, kwargs, self._cur_node_name)

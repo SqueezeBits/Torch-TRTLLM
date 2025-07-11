@@ -165,7 +165,7 @@ class ReplaceSDPAByGPTAttentionPlugin(GraphOptimizationPass):
                 layer_idx=layer_idx,
                 num_heads=attn.num_heads,
                 num_kv_heads=attn.num_kv_heads_per_group,
-                num_kv_heads_origin=attn.num_kv_heads_per_group,
+                num_kv_heads_origin=attn.num_kv_heads_per_group * self.mapping.tp_size,
                 head_size=attn.embed_dim,
                 tp_size=self.mapping.tp_size,
                 tp_rank=self.mapping.tp_rank,

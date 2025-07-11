@@ -34,13 +34,21 @@ from typer import Argument, Option, Typer
 from .api import build_llm_engine
 from .constants import DEFAULT_DEVICE
 from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
-from .literals import DTypeLiteral
+from .literals import DTypeLiteral, SpeculativeDecodingModeLiteral
 from .peft import load_peft_adapters
 from .types import trt_to_torch_dtype_mapping
 
 app = Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
 FLOATING_POINT_DTYPES = ("float32", "float16", "bfloat16")
+SPECULATIVE_DECODING_MODES = (
+    "draft_tokens_external",
+    "medusa",
+    "lookahead_decoding",
+    "explicit_draft_tokens",
+    "eagle",
+    "none",
+)
 
 
 @app.command()
@@ -190,11 +198,22 @@ def build(
     run_routers_in_model_dtype: Annotated[
         bool, Option(help="Run linear layers for routers in MoE models in model dtype instead of FP32.")
     ] = False,
+    speculative_decoding_mode: Annotated[
+        SpeculativeDecodingModeLiteral,
+        Option(click_type=click.Choice((*SPECULATIVE_DECODING_MODES,)), help="Mode of speculative decoding."),
+    ] = "none",
+    max_draft_len: Annotated[
+        int, Option(help="Maximum lengths of draft tokens for speculative decoding target model.")
+    ] = 0,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
     assert not (
         (tp_size > 1 or pp_size > 1) and peft_ids
     ), "Tensor Parallelism or Pipeline Parallelism with LoRA is currently not supported"
+    assert speculative_decoding_mode in (
+        "draft_tokens_external",
+        "none",
+    ), f"{speculative_decoding_mode=} is currently not supported"
     if gather_all_logits:
         gather_context_logits = gather_generation_logits = True
     output_dir = resolve_output_dir(output_dir, model_id)
@@ -239,6 +258,8 @@ def build(
         tokens_per_block=tokens_per_block,
         use_paged_context_fmha=use_paged_context_fmha,
         run_routers_in_model_dtype=run_routers_in_model_dtype,
+        speculative_decoding_mode=speculative_decoding_mode,
+        max_draft_len=max_draft_len,
     )
     minutes, seconds = divmod(int(time.perf_counter() - start_time), 60)
     logger.info(f"Build completed in {minutes:02d}:{seconds:02d}")

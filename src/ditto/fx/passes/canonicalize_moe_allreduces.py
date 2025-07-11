@@ -14,7 +14,7 @@
 # mypy: disable-error-code="union-attr"
 
 from loguru import logger
-from tensorrt_llm.functional import AllReduceConfig, AllReduceFusionOp, AllReduceStrategy
+from tensorrt_llm.functional import AllReduceFusionOp, AllReduceStrategy
 from torch.fx import Node
 
 from ...configs import TRTLLMMapping
@@ -90,10 +90,6 @@ class CanonicalizeMoEAllReduces(NodewiseOptimizationPass):
                 )
                 is not None
                 and expect_identical(
-                    all_reduce.target.config, shared_expert_all_reduce.target.config, expecting_type=AllReduceConfig
-                )
-                is not None
-                and expect_identical(
                     all_reduce.target.fusion_op,
                     shared_expert_all_reduce.target.fusion_op,
                     expecting_type=AllReduceFusionOp,
@@ -105,11 +101,10 @@ class CanonicalizeMoEAllReduces(NodewiseOptimizationPass):
                 logger.warning(
                     f"AllReduce configurations are different for expert and shared expert. "
                     f"Using expert's configurations for consolidated AllReduce."
-                    f"\n\tExpert: {all_reduce.target.strategy}, {all_reduce.target.config}, "
+                    f"\n\tExpert: {all_reduce.target.strategy}, "
                     f"{all_reduce.target.fusion_op}, {all_reduce.target.eps}"
                     f"\n\tShared expert: {shared_expert_all_reduce.target.strategy}, "
-                    f"{shared_expert_all_reduce.target.config}, {shared_expert_all_reduce.target.fusion_op}, "
-                    f"{shared_expert_all_reduce.target.eps}"
+                    f"{shared_expert_all_reduce.target.fusion_op}, {shared_expert_all_reduce.target.eps}"
                 )
 
         insert_allreduce_plugin(
@@ -117,7 +112,6 @@ class CanonicalizeMoEAllReduces(NodewiseOptimizationPass):
             all_reduce_input,
             self.mapping.tp_group,
             strategy=all_reduce.target.strategy,
-            config=all_reduce.target.config,
             fusion_op=all_reduce.target.fusion_op,
             eps=all_reduce.target.eps,
         )

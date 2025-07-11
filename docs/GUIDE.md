@@ -3,10 +3,10 @@
 ## A. Installation
 
 Note that `pip` may complain about dependency mismatch due to `torch-tensorrt`, even if you follow the instructions below without any mistakes.
-However, you can safely ignore these messages as we can confirm `torch-tensorrt==2.6.1` is compatible with `tensorrt-cu12*==10.9.0.34`.
+However, you can safely ignore these messages as we can confirm `torch-tensorrt==2.7.0` is compatible with `tensorrt-cu12*==10.10.0.31`.
 ```
 ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
-torch-tensorrt 2.6.1 has requirement tensorrt<10.8.0,>=10.7.0.post1, but you have tensorrt 10.9.0.34.
+torch-tensorrt 2.7.0 requires tensorrt<10.10.0,>=10.9.0, but you have tensorrt 10.10.0.31 which is incompatible.
 ...
 ```
 

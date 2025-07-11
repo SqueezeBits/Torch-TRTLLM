@@ -440,6 +440,7 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
         architecture (str): Model architecture name
         dtype (DTypeLiteral): Model data type. Defaults to "float16".
         vocab_size (int): Size of vocabulary
+        head_size (int): Dimension of attention head
         hidden_size (int): Size of hidden layers
         num_hidden_layers (int): Number of hidden layers
         num_attention_heads (int): Number of attention heads
@@ -456,6 +457,7 @@ class TRTLLMPretrainedConfig(StrictlyTyped):
     architecture: str
     dtype: DTypeLiteral = "float16"
     vocab_size: int
+    head_size: int
     hidden_size: int
     num_hidden_layers: int
     num_attention_heads: int

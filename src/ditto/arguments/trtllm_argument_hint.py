@@ -231,19 +231,45 @@ class TRTLLMArgumentHint(StrictlyTyped):
     @property
     def kv_cache_block_offsets(self) -> TensorTypeHint:
         """Tensor type hint for KV cache block offsets with shape (1, batch_size, 2, kv_cache_block_size)."""
-        return TensorTypeHint(shape=(1, self.batch_size, 2, self.max_blocks_per_seq), dtype=torch.int32)
+        return TensorTypeHint(
+            shape=(
+                DynamicDimension(name="kv_cache_block_offsets", min=1, opt=1, max=self.num_attn_layers_per_pipeline),
+                self.batch_size,
+                2,
+                self.max_blocks_per_seq,
+            ),
+            dtype=torch.int32,
+        )
 
     @computed_field
     @property
     def host_kv_cache_block_offsets(self) -> TensorTypeHint:
         """Tensor type hint for host KV cache block offsets with shape (1, batch_size, 2, kv_cache_block_size)."""
-        return TensorTypeHint(shape=(1, self.batch_size, 2, self.max_blocks_per_seq), dtype=torch.int32)
+        return TensorTypeHint(
+            shape=(
+                DynamicDimension(
+                    name="host_kv_cache_block_offsets", min=1, opt=1, max=self.num_attn_layers_per_pipeline
+                ),
+                self.batch_size,
+                2,
+                self.max_blocks_per_seq,
+            ),
+            dtype=torch.int32,
+        )
 
     @computed_field
     @property
     def host_kv_cache_pool_pointers(self) -> TensorTypeHint:
         """Tensor type hint for host KV cache pool pointers with shape (1, 2)."""
-        return TensorTypeHint(shape=(self._one, 2), dtype=torch.int64)
+        return TensorTypeHint(
+            shape=(
+                DynamicDimension(
+                    name="host_kv_cache_pool_pointers", min=1, opt=1, max=self.num_attn_layers_per_pipeline
+                ),
+                2,
+            ),
+            dtype=torch.int64,
+        )
 
     @computed_field
     @property

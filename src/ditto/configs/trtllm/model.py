@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from pydantic import Field
+from tensorrt_llm.models import SpeculativeDecodingMode
 
 from ...literals import DTypeLiteral, KVCacheTypeLiteral
 from ...types import StrictlyTyped
@@ -31,6 +32,8 @@ class TRTLLMModelConfig(StrictlyTyped):
         lora_config (TRTLLMLoraConfig): Configuration for LoRA adapters.
         plugin_config (TRTLLMPluginConfig): Configuration for TRT-LLM plugins.
         use_mrope (bool): Whether to use MRoPE.
+        speculative_decoding_mode (SpeculativeDecodingMode): Mode of speculative decoding.
+        max_draft_len (int): Maximum lengths of draft tokens for speculative decoding target model.
     """
 
     kv_cache_type: KVCacheTypeLiteral = "PAGED"
@@ -40,3 +43,5 @@ class TRTLLMModelConfig(StrictlyTyped):
     lora_config: TRTLLMLoraConfig = Field(default_factory=TRTLLMLoraConfig)
     plugin_config: TRTLLMPluginConfig = Field(default_factory=TRTLLMPluginConfig)
     use_mrope: bool = False
+    speculative_decoding_mode: SpeculativeDecodingMode = SpeculativeDecodingMode.NONE
+    max_draft_len: int = 0

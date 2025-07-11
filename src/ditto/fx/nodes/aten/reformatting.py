@@ -119,6 +119,19 @@ class Reshape(FinalATenOp):
     shape: ShapeArg
 
 
+@ATenOp.register(torch.ops.aten._reshape_copy.default)
+class ReshapeCopy(FinalATenOp):
+    """Specialization for the reshape_copy operator.
+
+    Attributes:
+        this (Node): The tensor to reshape.
+        shape (ShapeArg): The shape to reshape the tensor to.
+    """
+
+    this: Node
+    shape: ShapeArg
+
+
 @ATenOp.register(torch.ops.aten.view.default)
 class View(FinalATenOp):
     """Specialization for the view operator.

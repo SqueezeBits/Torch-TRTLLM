@@ -146,4 +146,8 @@ LogLevelLiteral = Literal[
     "NOTSET",
 ]
 
-QuantizeMethod = Literal["gptq", "awq", "compressed-tensors", "modelopt", None]
+QuantizeMethod = Literal["awq", "compressed-tensors", "modelopt", None]
+
+SpeculativeDecodingModeLiteral = Literal[
+    "draft_tokens_external", "medusa", "lookahead_decoding", "explicit_draft_tokens", "eagle", "none"
+]

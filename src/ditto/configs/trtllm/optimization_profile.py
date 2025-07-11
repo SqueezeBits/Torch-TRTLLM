@@ -16,6 +16,7 @@ import math
 
 from loguru import logger
 from pydantic import Field, model_validator
+from tensorrt_llm.models import SpeculativeDecodingMode
 from transformers import PretrainedConfig
 from typing_extensions import Self
 
@@ -86,6 +87,8 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
         opt_num_tokens: int | None = None,
         max_beam_width: int = 1,
         max_prompt_embedding_table_size: int = 0,
+        speculative_decoding_mode: SpeculativeDecodingMode = SpeculativeDecodingMode.NONE,
+        max_draft_len: int = 0,
     ) -> Self:
         """Configure the optimization profile from given configurations.
 
@@ -99,6 +102,8 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             opt_num_tokens (int | None): The optimized number of tokens
             max_beam_width (int): The maximum beam width
             max_prompt_embedding_table_size (int): The maximum size of the prompt embedding table
+            speculative_decoding_mode (SpeculativeDecodingMode): The mode of speculative decoding
+            max_draft_len (int): The maximum length of draft tokens for speculative decoding target model
 
         Returns:
             TRTLLMOptimizationProfileConfig: The optimization profile configuration
@@ -121,6 +126,11 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             raise ValueError(
                 f"When context_fmha is enabled, max_num_tokens ({max_num_tokens}) should be at least "
                 f"tokens_per_block ({plugin_config.tokens_per_block})"
+            )
+        if speculative_decoding_mode != SpeculativeDecodingMode.NONE:
+            assert max_batch_size * (max_draft_len + 1) <= max_num_tokens, (
+                f"{max_num_tokens=} must be at least 'max_batch_size * (max_draft_len + 1)' "
+                f"({max_batch_size * (max_draft_len + 1)})."
             )
         if opt_num_tokens is None:
             opt_num_tokens = min(max_num_tokens, max_batch_size * max_beam_width)

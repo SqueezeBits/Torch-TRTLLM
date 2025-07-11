@@ -317,6 +317,7 @@ def infer_pretrained_config(
         architecture=architecture,
         dtype=dtype,
         vocab_size=vocab_size,
+        head_size=plugin.head_size,
         hidden_size=hidden_size,
         num_hidden_layers=num_hidden_layers * mapping.pp_size,
         num_attention_heads=plugin.num_heads * mapping.tp_size,
