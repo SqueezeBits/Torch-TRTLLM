@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from pydantic import Field
+from tensorrt_llm.models import SpeculativeDecodingMode
 
 from ...literals import DTypeLiteral, KVCacheTypeLiteral
 from ...types import StrictlyTyped
@@ -24,19 +25,23 @@ class TRTLLMModelConfig(StrictlyTyped):
     """A subset of properties in `trtllm.BuildConfig` related to model configuration required at runtime.
 
     Attributes:
-        max_prompt_embedding_table_size (int): Maximum size of the prompt embedding table.
         kv_cache_type (KVCacheTypeLiteral): Type of KV cache to use ('PAGED', 'CONTIGUOUS' or 'DISABLED').
         logits_dtype (DTypeLiteral): Data type for logits.
         gather_context_logits (bool): Whether to gather context logits.
         gather_generation_logits (bool): Whether to gather generation logits.
         lora_config (TRTLLMLoraConfig): Configuration for LoRA adapters.
         plugin_config (TRTLLMPluginConfig): Configuration for TRT-LLM plugins.
+        use_mrope (bool): Whether to use MRoPE.
+        speculative_decoding_mode (SpeculativeDecodingMode): Mode of speculative decoding.
+        max_draft_len (int): Maximum lengths of draft tokens for speculative decoding target model.
     """
 
-    max_prompt_embedding_table_size: int = 0
     kv_cache_type: KVCacheTypeLiteral = "PAGED"
     logits_dtype: DTypeLiteral = "float32"
     gather_context_logits: bool = False
     gather_generation_logits: bool = False
     lora_config: TRTLLMLoraConfig = Field(default_factory=TRTLLMLoraConfig)
     plugin_config: TRTLLMPluginConfig = Field(default_factory=TRTLLMPluginConfig)
+    use_mrope: bool = False
+    speculative_decoding_mode: SpeculativeDecodingMode = SpeculativeDecodingMode.NONE
+    max_draft_len: int = 0

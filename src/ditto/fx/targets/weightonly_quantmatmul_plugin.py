@@ -80,7 +80,11 @@ class WeightOnlyQuantMatmulPlugin(Plugin):
             torch.Tensor: Result of matrix multiplication
         """
         if is_in_fake_tensor_mode():
-            return torch.zeros(x.shape[0], weight.shape[1], dtype=x.dtype)
+            return torch.zeros(
+                x.shape[0],
+                weight.shape[1] if self.weight_type_id == WeightTypeId.INT8 else weight.shape[1] * 2,
+                dtype=x.dtype,
+            )
         raise NotImplementedError(f"{type(self).__name__} doesn't have implementation")
 
 

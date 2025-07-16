@@ -14,7 +14,7 @@
 
 from torch.fx import Node
 
-from ..nodes import Clone, ToCopy
+from ..nodes import Clone, Reshape, ReshapeCopy, ToCopy
 from .infra import ModifiedInsideThePass, NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses
 
 
@@ -32,5 +32,10 @@ class CanonicalizeCopy(NodewiseOptimizationPass):
             if len(node.kwargs) > 1 and "dtype" in node.kwargs:
                 node.kwargs = {"dtype": node.kwargs["dtype"]}
                 return {node: ModifiedInsideThePass()}
+
+        if ReshapeCopy.specialize_from(node):
+            with node.graph.inserting_after(node):
+                reshape = Reshape.create(node.graph, *node.args, **node.kwargs)
+            return {node: ReplaceAllUses(by=reshape.node)}
 
         return {}

@@ -19,6 +19,7 @@ import time
 from typing import Annotated, Literal
 
 import click
+import modelopt.torch.opt as mto
 import torch
 from loguru import logger
 from transformers import (
@@ -30,16 +31,24 @@ from transformers import (
 )
 from typer import Argument, Option, Typer
 
-from .api import trtllm_build
+from .api import build_llm_engine
 from .constants import DEFAULT_DEVICE
 from .contexts import disable_modelopt_peft_patches, disable_torch_jit_state
-from .literals import DTypeLiteral
+from .literals import DTypeLiteral, SpeculativeDecodingModeLiteral
 from .peft import load_peft_adapters
 from .types import trt_to_torch_dtype_mapping
 
 app = Typer(context_settings={"help_option_names": ["-h", "--help"]})
 
 FLOATING_POINT_DTYPES = ("float32", "float16", "bfloat16")
+SPECULATIVE_DECODING_MODES = (
+    "draft_tokens_external",
+    "medusa",
+    "lookahead_decoding",
+    "explicit_draft_tokens",
+    "eagle",
+    "none",
+)
 
 
 @app.command()
@@ -181,14 +190,30 @@ def build(
     gather_all_logits: Annotated[
         bool, Option(help="Equivalent to `--gather-context-logits --gather-generation-logits`.")
     ] = False,
+    tokens_per_block: Annotated[int, Option(help="Number of tokens per block.")] = 64,
+    use_paged_context_fmha: Annotated[
+        bool,
+        Option(help="Use paged context FMHA. It allows advanced features like KV cache resue and chunked context."),
+    ] = True,
     run_routers_in_model_dtype: Annotated[
         bool, Option(help="Run linear layers for routers in MoE models in model dtype instead of FP32.")
     ] = False,
+    speculative_decoding_mode: Annotated[
+        SpeculativeDecodingModeLiteral,
+        Option(click_type=click.Choice((*SPECULATIVE_DECODING_MODES,)), help="Mode of speculative decoding."),
+    ] = "none",
+    max_draft_len: Annotated[
+        int, Option(help="Maximum lengths of draft tokens for speculative decoding target model.")
+    ] = 0,
 ) -> None:
     """Build a TensorRT-LLM engine from a pretrained model."""
     assert not (
         (tp_size > 1 or pp_size > 1) and peft_ids
     ), "Tensor Parallelism or Pipeline Parallelism with LoRA is currently not supported"
+    assert speculative_decoding_mode in (
+        "draft_tokens_external",
+        "none",
+    ), f"{speculative_decoding_mode=} is currently not supported"
     if gather_all_logits:
         gather_context_logits = gather_generation_logits = True
     output_dir = resolve_output_dir(output_dir, model_id)
@@ -196,6 +221,7 @@ def build(
 
     with disable_torch_jit_state(), disable_modelopt_peft_patches():
         logger.info(f"Loading model {model_id}")
+        mto.enable_huggingface_checkpointing()
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             torch_dtype=get_model_dtype(dtype),
@@ -213,7 +239,7 @@ def build(
 
     os.makedirs(output_dir, exist_ok=True)
     start_time = time.perf_counter()
-    trtllm_build(
+    build_llm_engine(
         model,
         output_dir,
         run_matmuls_in_fp32=run_matmuls_in_fp32,
@@ -229,7 +255,11 @@ def build(
         logits_dtype=logits_dtype,
         gather_context_logits=gather_context_logits,
         gather_generation_logits=gather_generation_logits,
+        tokens_per_block=tokens_per_block,
+        use_paged_context_fmha=use_paged_context_fmha,
         run_routers_in_model_dtype=run_routers_in_model_dtype,
+        speculative_decoding_mode=speculative_decoding_mode,
+        max_draft_len=max_draft_len,
     )
     minutes, seconds = divmod(int(time.perf_counter() - start_time), 60)
     logger.info(f"Build completed in {minutes:02d}:{seconds:02d}")

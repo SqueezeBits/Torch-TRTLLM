@@ -14,7 +14,7 @@
 
 from .aten import *
 from .call_function import CallFunction
-from .dequantize import Dequantize
+from .fake_quantize import FakeQuantize
 from .get_attr import GetAttr
 from .node_specialization import NodeSpecialization
 from .operator import GetItem

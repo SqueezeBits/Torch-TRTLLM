@@ -136,7 +136,6 @@ class TensorRTBuilderConfig(StrictlyTyped):
             dla_sram_size=self.memory_pool_limits.get(trt.MemoryPoolType.DLA_MANAGED_SRAM, DLA_SRAM_SIZE),
             sparse_weights=self.flags.sparse_weights,
             disable_tf32=not self.flags.tf32,
-            make_refittable=self.flags.refit,
         )
 
     @model_validator(mode="after")

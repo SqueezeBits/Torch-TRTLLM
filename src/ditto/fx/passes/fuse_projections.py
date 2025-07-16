@@ -19,7 +19,7 @@ from torch.fx import Node
 
 from ...constants import MATMUL_FUSION_MAX_OUTPUT_SIZE
 from ...literals import LoraPluginInputPrefix
-from ..metadata_keys import ACTIVATION_QUANTIZATION, LORA_PREFIX
+from ..metadata_keys import ACTIVATION_QUANTIZATION, LORA_PREFIX, OUTPUT_QUANTIZATION
 from ..nodes import MM, AddTensor, Cat, Slice
 from ..subgraphs import Linear
 from .infra import NodewiseOptimizationPass, NodewisePassResult, ReplaceAllUses, propagate_metadata_from
@@ -76,19 +76,29 @@ class FuseProjections(NodewiseOptimizationPass):
             nodes_to_replace = [linear.mm.node for linear in linears]
             propagate_metadata_from(*nodes_to_replace, to=fused_node)
             fused_node.meta[LORA_PREFIX] = self.fused_lora_prefix
-            if act_scales := [
+
+            if input_scales := [
                 linear.activation_quantization.scale
                 for linear in linears
                 if linear.activation_quantization and linear.activation_quantization.scale is not None
             ]:
-                assert len(act_scales) == len(linears) and all(
-                    act_scales[0].item() == act_scale.item() for act_scale in act_scales
-                )
-                assert (activation_quantization := linears[0].activation_quantization) is not None
+                assert len(input_scales) == len(linears) and all(
+                    input_scales[0].item() == act_scale.item() for act_scale in input_scales
+                ), "All scale values of target linear layers must be the same"
                 assert (
-                    activation_quantization.zero_point is None
-                ), "fusion of per-tensor activation quantization with zero point is not supported"
+                    activation_quantization := linears[0].activation_quantization
+                ) is not None and activation_quantization.zero_point is None, (
+                    "fusion of per-tensor activation quantization with zero point is not supported"
+                )
                 fused_node.meta[ACTIVATION_QUANTIZATION] = activation_quantization.model_copy()
+
+            if output_quantizations := [linear.output_quantization for linear in linears if linear.output_quantization]:
+                assert self.fused_lora_prefix == "attn_qkv"
+                assert len(output_quantizations) in (
+                    len(linears),
+                    len(linears) - 1,
+                ), "Output quantizations for K and V must be provided"
+                fused_node.meta[OUTPUT_QUANTIZATION] = max(output_quantizations, key=lambda q: q.scale.item())
 
             if all(linear.bias_node is not None for linear in linears):
                 # The existing bias nodes must be recreated in order to avoid breaking topological orders.

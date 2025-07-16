@@ -14,7 +14,7 @@
 
 from .allgather_plugin import AllGatherPlugin
 from .allreduce_plugin import AllReducePlugin, AllReducePluginInputs
-from .fake_quantizer import ActivationQuantization, Dequantizer, Quantizer
+from .fake_quantizer import ActivationQuantization, OutputQuantization, Quantizer
 from .fp8_rowwise_gemm_plugin import Fp8RowwiseGemmPlugin
 from .gemm_plugin import (
     GemmPlugin,
@@ -35,7 +35,6 @@ from .mixture_of_experts_plugin import (
     MixtureOfExpertsPlugin,
     MixtureOfExpertsPluginInputs,
     get_moe_activation_type,
-    get_moe_normalization_mode,
 )
 from .plugin import Plugin
 from .quantize_per_token import QuantizePerTokenPlugin

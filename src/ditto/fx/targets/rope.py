@@ -80,3 +80,23 @@ def fake_rope_gptj(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> tor
     if is_in_fake_tensor_mode():
         return x
     raise NotImplementedError("rope_gptj doesn't have implementation")
+
+
+@register_rope_target(PositionEmbeddingType.mrope)
+def fake_mrope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    """Fake mrope style rotary position embedding target.
+
+    Args:
+        x (torch.Tensor): Input tensor to apply RoPE to
+        cos (torch.Tensor): Cosine component of rotary embeddings
+        sin (torch.Tensor): Sine component of rotary embeddings
+
+    Returns:
+        torch.Tensor: Input tensor with rotary position embeddings applied
+
+    Raises:
+        NotImplementedError: If not in fake tensor mode
+    """
+    if is_in_fake_tensor_mode():
+        return x
+    raise NotImplementedError("mrope doesn't have implementation")

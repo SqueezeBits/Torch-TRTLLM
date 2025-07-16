@@ -12,57 +12,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
-from compressed_tensors.compressors.quantized_compressors.pack_quantized import PackedQuantizationCompressor
-from compressed_tensors.linear.compressed_linear import CompressedLinear
-from compressed_tensors.quantization import QuantizationArgs, QuantizationScheme, QuantizationStrategy
-from compressed_tensors.quantization.lifecycle import forward
+from collections import OrderedDict
+from copy import deepcopy
 
+import torch
+from compressed_tensors import quantization
+from compressed_tensors.linear.compressed_linear import CompressedLinear
+from compressed_tensors.quantization import (
+    QuantizationArgs,
+    QuantizationConfig,
+    QuantizationScheme,
+    QuantizationStatus,
+    QuantizationStrategy,
+)
+from compressed_tensors.quantization.lifecycle import forward
+from compressed_tensors.quantization.lifecycle.apply import (
+    find_name_or_class_matches,
+    fix_fsdp_module_name,
+    iter_named_quantizable_modules,
+    process_quantization_config,
+)
+from compressed_tensors.quantization.lifecycle.initialize import _initialize_attn_scales, is_attention_module
+from compressed_tensors.quantization.utils.helpers import KV_CACHE_TARGETS
+
+from ..torch.ops import ditto_fake_quantize
 from .patch import custom_patch
 
 
 @custom_patch(
-    name="compressed_tensors.compressors.quantized_compressors.pack_quantized.PackedQuantizationCompressor",
-    reason="resolving torch.export error due to unsupported operation.",
+    name="compressed_tensors.linear.compressed_linear.CompressedLinear",
+    reason="resolving torch.export error and the registration of the parameters "
+    "and applying custom fake quantize operation",
     required=True,
-    env_var_to_disable="DISABLE_COMPRESSED_TENSORS_PACKED_QUANTIZATION_COMPRESSOR_PATCH",
-)
-def patch_decompress_weight() -> None:
-    def patched_decompress_weight(
-        self,
-        compressed_data: dict[str, torch.Tensor],
-        quantization_args: QuantizationArgs | None = None,
-    ) -> torch.Tensor:
-        weight = compressed_data["weight_packed"]
-        scale = compressed_data["weight_scale"]
-        zero_point = compressed_data.get("weight_zero_point", None)
-        g_idx = compressed_data.get("weight_g_idx", None)
-        num_bits = quantization_args.num_bits
-
-        shifts = torch.arange(0, 32, num_bits, device=weight.device)
-        # unpacking weight
-        unpacked = torch.bitwise_right_shift(weight[:, :, None], shifts[None, None, :]).to(torch.int32)
-        unpacked = unpacked.view(unpacked.shape[0], -1) - (pow(2, num_bits) // 2)
-        unpacked = unpacked.to(torch.int8)
-        # unpacking zero point
-        if zero_point is not None:
-            zero_point = zero_point.T
-            zero_point = torch.bitwise_right_shift(zero_point[:, :, None], shifts[None, None, :]).to(torch.int8)
-            zero_point = zero_point.reshape(zero_point.shape[0], -1)
-            zero_point = zero_point.T
-
-        decompressed_weight = forward.dequantize(x_q=unpacked, scale=scale, zero_point=zero_point, g_idx=g_idx)
-
-        return decompressed_weight
-
-    PackedQuantizationCompressor.decompress_weight = patched_decompress_weight
-
-
-@custom_patch(
-    name="compressed linear process",
-    reason="resolving torch.export error and the registration of the parameters.",
-    required=True,
-    env_var_to_disable="DISABLE_COMPRESSED_TENSORS_COMPRESSED_LINEAR_PROCESS_PACH",
+    env_var_to_disable="DISABLE_COMPRESSED_TENSORS_COMPRESSED_LINEAR_PROCESS_PATCH",
 )
 def patch_compressed_linear_process() -> None:
     original_from_linear = CompressedLinear.from_linear
@@ -91,54 +73,71 @@ def patch_compressed_linear_process() -> None:
         return ret
 
     def patched_forward(self, input: torch.Tensor) -> torch.Tensor:
-        unpacked_weight = self.compressor.decompress_module(self)
-        return torch.nn.functional.linear(input, unpacked_weight, self.bias)
+        unpacked_weight = ditto_fake_quantize(
+            self.unpacked_weight,
+            self.quantization_scheme.weights.num_bits,
+            False,
+            self.scales.dtype,
+            self.scales,
+            self.unpacked_zeros,
+            self.quantization_scheme.weights.group_size,
+        )
+        out = torch.nn.functional.linear(input, unpacked_weight.T, self.bias if self.bias is not None else None)
 
-    def patched_process_quantization(
-        x: torch.Tensor,
-        scale: torch.Tensor,
-        zero_point: torch.Tensor | None,
-        args: QuantizationArgs,
-        g_idx: torch.Tensor | None = None,
-        dtype: torch.dtype | None = None,
-        do_quantize: bool = True,
-        do_dequantize: bool = True,
+        if hasattr(self, "output_scale"):
+            out = ditto_fake_quantize(out, 8, False, self.output_scale.dtype, self.output_scale)
+
+        return out
+
+    @torch.no_grad()
+    def patched_forward_quantize(
+        module: torch.nn.Module, value: torch.Tensor, base_name: str, args: QuantizationArgs
     ) -> torch.Tensor:
-        q_min, q_max = forward.calculate_range(args, x.device)
-        group_size = args.group_size
+        if module.quantization_status == QuantizationStatus.COMPRESSED and base_name == "weight":
+            return value
 
-        if args.strategy == QuantizationStrategy.GROUP:
-            while scale.ndim < 2:
-                # pad scale and zero point dims for slicing
-                scale = scale.unsqueeze(1)
-                zero_point = zero_point.unsqueeze(1) if zero_point is not None else None
+        if args.dynamic:
+            out = ditto_fake_quantize(value, args.num_bits, True, value.dtype)
+        else:
+            out = ditto_fake_quantize(
+                value,
+                args.num_bits,
+                False,
+                module.input_scale.dtype if base_name == "input" else module.scales.dtype,
+                module.input_scale if base_name == "input" else module.scales,
+                module.unpacked_zeros,
+                args.group_size,
+            )
 
-            assert g_idx is None or -1 in g_idx
-            scale = scale.reshape(scale.shape[0], 1, -1)
-            output = x.reshape(x.shape[0], group_size, -1)
-            zero_point = zero_point.reshape(zero_point.shape[0], 1, -1) if zero_point is not None else None
+        return out
 
-            if do_dequantize:
-                output = forward._dequantize(output, scale, zero_point)
+    origin_apply_quantization_config = quantization.apply_quantization_config
 
-            output = output.reshape(output.shape[0], output.shape[1] * output.shape[2])
+    def patched_apply_quantization_config(
+        model: torch.nn.Module, config: QuantizationConfig | None, run_compressed: bool = False
+    ) -> OrderedDict:
+        if config is None:
+            return OrderedDict()
 
-        else:  # covers channel, token and tensor strategies
-            if do_quantize:
-                output = forward._quantize(
-                    x,
-                    scale,
-                    zero_point,
-                    q_min,
-                    q_max,
-                    args,
-                    dtype=dtype,
-                )
-            if do_dequantize:
-                output = forward._dequantize(output if do_quantize else x, scale, zero_point)
+        config = deepcopy(org_config := config)
+        target_to_scheme = OrderedDict()
+        config = process_quantization_config(config)
+        for scheme in config.config_groups.values():
+            for target in scheme.targets:
+                target_to_scheme[target] = scheme
 
-        return output
+        attn_name_to_submodule: dict[str, torch.nn.Module] = {}
+        for name, submodule in iter_named_quantizable_modules(model, include_children=True, include_attn=True):
+            name = fix_fsdp_module_name(name)
+            targets = find_name_or_class_matches(name, submodule, target_to_scheme)
 
-    forward._process_quantization = patched_process_quantization
+            if targets == KV_CACHE_TARGETS and is_attention_module(submodule):
+                attn_name_to_submodule[name] = submodule
+                _initialize_attn_scales(submodule)
+
+        return origin_apply_quantization_config(model, org_config, run_compressed)
+
     CompressedLinear.from_linear = patched_from_linear
     CompressedLinear.forward = patched_forward
+    forward.forward_quantize = patched_forward_quantize
+    quantization.apply_quantization_config = patched_apply_quantization_config

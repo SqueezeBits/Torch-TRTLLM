@@ -96,7 +96,7 @@ PassName = Literal[
     "FuseConsecutiveSliceConcat",
     "FuseConsecutiveSplitConcat",
     "FuseConsecutiveToCopys",
-    "FuseDequantizes",
+    "FuseFakeQuantizes",
     "FuseGatedMLPProjections",
     "FuseMLAQKVProjections",
     "FuseQKVProjections",
@@ -110,12 +110,14 @@ PassName = Literal[
     "ParallelizePipeline",
     "PopLoraPlugins",
     "PropagateTensorParallelism",
+    "ReplaceEmbeddingByPTuningEmbedding",
     "ReplaceMoEByMoEPlugin",
     "ReplaceMMByFp8GemmPlugin",
     "ReplaceMMByFp8RowwiseGemmPlugin",
     "ReplaceMMByGemmPlugin",
     "ReplaceMMByWoQGemmPlugin",
     "ReplaceRmsNormByFp8RmsNormPlugin",
+    "ReplaceSafeSoftmaxBySoftmax",
     "ReplaceSDPAByGPTAttentionPlugin",
     "ReplaceTopkByTopkLastDimPlugin",
     "ReplaceViewByReshape",
@@ -124,9 +126,9 @@ PassName = Literal[
     "RewriteFloatingPointLiteralsAsNodes",
     "RewriteReshapeAsUnsqueeze",
     "RewriteSplitAsSlices",
-    "StashActQuantSubgraphs",
+    "StashActivationFakeQuantize",
     "StashLoraSubgraphs",
-    "WrapWeightDequantSubgraphs",
+    "StashOutputFakeQuantize",
     "WrapRoPESubgraphs",
     "WrapSDPASubgraphs",
 ]
@@ -142,4 +144,10 @@ LogLevelLiteral = Literal[
     "INFO",
     "DEBUG",
     "NOTSET",
+]
+
+QuantizeMethod = Literal["awq", "compressed-tensors", "modelopt", None]
+
+SpeculativeDecodingModeLiteral = Literal[
+    "draft_tokens_external", "medusa", "lookahead_decoding", "explicit_draft_tokens", "eagle", "none"
 ]

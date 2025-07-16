@@ -39,7 +39,7 @@ class TRTLLMPluginConfig(StrictlyTyped):
         context_fmha (bool): Whether to use context FMHA. Default is True.
         paged_kv_cache (bool): Whether to use paged KV cache. Default is True.
         remove_input_padding (bool): Whether to remove input padding. Default is True.
-        tokens_per_block (int): Number of tokens per block. Default is 64.
+        tokens_per_block (int): Number of tokens per block. Default is 32.
         use_paged_context_fmha (bool): Whether to use paged context FMHA. Default is False.
         paged_state (bool): Whether to use paged state. Default is False.
     """
@@ -62,17 +62,26 @@ class TRTLLMPluginConfig(StrictlyTyped):
     context_fmha: bool = True
     paged_kv_cache: bool = True
     remove_input_padding: bool = True
-    tokens_per_block: int = 64
+    tokens_per_block: int = 32
     use_paged_context_fmha: bool = False
     paged_state: bool = False
 
     @classmethod
-    def create_from(cls, dtype: torch.dtype, world_size: int = 1) -> Self:
+    def create_from(
+        cls,
+        dtype: torch.dtype,
+        world_size: int = 1,
+        *,
+        tokens_per_block: int = 32,
+        use_paged_context_fmha: bool = True,
+    ) -> Self:
         """Create a plugin configuration from a given dtype and world size.
 
         Args:
             dtype: The dtype to create the plugin configuration for.
             world_size: The world size to create the plugin configuration for.
+            tokens_per_block: The number of tokens per block to create the plugin configuration for. Default is 64.
+            use_paged_context_fmha: Whether to use paged context FMHA. Default is True.
 
         Returns:
             The plugin configuration.
@@ -82,6 +91,8 @@ class TRTLLMPluginConfig(StrictlyTyped):
             gpt_attention_plugin=plugin_flag,
             gemm_plugin=plugin_flag,
             nccl_plugin=plugin_flag if world_size > 1 else None,
+            tokens_per_block=tokens_per_block,
+            use_paged_context_fmha=use_paged_context_fmha,
         )
 
 

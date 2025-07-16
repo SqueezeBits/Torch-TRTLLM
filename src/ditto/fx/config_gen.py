@@ -29,8 +29,15 @@ from ..literals import DTypeLiteral
 from ..quantization import GlobalQuantConfig
 from ..types import DataType, verify
 from .metadata_keys import LINEAR_TYPE, MOE_CONFIG
-from .nodes import Fp8RowwiseGemm, RmsnormQuantization, WeightOnlyGroupwiseQuantMatmul, WeightOnlyQuantMatmul
-from .subgraphs import Linear, TokenEmbedding
+from .nodes import (
+    Embedding,
+    Fp8RowwiseGemm,
+    GetAttr,
+    RmsnormQuantization,
+    WeightOnlyGroupwiseQuantMatmul,
+    WeightOnlyQuantMatmul,
+)
+from .subgraphs import Linear
 from .targets import GPTAttentionPlugin, MixtureOfExpertsPlugin
 
 
@@ -88,6 +95,9 @@ def generate_trtllm_engine_config(
         build_config.plugin_config.fp8_rowwise_gemm_plugin is not None
     )
 
+    input_names = [node.name for node in graph_module.graph.find_nodes(op="placeholder")]
+    build_config.use_mrope = "mrope_position_deltas" in input_names and "mrope_rotary_cos_sin" in input_names
+
     return TRTLLMEngineConfig(
         pretrained_config=generate_trtllm_pretrained_config(
             graph_module,
@@ -127,11 +137,11 @@ def generate_trtllm_pretrained_config(
         mapping=mapping,
     )
     pretrained_config.quantization = TRTLLMQuantConfig.create_from(global_quant_config) if global_quant_config else None
-    if "qwen" in pretrained_config.architecture.lower() and isinstance(
-        hf_config := graph_module.meta.get("pretrained_config"), PretrainedConfig
-    ):
-        # pylint: disable-next=unsupported-assignment-operation
-        pretrained_config.extra_fields["qwen_type"] = hf_config.model_type
+    if isinstance(hf_config := graph_module.meta.get("pretrained_config"), PretrainedConfig):
+        if "qwen" in pretrained_config.architecture.lower():
+            pretrained_config.extra_fields["qwen_type"] = hf_config.model_type
+        if "gemma2" in pretrained_config.architecture.lower():
+            pretrained_config.extra_fields["query_pre_attn_scalar"] = hf_config.query_pre_attn_scalar
     if (moe_config := graph_module.meta.pop(MOE_CONFIG, None)) is not None:
         pretrained_config.moe = TRTLLMMoEConfig.model_validate(moe_config)
     return pretrained_config
@@ -150,8 +160,10 @@ def get_embedding_weight_sizes(graph_module: GraphModule) -> tuple[int, int]:
         PretrainedConfigGenerationError: If failed to infer vocab size from graph module.
     """
     for node in graph_module.graph.nodes:
-        if token_embedding := TokenEmbedding.configure_from(node):
-            return token_embedding.vocab_size, token_embedding.hidden_size
+        if (embedding := Embedding.specialize_from(node)) and (
+            embedding_weight := GetAttr.specialize_from(embedding.weight)
+        ):
+            return embedding_weight.parameter.shape[0], embedding_weight.parameter.shape[1]
     raise PretrainedConfigGenerationError("Failed to infer vocab size from graph module")
 
 
@@ -305,10 +317,13 @@ def infer_pretrained_config(
         architecture=architecture,
         dtype=dtype,
         vocab_size=vocab_size,
+        head_size=plugin.head_size,
         hidden_size=hidden_size,
         num_hidden_layers=num_hidden_layers * mapping.pp_size,
         num_attention_heads=plugin.num_heads * mapping.tp_size,
         num_key_value_heads=plugin.num_kv_heads * mapping.tp_size,
         intermediate_size=intermediate_size,
+        rotary_embedding_dim=plugin.rotary_embedding_dim,
+        max_position_embeddings=plugin.rotary_embedding_max_positions,
         mapping=mapping,
     )

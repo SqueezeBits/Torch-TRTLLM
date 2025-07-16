@@ -15,12 +15,13 @@
 import tensorrt as trt
 import torch
 from pydantic import Field
-from tensorrt_llm.functional import AllReduceConfig, AllReduceFusionOp, AllReduceStrategy
+from tensorrt_llm.functional import AllReduceFusionOp, AllReduceStrategy
 from torch.fx import Graph, GraphModule, Node
 
 from ...configs import TRTLLMMapping
 from ...constants import INPUT_IDS
 from ...types import DataType
+from ..fake_tensor_prop import run_fake_tensor_prop
 from ..nodes import Expand, GetAttr, Permute, Reshape, Slice
 from ..subgraphs import FusedLinear, Linear
 from ..targets import AllGatherPlugin, AllReducePlugin, AllReducePluginInputs
@@ -133,14 +134,16 @@ def parallelize_column_linear(
     """
     graph = linear.mm.node.graph
 
-    if (dequantize := linear.weight_dequantize_node) is not None:
-        input_nodes: list[Node] = []
-        for dequant_input_node in linear.mm.other.all_input_nodes:
+    if (fake_quantize := linear.weight_fake_quantize) is not None:
+        tensors_to_be_parallelized: list[Node | None] = [fake_quantize.x, fake_quantize.scale, fake_quantize.zeros]
+        for tensor_node in tensors_to_be_parallelized:
+            if tensor_node is None:
+                continue
             assert (
-                tensor := GetAttr.specialize_from(dequant_input_node)
-            ), "dequantize's input node is not specialized to GetAttr"
-            with graph.inserting_before(tensor.node):
-                parallelized_weight = GetAttr.create(
+                tensor := GetAttr.specialize_from(tensor_node)
+            ) is not None, "Node to be parallelized must be specialized to GetAttr"
+            with graph.inserting_before(tensor_node):
+                parallelized_tensor = GetAttr.create(
                     graph,
                     get_name_of_attr(tensor.target, mapping.tp_rank),
                     tensor.tensor
@@ -153,36 +156,20 @@ def parallelize_column_linear(
                         is_transposed=False,
                     ),
                 )
-                propagate_metadata_from(tensor, to=parallelized_weight)
-            dequant_input_node.replace_all_uses_with(parallelized_weight.node)
-            input_nodes.append(parallelized_weight.node)
-        parallelized_dequantize = dequantize.target.model_copy(
-            update={
-                "output_shape": torch.Size(
-                    [dequantize.target.output_shape[0], dequantize.target.output_shape[1] // mapping.tp_size]
-                )
-            }
-        )
-        with graph.inserting_before(linear.mm.other):
-            parallelized_dequantize_node = graph.call_function(parallelized_dequantize, tuple(input_nodes))
-            propagate_metadata_from(linear.mm.other, to=parallelized_dequantize_node)
-        linear.mm.other.replace_all_uses_with(parallelized_dequantize_node)
-        if inplace:
-            linear.mm.other = parallelized_dequantize_node
+            propagate_metadata_from(tensor, to=parallelized_tensor)
+            tensor_node.replace_all_uses_with(parallelized_tensor.node)
+        run_fake_tensor_prop(fake_quantize.node)
     else:
         assert (
             weight := GetAttr.specialize_from(linear.weight_node)
         ) is not None, "weight node is not specialized to GetAttr"
-        weight_tensor = weight.tensor
-        if linear.has_transposed_weight:
-            weight_tensor = weight_tensor.T
 
         with linear.mm.node.graph.inserting_before(weight.node):
             parallelized_weight = GetAttr.create(
                 linear.mm.node.graph,
                 get_name_of_attr(weight.target, mapping.tp_rank),
                 parallelize_2d_tensor(
-                    weight_tensor,
+                    weight.tensor,
                     tp_size=mapping.tp_size,
                     tp_rank=mapping.tp_rank,
                     is_column=True,
@@ -233,7 +220,6 @@ def parallelize_row_linear(
     mapping: TRTLLMMapping,
     *,
     strategy: AllReduceStrategy = AllReduceStrategy.AUTO,
-    config: AllReduceConfig = AllReduceConfig(0),  # noqa: B008
     fusion_op: AllReduceFusionOp = AllReduceFusionOp.NONE,
     eps: float = 1e-5,
 ) -> None:
@@ -244,20 +230,21 @@ def parallelize_row_linear(
         mapping (TRTLLMMapping): The tensor parallelism mapping configuration
         strategy (AllReduceStrategy, optional): The strategy of the allreduce plugin.
             Defaults to AllReduceStrategy.AUTO.
-        config (AllReduceConfig, optional): The config of the allreduce plugin. Defaults to AllReduceConfig(0).
         fusion_op (AllReduceFusionOp, optional): The fusion operation of the allreduce plugin.
             Defaults to AllReduceFusionOp.NONE.
         eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
     """
     graph = linear.mm.node.graph
-    if (dequantize := linear.weight_dequantize_node) is not None:
-        input_nodes: list[Node] = []
-        for dequant_input_node in linear.mm.other.all_input_nodes:
+    if (fake_quantize := linear.weight_fake_quantize) is not None:
+        tensors_to_be_parallelized: list[Node | None] = [fake_quantize.x, fake_quantize.scale, fake_quantize.zeros]
+        for tensor_node in tensors_to_be_parallelized:
+            if tensor_node is None:
+                continue
             assert (
-                tensor := GetAttr.specialize_from(dequant_input_node)
-            ), "dequantize's input node is not specialized to GetAttr"
-            with graph.inserting_before(tensor.node):
-                parallelized_weight = GetAttr.create(
+                tensor := GetAttr.specialize_from(tensor_node)
+            ) is not None, "Node to be parallelized must be specialized to GetAttr"
+            with graph.inserting_before(tensor_node):
+                parallelized_tensor = GetAttr.create(
                     graph,
                     get_name_of_attr(tensor.target, mapping.tp_rank),
                     tensor.tensor
@@ -270,20 +257,9 @@ def parallelize_row_linear(
                         is_transposed=False,
                     ),
                 )
-                propagate_metadata_from(tensor, to=parallelized_weight)
-            dequant_input_node.replace_all_uses_with(parallelized_weight.node)
-            input_nodes.append(parallelized_weight.node)
-        parallelized_dequantize = dequantize.target.model_copy(
-            update={
-                "output_shape": torch.Size(
-                    [dequantize.target.output_shape[0] // mapping.tp_size, dequantize.target.output_shape[1]]
-                )
-            }
-        )
-        with graph.inserting_before(linear.mm.other):
-            parallelized_dequantize_node = graph.call_function(parallelized_dequantize, tuple(input_nodes))
-            propagate_metadata_from(linear.mm.other, to=parallelized_dequantize_node)
-        linear.mm.other.replace_all_uses_with(parallelized_dequantize_node)
+            propagate_metadata_from(tensor, to=parallelized_tensor)
+            tensor_node.replace_all_uses_with(parallelized_tensor.node)
+        run_fake_tensor_prop(fake_quantize.node)
     else:
         assert (
             weight := GetAttr.specialize_from(linear.weight_node)
@@ -308,7 +284,6 @@ def parallelize_row_linear(
         linear.mm.node,
         mapping.tp_group,
         strategy=strategy,
-        config=config,
         fusion_op=fusion_op,
         eps=eps,
     )
@@ -431,7 +406,6 @@ def insert_allreduce_plugin(
     group: list[int],
     *,
     strategy: AllReduceStrategy = AllReduceStrategy.AUTO,
-    config: AllReduceConfig = AllReduceConfig(0),  # noqa: B008
     fusion_op: AllReduceFusionOp = AllReduceFusionOp.NONE,
     eps: float = 1e-5,  # TODO: default eps value should be 1e-6.
     affine: bool = False,
@@ -444,7 +418,6 @@ def insert_allreduce_plugin(
         group (list[int]): The group of the allreduce plugin
         strategy (AllReduceStrategy, optional): The strategy of the allreduce plugin.
             Defaults to AllReduceStrategy.AUTO.
-        config (AllReduceConfig, optional): The config of the allreduce plugin. Defaults to AllReduceConfig(0).
         fusion_op (AllReduceFusionOp, optional): The fusion operation of the allreduce plugin.
             Defaults to AllReduceFusionOp.NONE.
         eps (float, optional): The epsilon value of the allreduce plugin. Defaults to 1e-5.
@@ -455,7 +428,6 @@ def insert_allreduce_plugin(
         group=group,
         type_id=DataType(dtype=to_val.dtype).to(trt.DataType),
         strategy=strategy,
-        config=config,
         fusion_op=fusion_op,
         eps=eps,
         affine=affine,

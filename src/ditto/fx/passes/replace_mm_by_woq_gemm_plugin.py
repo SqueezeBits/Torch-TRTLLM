@@ -16,10 +16,12 @@
 import tensorrt as trt
 import torch
 from loguru import logger
+from pydantic import Field
 from tensorrt_llm.quantization import QuantAlgo
 from torch.fx import Node
-from transformers.utils.quantization_config import QuantizationMethod
 
+from ...literals import QuantizeMethod
+from ...quantization import GlobalQuantConfig
 from ...types import DataType
 from ..nodes import GetAttr
 from ..subgraphs import Linear
@@ -33,22 +35,26 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
 
     Attributes:
         model_dtype (torch.dtype): The data type of the model
+        global_quant_config (GlobalQuantConfig | None): The global quantization configuration
     """
 
     model_dtype: torch.dtype
+    global_quant_config: GlobalQuantConfig | None = Field(default=None, frozen=True)
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
-            (linear := Linear.configure_from(node))
+            self.global_quant_config is not None
+            and (linear := Linear.configure_from(node))
             and linear.activation_quantization is None
-            and (dequantize := linear.weight_dequantize_node) is not None
-            and (unpacked_weight := GetAttr.specialize_from(dequantize.qweight))
-            and (scale := GetAttr.specialize_from(dequantize.scale))
+            and (fake_quantize := linear.weight_fake_quantize)
+            and (unpacked_weight := GetAttr.specialize_from(fake_quantize.x))
+            and fake_quantize.scale
+            and (scale := GetAttr.specialize_from(fake_quantize.scale))
             and (
                 local_trtllm_quant_algo := inference_trtllm_quant_algo(
-                    dequantize.target.bits,
-                    dequantize.target.dtype,
-                    hf_quant_method=dequantize.target.global_quant_config.hf_quant_method,
+                    fake_quantize.bits,
+                    self.model_dtype,
+                    quant_method=self.global_quant_config.quant_method,
                 )
             )
             in (
@@ -61,19 +67,19 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
         ):
             return {}
 
-        if dequantize.target.global_quant_config.trtllm_quant_algo != local_trtllm_quant_algo:
+        if self.global_quant_config.trtllm_quant_algo != local_trtllm_quant_algo:
             logger.warning(
-                f"The quantization algorithm of the dequantize node ({local_trtllm_quant_algo}) is different from "
-                f"the global quantization algorithm ({dequantize.target.global_quant_config.trtllm_quant_algo}). "
-                f"This is not expected and may lead to incorrect behavior."
+                f"The quantization algorithm of the fake quantize node ({local_trtllm_quant_algo}) is different from "
+                f"the global quantization algorithm ({self.global_quant_config.trtllm_quant_algo}). "
+                "This is not expected and may lead to incorrect behavior."
             )
 
         postprocessed_qweight_tensor = postprocess_qweight_for_trtllm(
             unpacked_weight.tensor,
-            dequantize.target.bits,
-            dequantize.target.global_quant_config.hf_quant_method,
+            fake_quantize.bits,
+            self.global_quant_config.quant_method,
             model_dtype=self.model_dtype,
-            per_group=dequantize.target.group_size is not None,
+            per_group=fake_quantize.group_size is not None,
         )
         with node.graph.inserting_before(unpacked_weight.node):
             postprocessed_qweight = GetAttr.create(
@@ -82,10 +88,10 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
 
         plugin_inputs: list[Node] = [linear.input_node, postprocessed_qweight.node, scale.node]
 
-        if zeros := GetAttr.specialize_from(dequantize.zeros) if dequantize.zeros is not None else None:
+        if zeros := GetAttr.specialize_from(fake_quantize.zeros) if fake_quantize.zeros is not None else None:
             postprocessed_zeros_tensor = postprocess_zeros_for_trtllm(
                 zeros.tensor,
-                dequantize.target.global_quant_config.hf_quant_method,
+                self.global_quant_config.quant_method,
                 scale=scale.tensor,
                 model_dtype=self.model_dtype,
             )
@@ -97,23 +103,23 @@ class ReplaceMMByWoQGemmPlugin(NodewiseOptimizationPass):
 
         with node.graph.inserting_before(node):
             plugin: WeightOnlyQuantMatmulPlugin | WeightOnlyGroupwiseQuantMatmulPlugin
-            if dequantize.target.group_size is not None:
+            if fake_quantize.group_size is not None:
                 plugin = WeightOnlyGroupwiseQuantMatmulPlugin(
-                    type_id=DataType(dequantize.target.dtype).to(trt.DataType),
+                    type_id=DataType(self.model_dtype).to(trt.DataType),
                     quant_algo=get_weightonly_groupwise_quant_algo(
                         False,
                         zeros is not None,
                         False,
                         local_trtllm_quant_algo == QuantAlgo.W4A8_AWQ,
-                        dequantize.target.bits == 8,
+                        fake_quantize.bits == 8,
                     ),
-                    group_size=dequantize.target.group_size,
+                    group_size=fake_quantize.group_size,
                 )
             else:
                 assert len(plugin_inputs) == 3, "Zero point is not supported for weight-only quantization"
                 plugin = WeightOnlyQuantMatmulPlugin(
-                    type_id=DataType(dequantize.target.dtype).to(trt.DataType),
-                    weight_type_id=WeightTypeId.INT8 if dequantize.target.bits == 8 else WeightTypeId.INT4,
+                    type_id=DataType(self.model_dtype).to(trt.DataType),
+                    weight_type_id=WeightTypeId.INT8 if fake_quantize.bits == 8 else WeightTypeId.INT4,
                 )
 
             plugin_node = node.graph.call_function(plugin, tuple(plugin_inputs))
@@ -144,7 +150,7 @@ def get_weightonly_groupwise_quant_algo(
 def postprocess_qweight_for_trtllm(
     qweight: torch.Tensor,
     bits: int,
-    quant_method: QuantizationMethod,
+    quant_method: QuantizeMethod,
     *,
     model_dtype: torch.dtype,
     per_group: bool = False,
@@ -154,7 +160,7 @@ def postprocess_qweight_for_trtllm(
     Args:
         qweight (torch.Tensor): The quantized weight tensor
         bits (int): The number of bits used for quantization
-        quant_method (QuantizationMethod): The quantization method used
+        quant_method (QuantizeMethod): The quantization method used
         model_dtype (torch.dtype): The model data type.
         per_group (bool): Whether the quantization is per group. Defaults to False.
 
@@ -162,7 +168,7 @@ def postprocess_qweight_for_trtllm(
         torch.Tensor: The postprocessed weight tensor for TensorRT-LLM
     """
     assert bits in (4, 8), "Only 4-bit or 8-bit quantization is supported for Weight-Only Quantization of TensorRT-LLM"
-    if quant_method in (QuantizationMethod.AWQ, QuantizationMethod.GPTQ, QuantizationMethod.COMPRESSED_TENSORS):
+    if quant_method in ("awq", "gptq", "compressed-tensors", "modelopt"):
         assert qweight.dtype in (torch.uint8, torch.int8), f"Unsupported tensor dtype: {qweight.dtype=}"
         if bits == 4:
             qweight = (qweight[:, 1::2] * 16 + qweight[:, ::2]).view(torch.int8)
@@ -178,7 +184,7 @@ def postprocess_qweight_for_trtllm(
 
 def postprocess_zeros_for_trtllm(
     zeros: torch.Tensor,
-    quant_method: QuantizationMethod,
+    quant_method: QuantizeMethod,
     *,
     scale: torch.Tensor,
     model_dtype: torch.dtype,
@@ -187,14 +193,14 @@ def postprocess_zeros_for_trtllm(
 
     Args:
         zeros (torch.Tensor): The quantized zero point tensor
-        quant_method (QuantizationMethod): The quantization method used
+        quant_method (QuantizeMethod): The quantization method used
         scale (torch.Tensor): The scale tensor
         model_dtype (torch.dtype): The model data type
 
     Returns:
         torch.Tensor: The postprocessed zero point tensor for TensorRT-LLM
     """
-    if quant_method in (QuantizationMethod.AWQ, QuantizationMethod.COMPRESSED_TENSORS, QuantizationMethod.GPTQ):
+    if quant_method in ("awq", "compressed-tensors", "gptq", "modelopt"):
         zeros = zeros * scale
         zeros = zeros.to(model_dtype)
     else:
@@ -203,28 +209,26 @@ def postprocess_zeros_for_trtllm(
     return zeros
 
 
-def inference_trtllm_quant_algo(
-    bits: int, compute_dtype: torch.dtype, *, hf_quant_method: QuantizationMethod
-) -> QuantAlgo:
+def inference_trtllm_quant_algo(bits: int, compute_dtype: torch.dtype, *, quant_method: QuantizeMethod) -> QuantAlgo:
     """Infer the quantization algorithm for TensorRT-LLM .
 
     Args:
         bits (int): The number of bits used for quantization
         compute_dtype (torch.dtype): The compute data type
-        hf_quant_method (QuantizationMethod): The quantization method used by the Hugging Face model
+        quant_method (QuantizeMethod): The quantization method used by the Hugging Face model
 
     Returns:
         QuantAlgo: The quantization algorithm for TensorRT-LLM
     """
     assert bits in (4, 8), "Only 4-bit and 8-bit quantization is supported for TensorRT-LLM"
-    if hf_quant_method in (QuantizationMethod.AWQ, QuantizationMethod.COMPRESSED_TENSORS, QuantizationMethod.GPTQ):
+    if quant_method in ("awq", "compressed-tensors", "gptq", "modelopt"):
         quant_algo: str = f"W{bits}A{compute_dtype.itemsize * 8}"
-        if hf_quant_method == QuantizationMethod.GPTQ:
+        if quant_method == "gptq":
             quant_algo = f"{quant_algo}_GPTQ"
-        elif hf_quant_method == QuantizationMethod.AWQ:
+        elif quant_method == "awq":
             quant_algo = f"{quant_algo}_AWQ"
     else:
-        raise RuntimeError(f"Unsupported quantization method: {hf_quant_method}")
+        raise RuntimeError(f"Unsupported quantization method: {quant_method}")
 
     assert quant_algo in QuantAlgo, f"Unsupported quantization algorithm: {quant_algo}"
     return QuantAlgo[quant_algo]

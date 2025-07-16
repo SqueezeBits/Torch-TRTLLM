@@ -486,10 +486,6 @@ def get_shape_ranges(
     Returns:
         list[ShapeRanges]: List of shape ranges for each profile.
     """
-    logger.info(
-        "You can ignore the following error messages 'IOptimizationProfile::getDimensions: Error Code 4: "
-        "API Usage Error (...)', which are caused by inputs and outputs without optimization profiles."
-    )
     return [
         {
             name: dict(

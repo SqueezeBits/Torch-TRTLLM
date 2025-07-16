@@ -38,7 +38,7 @@ from .fuse_consecutive_reshapes import FuseConsecutiveReshapes
 from .fuse_consecutive_slice_concat import FuseConsecutiveSliceConcat
 from .fuse_consecutive_split_concat import FuseConsecutiveSplitConcat
 from .fuse_consecutive_to_copys import FuseConsecutiveToCopys
-from .fuse_dequantizes import FuseDequantizes
+from .fuse_fake_quantizes import FuseFakeQuantizes
 from .fuse_gated_mlp_projections import FuseGatedMLPProjections
 from .fuse_qkv_projections import FuseMLAQKVProjections, FuseQKVProjections
 from .fuse_reciprocal_mul import FuseReciprocalMul
@@ -52,12 +52,14 @@ from .parallelize_linear import ParallelizeLinear
 from .parallelize_pipeline import ParallelizePipeline
 from .pop_lora_plugins import PopLoraPlugins
 from .propagate_tensor_parallelism import PropagateTensorParallelism
+from .replace_embedding_by_ptuning_embedding import ReplaceEmbeddingByPTuningEmbedding
 from .replace_mm_by_fp8_gemm_plugin import ReplaceMMByFp8GemmPlugin
 from .replace_mm_by_fp8_rowwise_gemm_plugin import ReplaceMMByFp8RowwiseGemmPlugin
 from .replace_mm_by_gemm_plugin import ReplaceMMByGemmPlugin
 from .replace_mm_by_woq_gemm_plugin import ReplaceMMByWoQGemmPlugin
 from .replace_moe_by_mixture_of_experts_plugin import ReplaceMoEByMoEPlugin
 from .replace_rmsnorm_by_fp8_rmsnorm_plugin import ReplaceRmsNormByFp8RmsNormPlugin
+from .replace_safe_softmax_by_softmax import ReplaceSafeSoftmaxBySoftmax
 from .replace_sdpa_by_gpt_attention_plugin import ReplaceSDPAByGPTAttentionPlugin
 from .replace_topk_by_topk_plugin import ReplaceTopkByTopkLastDimPlugin
 from .replace_view_by_reshape import ReplaceViewByReshape
@@ -68,8 +70,8 @@ from .rewrite_index_as_single_slice import RewriteIndexAsSingleSlice
 from .rewrite_pow_as_mul import RewritePowAsMul
 from .rewrite_reshape_as_unsqueeze import RewriteReshapeAsUnsqueeze
 from .rewrite_split_as_slices import RewriteSplitAsSlices
-from .stash_act_quant_subgraphs import StashActQuantSubgraphs
+from .stash_activation_fake_quantize import StashActivationFakeQuantize
 from .stash_lora_subgraphs import StashLoraSubgraphs
+from .stash_output_fake_quantize import StashOutputFakeQuantize
 from .wrap_rope_subgraphs import WrapRoPESubgraphs
 from .wrap_sdpa_subgraphs import WrapSDPASubgraphs
-from .wrap_weight_dequant_subgraphs import WrapWeightDequantSubgraphs

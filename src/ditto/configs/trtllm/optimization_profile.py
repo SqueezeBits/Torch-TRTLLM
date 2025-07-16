@@ -16,6 +16,7 @@ import math
 
 from loguru import logger
 from pydantic import Field, model_validator
+from tensorrt_llm.models import SpeculativeDecodingMode
 from transformers import PretrainedConfig
 from typing_extensions import Self
 
@@ -34,6 +35,7 @@ class RuntimeTRTLLMOptimizationProfileConfig(StrictlyTyped):
     max_beam_width: int = Field(default=1, gt=0)
     max_num_tokens: int = Field(default=8192, gt=0)
     opt_num_tokens: int = Field(default=8, gt=0)
+    max_prompt_embedding_table_size: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def check_runtime_attribute_dependencies(self) -> Self:
@@ -84,6 +86,9 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
         max_num_tokens: int = 8192,
         opt_num_tokens: int | None = None,
         max_beam_width: int = 1,
+        max_prompt_embedding_table_size: int = 0,
+        speculative_decoding_mode: SpeculativeDecodingMode = SpeculativeDecodingMode.NONE,
+        max_draft_len: int = 0,
     ) -> Self:
         """Configure the optimization profile from given configurations.
 
@@ -96,6 +101,9 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             max_num_tokens (int): The maximum number of tokens
             opt_num_tokens (int | None): The optimized number of tokens
             max_beam_width (int): The maximum beam width
+            max_prompt_embedding_table_size (int): The maximum size of the prompt embedding table
+            speculative_decoding_mode (SpeculativeDecodingMode): The mode of speculative decoding
+            max_draft_len (int): The maximum length of draft tokens for speculative decoding target model
 
         Returns:
             TRTLLMOptimizationProfileConfig: The optimization profile configuration
@@ -114,6 +122,16 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
                 f"max_input_len ({max_input_len}) is larger than max_seq_len ({max_seq_len}), using max_seq_len"
             )
             max_input_len = max_seq_len
+        if plugin_config.context_fmha and max_num_tokens < plugin_config.tokens_per_block:
+            raise ValueError(
+                f"When context_fmha is enabled, max_num_tokens ({max_num_tokens}) should be at least "
+                f"tokens_per_block ({plugin_config.tokens_per_block})"
+            )
+        if speculative_decoding_mode != SpeculativeDecodingMode.NONE:
+            assert max_batch_size * (max_draft_len + 1) <= max_num_tokens, (
+                f"{max_num_tokens=} must be at least 'max_batch_size * (max_draft_len + 1)' "
+                f"({max_batch_size * (max_draft_len + 1)})."
+            )
         if opt_num_tokens is None:
             opt_num_tokens = min(max_num_tokens, max_batch_size * max_beam_width)
             logger.debug(f"opt_num_tokens is not set, specifying to {opt_num_tokens}")
@@ -131,6 +149,7 @@ class TRTLLMOptimizationProfileConfig(RuntimeTRTLLMOptimizationProfileConfig):
             opt_beam_width=max(1, (max_beam_width + 1) // 2),
             max_kv_cache_block_size=max_kv_cache_block_size,
             opt_kv_cache_block_size=opt_kv_cache_block_size,
+            max_prompt_embedding_table_size=max_prompt_embedding_table_size,
         )
 
     def runtime(self) -> RuntimeTRTLLMOptimizationProfileConfig:

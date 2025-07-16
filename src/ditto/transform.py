@@ -18,6 +18,7 @@ from copy import copy, deepcopy
 import torch
 from loguru import logger
 from torch.fx import GraphModule
+from torch_tensorrt.dynamo import CompilationSettings
 from torch_tensorrt.dynamo.lowering.passes import (
     ATEN_POST_LOWERING_PASSES,
     DynamoPassManager,
@@ -28,12 +29,15 @@ from .configs import TRTLLMModelConfig
 from .contexts import ignore_symbolic_shapes_warning
 from .debug import get_memory_footprint, save_for_debug
 from .fx import (
+    ConstantFolding,
     ForgetSubmodules,
     ParallelizePipeline,
     Plugin,
+    ReplaceSafeSoftmaxBySoftmax,
     ResetCodeGen,
     fake_tensor_prop_on_node_creation,
     get_level1_transform,
+    get_level2_transform,
     get_optimization_transform,
     get_preoptimization_transform,
     update_argument_hint,
@@ -54,9 +58,9 @@ def transform(
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
     run_routers_in_model_dtype: bool = False,
-    extra_passes: list[Callable[[GraphModule], GraphModule]] | None = None,
+    extra_passes: list[Callable[[GraphModule, CompilationSettings], GraphModule]] | None = None,
 ) -> Generator[tuple[int, GraphModule], None, None]:
-    """Transform a PyTorch GraphModule by applying a series of optimization passes.
+    """Transform a PyTorch GraphModule by applying a series of optimization passes for language models.
 
     Args:
         graph_module (GraphModule): The input PyTorch GraphModule to transform
@@ -67,10 +71,10 @@ def transform(
         skipped_optimizers (list[PassName] | None, optional): List of optimizer passes to skip. Defaults to None.
         run_matmuls_in_fp32 (bool, optional): Whether to run matrix multiplications in FP32. Defaults to False.
         run_activations_in_model_dtype (bool, optional): Whether to run activations in model dtype. Defaults to True.
-        extra_passes (list[Callable[[GraphModule], GraphModule]] | None, optional): Additional transformation passes to
-            apply. Defaults to None.
         run_routers_in_model_dtype (bool, optional): Whether to run linear layers for routers in MoE models in model
             dtype instead of FP32. Defaults to False.
+        extra_passes (list[Callable[[GraphModule, CompilationSettings], GraphModule]] | None, optional):
+            Additional transformation passes to apply. Defaults to None.
 
     Returns:
         Generator[tuple[int, GraphModule], None, None]: A generator of tuples containing the rank and the transformed
@@ -82,18 +86,14 @@ def transform(
         [
             ResetCodeGen().as_transform(),
             ForgetSubmodules().as_transform(),
-            *(
-                f
-                for f in ATEN_POST_LOWERING_PASSES.passes
-                if f.__name__ not in ("constant_fold", "lower_linear", "view_to_reshape")
-            ),
+            *(f for f in ATEN_POST_LOWERING_PASSES.passes if f.__name__ not in ("constant_fold", "view_to_reshape")),
             get_level1_transform(skipped_optimizers),
         ]
     )
 
     logger.debug("Running post-inlining passes")
     with fake_tensor_prop_on_node_creation(graph_module), ignore_symbolic_shapes_warning():
-        graph_module = post_inline_pass_manager(graph_module)
+        graph_module = post_inline_pass_manager(graph_module, CompilationSettings())
     update_argument_hint(argument_hint, graph_module, dtype)
 
     save_for_debug("initial_graph_module", graph_module)
@@ -103,12 +103,12 @@ def transform(
         copied_graph_module = copy_graph_module(graph_module)
         pre_custom_pass_manager = DynamoPassManager.build_from_passlist(
             [
-                get_preoptimization_transform(argument_hint, global_quant_config, dtype),
+                get_preoptimization_transform(argument_hint, global_quant_config),
             ]
         )
         logger.debug(f"Running pre-custom passes for rank {rank}")
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
-            copied_graph_module = pre_custom_pass_manager(copied_graph_module)
+            copied_graph_module = pre_custom_pass_manager(copied_graph_module, CompilationSettings())
 
         save_for_debug(f"preopt_graph_module_rank{rank}", copied_graph_module)
 
@@ -129,14 +129,46 @@ def transform(
         )
         logger.debug(f"Running custom passes for rank {rank}")
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
-            copied_graph_module = custom_pass_manager(copied_graph_module)
+            copied_graph_module = custom_pass_manager(copied_graph_module, CompilationSettings())
 
         post_pass_manager = DynamoPassManager.build_from_passlist(
             [ParallelizePipeline(argument_hint=argument_hint).as_transform()]
         )
         logger.debug(f"Running post-custom passes for rank {rank}")
         with fake_tensor_prop_on_node_creation(copied_graph_module), ignore_symbolic_shapes_warning():
-            yield rank, post_pass_manager(copied_graph_module)
+            yield rank, post_pass_manager(copied_graph_module, CompilationSettings())
+
+
+def multimodal_transform(
+    graph_module: GraphModule,
+    extra_passes: list[Callable[[GraphModule, CompilationSettings], GraphModule]] | None = None,
+) -> GraphModule:
+    """Transform a PyTorch GraphModule by applying a series of optimization passes for a multimodal model.
+
+    Args:
+        graph_module (GraphModule): The input PyTorch GraphModule to transform
+        extra_passes (list[Callable[[GraphModule, CompilationSettings], GraphModule]] | None, optional):
+            Additional transformation passes to apply. Defaults to None.
+
+    Returns:
+        GraphModule: The transformed graph module
+    """
+    pass_manager = DynamoPassManager.build_from_passlist(
+        [
+            ResetCodeGen().as_transform(),
+            ForgetSubmodules().as_transform(),
+            *(f for f in ATEN_POST_LOWERING_PASSES.passes if f.__name__ not in ("constant_fold", "view_to_reshape")),
+            get_level2_transform(skipped_optimizers=["WrapSDPASubgraphs", "ResolveDynamicReshape"]),
+            ReplaceSafeSoftmaxBySoftmax().as_transform(),
+            ConstantFolding().as_transform(),
+            *(extra_passes or []),
+        ]
+    )
+
+    with fake_tensor_prop_on_node_creation(graph_module), ignore_symbolic_shapes_warning():
+        pass_manager(graph_module, CompilationSettings())
+
+    return graph_module
 
 
 def copy_graph_module(graph_module: GraphModule) -> GraphModule:

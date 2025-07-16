@@ -17,6 +17,7 @@ from collections.abc import Callable
 import torch
 from loguru import logger
 from torch.fx import GraphModule
+from torch_tensorrt.dynamo import CompilationSettings
 
 from ..arguments import TRTLLMArgumentHint
 from ..configs import TRTLLMModelConfig
@@ -49,7 +50,7 @@ from .passes import (
     FuseConsecutiveSliceConcat,
     FuseConsecutiveSplitConcat,
     FuseConsecutiveToCopys,
-    FuseDequantizes,
+    FuseFakeQuantizes,
     FuseGatedMLPProjections,
     FuseMLAQKVProjections,
     FuseQKVProjections,
@@ -78,11 +79,11 @@ from .passes import (
     RewritePowAsMul,
     RewriteReshapeAsUnsqueeze,
     RewriteSplitAsSlices,
-    StashActQuantSubgraphs,
+    StashActivationFakeQuantize,
     StashLoraSubgraphs,
+    StashOutputFakeQuantize,
     WrapRoPESubgraphs,
     WrapSDPASubgraphs,
-    WrapWeightDequantSubgraphs,
 )
 from .passes.defer_unsqueeze import SwapUnsqueezeWithSymSizeInt
 from .passes.infra import GraphOptimizationPass, PassManager
@@ -91,23 +92,21 @@ from .passes.infra import GraphOptimizationPass, PassManager
 def get_preoptimization_transform(
     argument_hint: TRTLLMArgumentHint,
     global_quant_config: GlobalQuantConfig | None,
-    dtype: torch.dtype,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Get the pre-optimization transform.
 
     Args:
         argument_hint (TRTLLMArgumentHint): the type hints for TRTLLM inputs
         global_quant_config (GlobalQuantConfig | None): the global quantization configuration
-        dtype (torch.dtype): the data type for the plugins
 
     Returns:
-        Callable[[GraphModule], GraphModule]: the pre-optimization transform
+        Callable[[GraphModule, CompilationSettings], GraphModule]: the pre-optimization transform
     """
     mark_linears_for_tp = [MarkMoELinears, MarkMLALinears]
 
     return get_transform(
-        WrapWeightDequantSubgraphs(global_quant_config=global_quant_config, dtype=dtype),
-        StashActQuantSubgraphs(global_quant_config=global_quant_config),
+        StashActivationFakeQuantize(global_quant_config=global_quant_config),
+        StashOutputFakeQuantize(global_quant_config=global_quant_config),
         StashLoraSubgraphs(),
         ConstantFolding(),
         AddTRTLLMInputs(argument_hint=argument_hint),
@@ -133,7 +132,7 @@ def get_optimization_transform(
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
     run_routers_in_model_dtype: bool = False,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Optimize the given graph module inplace.
 
     Args:
@@ -151,7 +150,8 @@ def get_optimization_transform(
             dtype instead of FP32. Defaults to False.
 
     Returns:
-        Callable[[GraphModule], GraphModule]: the function that applies FX optimization passes to the given graph module
+        Callable[[GraphModule, CompilationSettings], GraphModule]: the function that applies FX optimization passes
+            to the given graph module
     """
     return compose(
         get_trtllm_conversion_transform(
@@ -169,19 +169,22 @@ def get_optimization_transform(
     )
 
 
-def compose(*transforms: Callable[[GraphModule], GraphModule]) -> Callable[[GraphModule], GraphModule]:
+def compose(
+    *transforms: Callable[[GraphModule, CompilationSettings], GraphModule],
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Compose multiple transforms into a single transform.
 
     Args:
-        *transforms (Callable[[GraphModule], GraphModule]): The transforms to compose
+        *transforms (Callable[[GraphModule, CompilationSettings], GraphModule]): The transforms to compose
 
     Returns:
-        Callable[[GraphModule], GraphModule]: A function that applies all the given transforms to a graph module
+        Callable[[GraphModule, CompilationSettings], GraphModule]: A function that applies all the given transforms
+            to a graph module
     """
 
-    def composed_transform(graph_module: GraphModule) -> GraphModule:
+    def composed_transform(graph_module: GraphModule, settings: CompilationSettings) -> GraphModule:
         for transform in transforms:
-            graph_module = transform(graph_module)
+            graph_module = transform(graph_module, settings)
         return graph_module
 
     return composed_transform
@@ -249,7 +252,7 @@ def get_trtllm_conversion_transform(
     run_matmuls_in_fp32: bool = False,
     run_activations_in_model_dtype: bool = True,
     run_routers_in_model_dtype: bool = False,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Create a transform that converts a graph module to TensorRT-LLM compatible format.
 
     Args:
@@ -264,7 +267,8 @@ def get_trtllm_conversion_transform(
             dtype instead of FP32. Defaults to False.
 
     Returns:
-        Callable[[GraphModule], GraphModule]: A function that applies TRT-LLM conversion passes to a graph module
+        Callable[[GraphModule, CompilationSettings], GraphModule]: A function that applies TRT-LLM conversion passes
+            to a graph module
     """
     passes: list[type[GraphOptimizationPass] | GraphOptimizationPass] = [
         *get_trtllm_output_adaptation_passes(model_config.gather_context_logits),
@@ -279,20 +283,23 @@ def get_trtllm_conversion_transform(
         FuseQKVProjections,
         FuseMLAQKVProjections,
         FuseGatedMLPProjections,
-        FuseDequantizes,
+        FuseFakeQuantizes,
         WrapRoPESubgraphs,
         RewriteIndexAsSingleSlice,
         ReplaceSDPAByGPTAttentionPlugin(
             dtype=dtype,
+            argument_hint=argument_hint,
             mapping=argument_hint.mapping,
+            plugin_config=model_config.plugin_config,
+            global_quant_config=global_quant_config,
         ),
         IndexLayers,
         BindUnmatchedLoraProtos,
         PopLoraPlugins(argument_hint=argument_hint),
         ReplaceRmsNormByFp8RmsNormPlugin(model_dtype=dtype, global_quant_config=global_quant_config),
-        ReplaceMMByWoQGemmPlugin(model_dtype=dtype),
+        ReplaceMMByWoQGemmPlugin(model_dtype=dtype, global_quant_config=global_quant_config),
         ReplaceMMByFp8GemmPlugin,
-        ReplaceMMByFp8RowwiseGemmPlugin(model_dtype=dtype),
+        ReplaceMMByFp8RowwiseGemmPlugin,
         ReplaceMMByGemmPlugin,
         CastOutputLogits(logits_dtype=model_config.logits_dtype),
     ]
@@ -317,14 +324,15 @@ def get_trtllm_conversion_transform(
 
 def get_level1_transform(
     skipped_optimizers: list[PassName] | None = None,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Create a transform that applies level 1 optimization passes.
 
     Args:
         skipped_optimizers (list[PassName] | None, optional): Names of optimization passes to skip. Defaults to None.
 
     Returns:
-        Callable[[GraphModule], GraphModule]: A function that applies level 1 optimization passes to a graph module
+        Callable[[GraphModule, CompilationSettings], GraphModule]: A function that applies level 1 optimization passes
+            to a graph module
     """
     return get_transform(
         *LEVEL1_PASSES,
@@ -334,14 +342,15 @@ def get_level1_transform(
 
 def get_level2_transform(
     skipped_optimizers: list[PassName] | None = None,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Create a transform that applies level 2 optimization passes.
 
     Args:
         skipped_optimizers (list[PassName] | None, optional): Names of optimization passes to skip. Defaults to None.
 
     Returns:
-        Callable[[GraphModule], GraphModule]: A function that applies level 2 optimization passes to a graph module
+        Callable[[GraphModule, CompilationSettings], GraphModule]: A function that applies level 2 optimization passes
+            to a graph module
     """
     return get_transform(
         *LEVEL1_PASSES,
@@ -355,7 +364,7 @@ def get_transform(
     skipped_optimizers: list[PassName] | None = None,
     steps: int = FX_TRANSFORM_MAXIMUM_ITERATION,
     warn_on_partial_convergence: bool = True,
-) -> Callable[[GraphModule], GraphModule]:
+) -> Callable[[GraphModule, CompilationSettings], GraphModule]:
     """Get transform out of the given FX passes.
 
     Args:

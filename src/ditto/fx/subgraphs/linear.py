@@ -29,18 +29,19 @@ from ..metadata_keys import (
     LINEAR_TYPE,
     LORA_PREFIX,
     LORA_PROTOS,
+    OUTPUT_QUANTIZATION,
 )
 from ..nodes import (
     MM,
     AddTensorTensor,
-    Dequantize,
+    FakeQuantize,
     Fp8RowwiseGemm,
     Gemm,
     Reshape,
     WeightOnlyGroupwiseQuantMatmul,
     WeightOnlyQuantMatmul,
 )
-from ..targets import ActivationQuantization, LoraProto
+from ..targets import ActivationQuantization, LoraProto, OutputQuantization
 from ..utils import get_val
 from .subgraph import Subgraph
 
@@ -236,9 +237,9 @@ class Linear(Subgraph):
         return verify(self.mm.meta.get(LORA_PREFIX), as_type=LoraPluginInputPrefix)  # type: ignore[arg-type]
 
     @property
-    def weight_dequantize_node(self) -> Dequantize | None:
-        """The weight dequantization node associated with this linear layer."""
-        return Dequantize.specialize_from(self.mm.other)
+    def weight_fake_quantize(self) -> FakeQuantize | None:
+        """The weight fake-quantization specialization associated with this linear layer."""
+        return FakeQuantize.specialize_from(self.mm.other)
 
     @property
     def activation_quantization(self) -> ActivationQuantization | None:
@@ -250,6 +251,17 @@ class Linear(Subgraph):
         """Set the activation quantization for this linear layer."""
         assert ACTIVATION_QUANTIZATION not in self.mm.meta, f"Activation quantization already set for {self.mm}"
         self.mm.meta[ACTIVATION_QUANTIZATION] = value
+
+    @property
+    def output_quantization(self) -> OutputQuantization | None:
+        """The output quantization associated with this linear layer."""
+        return verify(self.mm.meta.get(OUTPUT_QUANTIZATION, None), as_type=OutputQuantization)
+
+    @output_quantization.setter
+    def output_quantization(self, value: OutputQuantization) -> None:
+        """Set the output quantization for this linear layer."""
+        assert OUTPUT_QUANTIZATION not in self.mm.meta, f"Output quantization already set for {self.mm}"
+        self.mm.meta[OUTPUT_QUANTIZATION] = value
 
     def mark_linear_type_as(self, linear_type: LinearTypeLiteral) -> None:
         """Mark the linear type of this linear layer if it is a part of a MoE layer."""

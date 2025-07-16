@@ -19,7 +19,7 @@ from torch.fx import Node
 
 from ...quantization import QuantizeMode, QuantizeType
 from ...types import DataType
-from ..nodes import Dequantize, GetAttr, GetItem, Permute, RmsnormQuantization, ToCopy
+from ..nodes import FakeQuantize, GetAttr, GetItem, Permute, RmsnormQuantization, ToCopy
 from ..subgraphs import Linear
 from ..targets import Fp8RowwiseGemmPlugin, QuantizePerTokenPlugin
 from ..utils import attr_name_generator, get_val
@@ -30,12 +30,7 @@ class ReplaceMMByFp8RowwiseGemmPlugin(NodewiseOptimizationPass):
     """Replace torch.ops.aten.mm.default by Fp8RowwiseGemmPlugin (required for trtllm).
 
     This pass must be run after ReplaceRmsNormByFp8RmsNormPlugin.
-
-    Attributes:
-        model_dtype (torch.dtype): Data type of the model
     """
-
-    model_dtype: torch.dtype
 
     def rewrite(self, node: Node) -> dict[Node, NodewisePassResult]:
         if not (
@@ -49,11 +44,11 @@ class ReplaceMMByFp8RowwiseGemmPlugin(NodewiseOptimizationPass):
             and activation_quantization.type == QuantizeType.FLOAT
             and activation_quantization.quant_mode == QuantizeMode.PER_TOKEN
             and activation_quantization.dynamic
-            and (dequantize := Dequantize.specialize_from(linear.mm.other)) is not None
-            and dequantize.qweight_tensor is not None
-            and dequantize.qweight_tensor.dtype == torch.float8_e4m3fn
-            and dequantize.scale_tensor is not None
-            and dequantize.target.mode == QuantizeMode.PER_CHANNEL
+            and (fake_quantize := FakeQuantize.specialize_from(linear.mm.other)) is not None
+            and fake_quantize.input_tensor is not None
+            and fake_quantize.input_tensor.dtype == torch.float8_e4m3fn
+            and fake_quantize.scale_tensor is not None
+            and fake_quantize.quantize_mode == QuantizeMode.PER_CHANNEL
             and (graph_module := node.graph.owning_module) is not None
         ):
             return {}
@@ -98,18 +93,18 @@ class ReplaceMMByFp8RowwiseGemmPlugin(NodewiseOptimizationPass):
             with node.graph.inserting_before(node):
                 token_scale_node = GetItem.create(node.graph, rmsnorm_quantization.node, 1).node
 
-        channel_scale_node = dequantize.scale
-        if dequantize.scale_tensor.dtype != torch.float32:
+        channel_scale_node = fake_quantize.scale
+        if fake_quantize.scale_tensor.dtype != torch.float32:
             with node.graph.inserting_before(node):
                 channel_scale_node = ToCopy.create(node.graph, channel_scale_node, dtype=torch.float32).node
 
         with node.graph.inserting_before(node):
-            permute_node = Permute.create(node.graph, dequantize.qweight, (1, 0)).node
+            permute_node = Permute.create(node.graph, fake_quantize.x, (1, 0)).node
             fp8_rowwise_gemm_plugin_node = node.graph.call_function(
                 Fp8RowwiseGemmPlugin(
                     has_per_channel_scaling=True,
                     has_per_token_scaling=True,
-                    type_id=DataType(self.model_dtype).to(trt.DataType),
+                    type_id=DataType(fake_quantize.output_dtype).to(trt.DataType),
                 ),
                 (
                     input_node,

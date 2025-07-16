@@ -12,12 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import ast
 import json
 import os
 import subprocess
 import sys
+from argparse import BooleanOptionalAction
 from functools import partial
-from os.path import abspath, dirname
 from pathlib import Path
 from typing import List, Optional
 
@@ -120,6 +121,8 @@ def _load_tokenizer(tokenizer_dir: Optional[str] = None,
                                                       language='english',
                                                       task='transcribe',
                                                       predict_timestamps=False)
+        elif tokenizer_type == 'language_adapter':
+            tokenizer = None
         else:
             use_fast = True
             if tokenizer_type is not None and tokenizer_type == "llama":
@@ -161,6 +164,9 @@ def _load_tokenizer(tokenizer_dir: Optional[str] = None,
     elif 'GLM' in model_name and model_version == 'glm':
         pad_id = tokenizer.pad_token_id
         end_id = tokenizer.eop_token_id
+    elif tokenizer_type == 'language_adapter':
+        pad_id = 0
+        end_id = 2
     else:
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -192,11 +198,9 @@ def prepare_enc_dec_inputs(batch_input_ids: List[torch.Tensor], model_name: str,
     encoder_input_features = None
     encoder_input_ids = None
     if 'whisper' in model_name.lower():
-        tllm_path = dirname(dirname(abspath(__file__)))
-        sys.path.insert(0, tllm_path)
-
-        from examples.whisper.whisper_utils import \
-            log_mel_spectrogram  # cannot directly import whisper due to name collision
+        # cannot directly import whisper due to name collision
+        sys.path.append(f"{os.path.dirname(__file__)}/whisper")
+        from whisper_utils import log_mel_spectrogram
 
         config_path = os.path.join(engine_dir, 'encoder', 'config.json')
         with open(config_path, 'r') as f:
@@ -231,6 +235,40 @@ def prepare_enc_dec_inputs(batch_input_ids: List[torch.Tensor], model_name: str,
     return encoder_input_ids, encoder_input_features, encoder_output_lengths, decoder_input_ids
 
 
+def get_beam_width_array(bwa: str = None):
+    bwa = ast.literal_eval(bwa)  # Short for "beam_width_array"
+    if isinstance(bwa, str):
+        bwa = ast.literal_eval(bwa)  # parse again for string
+
+    def parse_one_bwa(row):
+        assert isinstance(row, list), f"Beam width array must be a list."
+        assert len(
+            row
+        ) <= 8, "Length of beam width array must not be greater than 8 now."
+        assert all([isinstance(beam, int) for beam in row
+                    ]), "Numbers in beam width array must be integer."
+        bwa_tensor = torch.zeros([8], dtype=torch.int32)
+        for j in range(len(row)):
+            bwa_tensor[j] = row[j]
+        bwa_tensor[len(row):] = row[-1]
+        return bwa_tensor, max(row)
+
+    if isinstance(bwa, list):  # Only one BWA
+        bwa_tensor, max_beam_width = parse_one_bwa(bwa)
+    elif isinstance(bwa, tuple):  # BWA for respective requests
+        bwa_tensor_list = []
+        max_beam_width = 0
+        for row in bwa:
+            bwa_tensor, beam_width = parse_one_bwa(row)
+            bwa_tensor_list.append(bwa_tensor)
+            max_beam_width = max(max_beam_width, beam_width)
+        bwa_tensor = torch.stack(bwa_tensor_list, dim=0)
+    else:
+        raise ValueError(f"Invalid beam width array: {bwa}")
+
+    return bwa_tensor.tolist(), max_beam_width
+
+
 def add_common_args(parser):
     # sampling arguments
     parser.add_argument('--num_beams',
@@ -248,6 +286,7 @@ def add_common_args(parser):
     parser.add_argument('--repetition_penalty', type=float, default=1.0)
     parser.add_argument('--presence_penalty', type=float, default=0.0)
     parser.add_argument('--frequency_penalty', type=float, default=0.0)
+    parser.add_argument('--min_p', type=float, default=0.0)
     parser.add_argument('--beam_search_diversity_rate', type=float, default=0.0)
     parser.add_argument('--random_seed', type=int, default=0)
     parser.add_argument('--early_stopping',
@@ -256,6 +295,13 @@ def add_common_args(parser):
                         '1 for early-stopping, 0 for non-early-stopping'
                         'other values for stopping by length',
                         default=1)
+    parser.add_argument(
+        '--beam_width_array',
+        type=str,
+        default=None,
+        help=
+        'Beam width array for each step. E.g.: --beam_width_array="[2,4,6,8]"',
+    )
     parser.add_argument(
         '--end_id',
         default=None,
@@ -403,6 +449,16 @@ def add_common_args(parser):
         help="Minimum token probability threshold for typical acceptance. "
         "Enables typical acceptance in Eagle. "
         "Corresponds to epsilon in https://arxiv.org/pdf/2401.10774.")
+    parser.add_argument('--eagle_use_dynamic_tree',
+                        action='store_true',
+                        help="Whether to use Ealge-2")
+    parser.add_argument(
+        '--eagle_dynamic_tree_max_top_k',
+        default=None,
+        type=int,
+        help=
+        "The maximum number of draft tokens to expand for each node in Eagle-2."
+    )
     parser.add_argument(
         '--lookahead_config',
         type=str,
@@ -447,7 +503,8 @@ def add_common_args(parser):
     )
     parser.add_argument(
         '--kv_cache_enable_block_reuse',
-        action='store_true',
+        default=True,
+        action=BooleanOptionalAction,
         help=
         'Enables block reuse in kv cache (only available with cpp session).',
     )
@@ -494,5 +551,15 @@ def add_common_args(parser):
         "It is automatically enabled for num_beams>1 (only available with cpp session). "
         "WARNING: using this option may increase network usage significantly (quadratically w.r.t output length)."
     )
+
+    parser.add_argument(
+        '--language_task_uids',
+        type=int,
+        nargs='+',
+        default=None,
+        help=
+        "language task id indicating which adapter to use in language adapter. Please include 1 locale per input text"
+    )
+    parser.add_argument('--backend', type=str, default=None)
 
     return parser

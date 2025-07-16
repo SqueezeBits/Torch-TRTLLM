@@ -211,7 +211,6 @@ Thumbs.db
 !test/best/*.onnx
 *.bin
 models
-ops
 
 # TensorRT engine files
 *.engine
@@ -236,3 +235,5 @@ nohup.out
 # debug artifacts and engines
 artifacts/*
 engines
+*/artifacts/
+*/engines/

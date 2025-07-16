@@ -7,12 +7,13 @@ from torch._ops import OpOverload, OpOverloadPacket
 
 def main() -> None:
     available_aten_ops = {
-        name: aten_op for name, aten_op in vars(torch.ops.aten).items()
+        name: aten_op
+        for name, aten_op in vars(torch.ops.aten).items()
         if isinstance(aten_op, OpOverloadPacket)
     }
 
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("ops", nargs='*')
+    parser.add_argument("ops", nargs="*")
     args = parser.parse_args()
 
     if not args.ops:
@@ -25,7 +26,6 @@ def main() -> None:
                 print_div(
                     first_letter.upper() if first_letter.isalpha() else {"_": "private", "__": "dunder"}[first_letter]
                 )
-            print(name)
         return
 
     for op in args.ops:
